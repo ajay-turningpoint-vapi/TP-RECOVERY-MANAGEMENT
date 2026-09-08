@@ -1,0 +1,32 @@
+{
+  "name": "tp-rms-workflow-engine",
+  "version": "1.0.0",
+  "description": "TP-RMS recovery-management workflow engine — BullMQ-based, DB-less (in-memory store), ready for a future API/DB layer.",
+  "type": "module",
+  "private": true,
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "smoke": "node scripts/smoke.js",
+    "dashboard": "node scripts/dashboard.js",
+    "test": "NODE_ENV=test node scripts/check-redis.js && NODE_ENV=test vitest run",
+    "test:watch": "NODE_ENV=test vitest"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "bullmq": "^5.34.5",
+    "ioredis": "^5.4.1",
+    "pino": "^9.5.0",
+    "pino-pretty": "^13.0.0"
+  },
+  "optionalDependencies": {
+    "@bull-board/api": "^6.5.0",
+    "@bull-board/express": "^6.5.0",
+    "express": "^4.21.1"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.8"
+  }
+}

@@ -1,0 +1,13 @@
+-- Removes the 5 fabricated demo customers (C1-C5) now that real BUSY
+-- data is the actual customer base — "single database, production
+-- readiness" leaves no reason to keep fake companies mixed in with real
+-- ones. Every child row referencing them (invoices/tasks/ptps/disputes/
+-- escalation_cases/payment_claims/audit_events/outcome_correction_requests)
+-- cascades via each table's existing ON DELETE CASCADE FK to customers.id
+-- (notifications.customer_id is ON DELETE SET NULL, so any stray demo
+-- notification survives with a null customer reference rather than being
+-- deleted). Demo *login* accounts (rahul, mahesh, amit.re, ramesh.re,
+-- suresh.mgr) are untouched — this only deletes customers.
+--
+-- Naturally idempotent: a no-op once these rows are gone.
+DELETE FROM customers WHERE id IN ('C1', 'C2', 'C3', 'C4', 'C5');

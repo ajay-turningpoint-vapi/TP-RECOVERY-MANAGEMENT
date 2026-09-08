@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  AGP's release-build resource shrinker (shrinkResources true, see
+  app/build.gradle) doesn't reliably recognize android:networkSecurityConfig
+  in AndroidManifest.xml as a reachable root — it silently dropped
+  res/xml/network_security_config.xml from an early release build, which
+  made every HTTP request the app made time out (the manifest still
+  pointed at the now-missing resource). This explicit keep list is the
+  documented fix: https://developer.android.com/build/shrink-code#keep-resources
+-->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@xml/network_security_config" />

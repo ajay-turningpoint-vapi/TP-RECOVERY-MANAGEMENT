@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 9+ (API 28+) blocks plain HTTP by default. The TP-RMS server is
+  LAN-only today (no public domain/TLS cert — see server/.env's
+  192.168.1.x MariaDB/BUSY-ERP hosts), so this scopes the cleartext
+  exception to that one server address instead of allowing cleartext
+  traffic app-wide. If the server ever moves behind a real domain + HTTPS,
+  delete this file and the android:networkSecurityConfig reference in
+  AndroidManifest.xml along with it.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">192.168.1.141</domain>
+        <!-- 10.0.2.2 is the Android emulator's alias for the host
+             machine's localhost — needed only for local dev/testing
+             against a server run outside the emulator, harmless in a
+             real device install since nothing on a phone ever resolves
+             to it. -->
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
+</network-security-config>

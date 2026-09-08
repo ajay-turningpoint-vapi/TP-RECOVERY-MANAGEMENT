@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BUSY Sync — Admin</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="login-view" class="view">
+    <form id="login-form" class="login-card">
+      <h1>BUSY Sync</h1>
+      <p class="subtitle">Admin sign-in</p>
+      <label>
+        Username
+        <input type="text" id="username" autocomplete="username" required />
+      </label>
+      <label>
+        Password
+        <input type="password" id="password" autocomplete="current-password" required />
+      </label>
+      <button type="submit">Sign in</button>
+      <p id="login-error" class="error" hidden></p>
+    </form>
+  </div>
+
+  <div id="dashboard-view" class="view" hidden>
+    <header>
+      <h1>BUSY → MariaDB Sync</h1>
+      <div class="header-actions">
+        <span id="refresh-indicator" class="refresh-indicator"></span>
+        <button id="logout-btn" class="secondary">Sign out</button>
+      </div>
+    </header>
+
+    <div id="alert-banner" class="alert-banner" hidden></div>
+
+    <section class="cards">
+      <div class="card">
+        <div class="card-label">Sync status</div>
+        <div id="sync-state" class="card-value">—</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Total customers (mirrored)</div>
+        <div id="total-customers" class="card-value">—</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Last run</div>
+        <div id="last-run" class="card-value">—</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Connectivity</div>
+        <div id="connectivity" class="card-value">—</div>
+      </div>
+    </section>
+
+    <section class="actions">
+      <button id="trigger-btn">Run sync now</button>
+      <button id="validate-btn" class="secondary">Validate BUSY vs MariaDB</button>
+    </section>
+
+    <section id="progress-panel" class="panel" hidden>
+      <div class="progress-header">
+        <span id="progress-label">Working…</span>
+        <span id="progress-detail" class="progress-detail"></span>
+      </div>
+      <div class="progress-track">
+        <div id="progress-bar" class="progress-bar"></div>
+      </div>
+    </section>
+
+    <section id="validation-result" class="panel" hidden>
+      <h2>Validation result</h2>
+      <div id="validation-summary"></div>
+      <div id="validation-diffs"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Recent sync runs</h2>
+      <table id="runs-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Status</th>
+            <th>Started</th>
+            <th>Finished</th>
+            <th>Fetched</th>
+            <th>Upserted</th>
+            <th>Deleted</th>
+            <th>Error</th>
+          </tr>
+        </thead>
+        <tbody id="runs-tbody"></tbody>
+      </table>
+    </section>
+  </div>
+
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
