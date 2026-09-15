@@ -2,6 +2,7 @@ import { PoolConnection } from 'mysql2/promise';
 import logger from '../utils/logger';
 import { withRetry } from '../utils/retry';
 import { pool as mariaDbPool } from '../config/mariadb';
+import { getBranches } from '../config/branches';
 import { MssqlCustomerReportRepository } from '../reports/customer/mssqlCustomerReportRepository';
 import { syncSnapshot } from '../repositories/customerAgeingRepository';
 import { startRun, completeRun } from '../repositories/syncRunsRepository';
@@ -119,24 +120,40 @@ async function runLocked(): Promise<SyncRunResult> {
   progress = { phase: 'connecting', runId, rowsFetched: null };
 
   try {
-    progress = { phase: 'fetching', runId, rowsFetched: null };
-    const rows = await withRetry('BUSY customer report fetch', () =>
-      mssqlReportRepository.getCustomers()
-    );
+    const branches = getBranches();
+    let totalFetched = 0;
+    let totalUpserted = 0;
+    let totalDeleted = 0;
 
-    progress = { phase: 'writing', runId, rowsFetched: rows.length };
-    const { upserted, deleted } = await syncSnapshot(rows, startedAt);
+    // One BUSY DB per branch (some on other servers) — walk them
+    // sequentially to bound concurrent load on the ERP box(es).
+    for (const branch of branches) {
+      progress = { phase: 'fetching', runId, rowsFetched: totalFetched };
+      const rows = await withRetry(`BUSY customer report fetch [${branch.id}]`, () =>
+        mssqlReportRepository.getCustomers({ branchId: branch.id })
+      );
+
+      progress = { phase: 'writing', runId, rowsFetched: totalFetched + rows.length };
+      const { upserted, deleted } = await syncSnapshot(rows, startedAt, branch.id);
+
+      totalFetched += rows.length;
+      totalUpserted += upserted;
+      totalDeleted += deleted;
+      logger.info(
+        `[sync] run #${runId} branch ${branch.id}: fetched ${rows.length}, upserted ${upserted}, deleted ${deleted}.`
+      );
+    }
 
     await completeRun(runId, {
       status: 'success',
       finishedAt: new Date(),
-      rowsFetched: rows.length,
-      rowsUpserted: upserted,
-      rowsDeleted: deleted,
+      rowsFetched: totalFetched,
+      rowsUpserted: totalUpserted,
+      rowsDeleted: totalDeleted,
     });
 
     logger.info(
-      `[sync] customer_ageing run #${runId} succeeded: fetched ${rows.length}, upserted ${upserted}, deleted ${deleted}.`
+      `[sync] customer_ageing run #${runId} succeeded across ${branches.length} branch(es): fetched ${totalFetched}, upserted ${totalUpserted}, deleted ${totalDeleted}.`
     );
     return { ran: true, runId };
   } catch (err: any) {

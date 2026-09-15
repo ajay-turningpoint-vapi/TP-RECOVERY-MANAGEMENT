@@ -1,16 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:salesman_mobile/widgets/data_loading.dart' show LoadingAppBarStrip;
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:salesman_mobile/v2/stores/app_store.dart';
 import 'package:salesman_mobile/v2/models/task.dart';
 import 'package:salesman_mobile/v3/screens/task_details_screen_v3.dart';
-import 'package:salesman_mobile/v2/screens/customer_360_screen.dart';
 import 'package:intl/intl.dart';
 
 class TasksScreen extends StatefulWidget {
-  /// Which tab to open on ('All' | 'Overdue' | 'Today' | 'Upcoming').
-  /// Lets other screens (e.g. the dashboard "Tasks Due Today" card) deep-link
-  /// straight into the matching filter.
+  /// Which tab to open on ('All' | 'Today' | 'Overdue' | 'Completed' |
+  /// 'Upcoming'). Lets other screens (e.g. the dashboard "Tasks Due Today"
+  /// card) deep-link straight into the matching filter.
   final String initialFilter;
 
   const TasksScreen({super.key, this.initialFilter = 'All'});
@@ -38,10 +38,12 @@ class _TasksScreenState extends State<TasksScreen> {
     final overdueTasks = notCompleted.where((t) => t.deadline.isBefore(now)).toList();
     final todayTasks = notCompleted.where((t) => !t.deadline.isBefore(now) && t.deadline.isBefore(endOfToday)).toList();
     final upcomingTasks = notCompleted.where((t) => !t.deadline.isBefore(now) && t.deadline.isAfter(endOfToday)).toList();
+    final completedTasks = allTasks.where((t) => t.status == TaskStatus.completed).toList();
 
     List<AppTask> displayedTasks = allTasks;
-    if (_selectedFilter == 'Overdue') displayedTasks = overdueTasks;
     if (_selectedFilter == 'Today') displayedTasks = todayTasks;
+    if (_selectedFilter == 'Overdue') displayedTasks = overdueTasks;
+    if (_selectedFilter == 'Completed') displayedTasks = completedTasks;
     if (_selectedFilter == 'Upcoming') displayedTasks = upcomingTasks;
     if (_query.trim().isNotEmpty) {
       final q = _query.trim().toLowerCase();
@@ -54,6 +56,7 @@ class _TasksScreenState extends State<TasksScreen> {
         backgroundColor: const Color(0xFF0052CC),
         elevation: 0,
         title: const Text('My Tasks', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20, color: Colors.white)),
+        bottom: const LoadingAppBarStrip(),
         centerTitle: false,
         iconTheme: const IconThemeData(color: Colors.white),
         systemOverlayStyle: const SystemUiOverlayStyle(
@@ -79,8 +82,9 @@ class _TasksScreenState extends State<TasksScreen> {
                     child: Row(
                       children: [
                         _buildTab('All', Icons.all_inbox, allTasks.length),
-                        _buildTab('Overdue', Icons.warning_amber_rounded, overdueTasks.length),
                         _buildTab('Today', Icons.today, todayTasks.length),
+                        _buildTab('Overdue', Icons.warning_amber_rounded, overdueTasks.length),
+                        _buildTab('Completed', Icons.check_circle_outline, completedTasks.length),
                         _buildTab('Upcoming', Icons.next_plan_outlined, upcomingTasks.length),
                       ],
                     ),
@@ -172,10 +176,62 @@ class _TasksScreenState extends State<TasksScreen> {
     }
   }
 
+  /// Dispute-linked tasks come from the server as `type: customerCall` with
+  /// a "DISPUTE CLARIFICATION NEEDED: …" / "DISPUTE RESOLUTION: …" reason —
+  /// render them by their real purpose, not as a phone-call task. Returns
+  /// null for an ordinary task.
+  Map<String, String>? _disputeTaskMeta(AppTask t) {
+    const clar = 'DISPUTE CLARIFICATION NEEDED:';
+    const reso = 'DISPUTE RESOLUTION:';
+    if (t.reason.startsWith(clar)) {
+      return {'kind': 'clarify', 'title': 'Dispute — clarification needed', 'related': 'Dispute Clarification', 'desc': t.reason.substring(clar.length).trim()};
+    }
+    if (t.reason.startsWith(reso)) {
+      return {'kind': 'resolve', 'title': 'Dispute — resolve', 'related': 'Dispute Resolution', 'desc': t.reason.substring(reso.length).trim()};
+    }
+    return null;
+  }
+
+  /// "Related To" is the recorded outcome this task came out of — not the
+  /// raw task type. Derived from the task's source + reason (which the
+  /// server stamps when the follow-up is created).
+  String _relatedOutcomeLabel(AppTask t) {
+    final r = t.reason.toLowerCase();
+    final s = t.source;
+    if (r.contains('broken ptp') || r.contains('ptp was broken') || r.contains('ptp broke') || s == 'PTP Verification') {
+      return 'PTP Broken';
+    }
+    if (r.contains('re-collect') || r.contains('dispute rejected')) return 'Dispute Rejected';
+    if (s == 'Dispute Review') return 'Dispute Raised';
+    if (s == 'Payment Claim Review' || r.contains('payment claim')) return 'Payment Already Made';
+    if (s == 'Internal Action Review' || r.contains('internal action')) return 'Internal Action';
+    if (s == 'Recovery Reconcile' || s == 'Recovery' || r.startsWith('recover ₹') || r.contains('record a new outcome')) return 'Recovery — Balance Due';
+    if (t.type == TaskType.physicalVisit &&
+        (r.contains('non-response') || r.contains('non response') || s == 'Record Outcome')) {
+      return 'No Answer'; // 3rd-attempt physical visit
+    }
+    if (s == 'Record Outcome') {
+      if (r.contains('no answer') || r.contains('not reachable') || r.contains('non-response')) return 'No Answer';
+      if (r.contains('refused') || r.contains('unable to commit')) return 'Customer Refused';
+      // Every other Record-Outcome follow-up is a scheduled call-back from a
+      // "Will Confirm / Follow-up" outcome (the reason is just its date/time).
+      return 'Follow-up Scheduled';
+    }
+    // Fall back to a readable task-type label.
+    return t.type.name.replaceAll(RegExp(r'(?<!^)(?=[A-Z])'), ' ').toUpperCase();
+  }
+
   Widget _buildTaskCard(AppTask t, AppStore store) {
     final isCompleted = t.status == TaskStatus.completed;
     final isCritical = t.priority == 'Critical';
-    final iconInfo = _getTaskIconInfo(t.type);
+    final disputeMeta = _disputeTaskMeta(t);
+    final iconInfo = disputeMeta == null
+        ? _getTaskIconInfo(t.type)
+        : (disputeMeta['kind'] == 'clarify'
+            ? {'icon': Icons.help_outline, 'color': const Color(0xFFF57C00), 'bg': const Color(0xFFFFF3E0)}
+            : {'icon': Icons.gavel_outlined, 'color': const Color(0xFF4F46E5), 'bg': const Color(0xFFEEF2FF)});
+    final cardTitle = disputeMeta?['title'] ?? t.reason;
+    final relatedTo = disputeMeta?['related'] ?? _relatedOutcomeLabel(t);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -219,7 +275,11 @@ class _TasksScreenState extends State<TasksScreen> {
                               decoration: BoxDecoration(color: const Color(0xFFFFEBEE), borderRadius: BorderRadius.circular(4)),
                               child: const Text('Urgent', style: TextStyle(color: Color(0xFFE53935), fontSize: 10, fontWeight: FontWeight.bold)),
                             ),
-                          Text(t.reason, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: const Color(0xFF1B2B48), decoration: isCompleted ? TextDecoration.lineThrough : null)),
+                          Text(cardTitle, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: const Color(0xFF1B2B48), decoration: isCompleted ? TextDecoration.lineThrough : null)),
+                          if (disputeMeta != null && (disputeMeta['desc'] ?? '').isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Text(disputeMeta['desc']!, style: const TextStyle(fontSize: 12.5, color: Color(0xFF5A6B87))),
+                          ],
                         ],
                       ),
                     ),
@@ -228,9 +288,9 @@ class _TasksScreenState extends State<TasksScreen> {
                 const SizedBox(height: 16),
                 const Divider(height: 1, color: Color(0xFFEDF2F7)),
                 const SizedBox(height: 12),
-                
+
                 // Tabular Data
-                _buildDataRow(Icons.person_outline, 'Customer', t.customerName, Icons.category_outlined, 'Related To', t.type.name.replaceAll(RegExp(r'(?<!^)(?=[A-Z])'), ' ').toUpperCase()),
+                _buildDataRow(Icons.person_outline, 'Customer', t.customerName, Icons.category_outlined, 'Related To', relatedTo),
                 const SizedBox(height: 12),
                 _buildDataRow(Icons.calendar_today_outlined, 'Due On', DateFormat('dd MMM, HH:mm').format(t.deadline), Icons.info_outline, 'Status', isCompleted ? 'Completed' : 'Pending', vColor2: isCompleted ? const Color(0xFF388E3C) : const Color(0xFFF57C00)),
                 if (!isCompleted) ...[
@@ -246,14 +306,10 @@ class _TasksScreenState extends State<TasksScreen> {
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       ),
                       onPressed: () {
-                        final customer = store.customers.firstWhere(
-                          (c) => c.id == t.customerId,
-                          orElse: () => store.customers.first,
-                        );
-                        Navigator.push(context, MaterialPageRoute(builder: (_) => Customer360Screen(customer: customer)));
+                        Navigator.push(context, MaterialPageRoute(builder: (_) => TaskDetailsScreenV3(task: t)));
                       },
-                      icon: const Icon(Icons.play_circle_outline, size: 18),
-                      label: const Text('Take Action', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                      icon: const Icon(Icons.visibility_outlined, size: 18),
+                      label: const Text('View Task', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                     ),
                   ),
                 ],

@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
-const { sql, mssqlDb } = require('../config/mssqlClient');
+const { sql, mssqlDb, poolForDatabase } = require('../config/mssqlClient');
+const { parentGroupClause } = require('./parentGroupFilter');
 
 const QUERY_PATH = path.resolve(__dirname, 'invoiceReport.mssql.sql');
 
@@ -20,8 +21,9 @@ function mapRow(raw) {
 }
 
 async function getInvoices(options = {}) {
-  if (!mssqlDb.isConnected) {
-    await mssqlDb.connect();
+  const conn = options.database ? await poolForDatabase(options.database) : mssqlDb;
+  if (!conn.isConnected) {
+    await conn.connect();
   }
 
   let queryText = fs.readFileSync(QUERY_PATH, 'utf8');
@@ -30,7 +32,9 @@ async function getInvoices(options = {}) {
     queryText = queryText.replace(/^SELECT\b/m, `SELECT TOP (${Number(options.limit)})`);
   }
 
-  const request = mssqlDb.getPool().request();
+  queryText = queryText.replace('/*{{PARENTGRP_FILTER}}*/', parentGroupClause(options.parentGroups));
+
+  const request = conn.getPool().request();
   if (options.customerId != null) {
     request.input('customerId', sql.Int, options.customerId);
     queryText = queryText.replace('/*{{CUSTOMER_FILTER}}*/', 'AND M.Code = @customerId');

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:salesman_mobile/v2/stores/app_store.dart';
-import 'package:salesman_mobile/v2/models/task.dart';
 import 'package:intl/intl.dart';
 import 'package:salesman_mobile/widgets/app_message.dart';
 
@@ -18,7 +17,7 @@ class _ReApprovalsTabState extends State<ReApprovalsTab> with SingleTickerProvid
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 5, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
   }
 
   @override
@@ -30,8 +29,7 @@ class _ReApprovalsTabState extends State<ReApprovalsTab> with SingleTickerProvid
   @override
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
-    final pendingTasks = store.tasks.where((t) => t.approvalStatus == 'Pending').toList();
-    final pendingDisputes = store.disputes.where((d) => d['status'] == 'Pending Approval').toList();
+    final pendingDisputes = store.visibleDisputes.where((d) => d['status'] == 'Pending Approval').toList();
     final pendingClaims = store.paymentClaims.where((p) => p['status'] == 'Awaiting Verification' || p['status'] == 'Sync Pending').toList();
     final pendingPtpCorrections = store.ptpCorrectionRequests;
     final pendingOutcomeEdits = store.pendingOutcomeEdits;
@@ -51,7 +49,6 @@ class _ReApprovalsTabState extends State<ReApprovalsTab> with SingleTickerProvid
             tabs: [
               Tab(text: 'PTP Corrections (${pendingPtpCorrections.length})'),
               Tab(text: 'Outcome Edits (${pendingOutcomeEdits.length})'),
-              Tab(text: 'Task Edits (${pendingTasks.length})'),
               Tab(text: 'Disputes (${pendingDisputes.length})'),
               Tab(text: 'Payments (${pendingClaims.length})'),
             ],
@@ -64,8 +61,7 @@ class _ReApprovalsTabState extends State<ReApprovalsTab> with SingleTickerProvid
             children: [
               _buildPtpCorrectionsList(pendingPtpCorrections, store),
               _buildOutcomeEditsList(pendingOutcomeEdits, store),
-              _buildTaskEditsList(pendingTasks, store),
-              _buildDisputesList(store.disputes, store),
+              _buildDisputesList(store.visibleDisputes, store),
               _buildClaimsList(pendingClaims, store),
             ],
           ),
@@ -248,130 +244,6 @@ class _ReApprovalsTabState extends State<ReApprovalsTab> with SingleTickerProvid
           ),
         );
       },
-    );
-  }
-
-  Widget _buildTaskEditsList(List<AppTask> tasks, AppStore store) {
-    if (tasks.isEmpty) {
-      return const Center(
-        child: Text('No pending task edit requests.', style: TextStyle(color: Color(0xFF5A6B87))),
-      );
-    }
-
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: tasks.length,
-      itemBuilder: (ctx, i) {
-        final t = tasks[i];
-        return Container(
-          margin: const EdgeInsets.only(bottom: 16),
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.grey.withOpacity(0.15)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(t.customerName,
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF1B2B48))),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(color: const Color(0xFFFFF3E0), borderRadius: BorderRadius.circular(4)),
-                    child: const Text('EDIT REQUESTED', style: TextStyle(color: Color(0xFFF57C00), fontSize: 9, fontWeight: FontWeight.bold)),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              const Divider(height: 1),
-              const SizedBox(height: 12),
-              
-              // Proposed Changes comparison
-              const Text('PROPOSED MODIFICATIONS', style: TextStyle(fontSize: 10, color: Color(0xFF5A6B87), fontWeight: FontWeight.bold, letterSpacing: 0.5)),
-              const SizedBox(height: 8),
-              _buildChangeItem('Task Detail', t.reason, t.pendingReason ?? t.reason),
-              if (t.pendingDeadline != null)
-                _buildChangeItem('Due Date', DateFormat('dd MMM, HH:mm').format(t.deadline), DateFormat('dd MMM, HH:mm').format(t.pendingDeadline!)),
-              if (t.pendingPriority != null)
-                _buildChangeItem('Priority', t.priority, t.pendingPriority!),
-              
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      style: OutlinedButton.styleFrom(
-                        side: const BorderSide(color: Color(0xFFE53935)),
-                        foregroundColor: const Color(0xFFE53935),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
-                      onPressed: () async {
-                        final navigator = Navigator.of(context);
-                        try {
-                          await store.rejectTaskEdit(t.id);
-                          showAppMessageAfter(navigator, message: 'Task edit request rejected.');
-                        } catch (e) {
-                          showAppMessageAfter(navigator, message: 'Could not reject: $e', isError: true);
-                        }
-                      },
-                      child: const Text('Reject Changes', style: TextStyle(fontWeight: FontWeight.bold)),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF388E3C),
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
-                      onPressed: () async {
-                        final navigator = Navigator.of(context);
-                        try {
-                          await store.approveTaskEdit(t.id);
-                          showAppMessageAfter(navigator, message: 'Task edit request approved!');
-                        } catch (e) {
-                          showAppMessageAfter(navigator, message: 'Could not approve: $e', isError: true);
-                        }
-                      },
-                      child: const Text('Approve Changes', style: TextStyle(fontWeight: FontWeight.bold)),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildChangeItem(String label, String original, String proposed) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8.0),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            flex: 2,
-            child: Text(label, style: const TextStyle(fontSize: 12, color: Color(0xFF5A6B87))),
-          ),
-          Expanded(
-            flex: 3,
-            child: Text(original, style: const TextStyle(fontSize: 12, color: Colors.grey, decoration: TextDecoration.lineThrough)),
-          ),
-          const Icon(Icons.arrow_forward, size: 12, color: Color(0xFF5A6B87)),
-          const SizedBox(width: 8),
-          Expanded(
-            flex: 3,
-            child: Text(proposed, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF1B2B48))),
-          ),
-        ],
-      ),
     );
   }
 

@@ -70,7 +70,13 @@ test('recording a PTP Scheduled outcome creates a real PTP and closes prior open
   });
   assert.equal(res.status, 200);
   const detail = await res.json();
-  assert.equal(detail.currentRecoveryState, 'Waiting / Monitoring');
+  // A PTP that covers only PART of the overdue no longer parks the whole
+  // customer — the salesperson keeps working the uncovered remainder (see
+  // recoveryReconcileService.reconcileState). C1 owes 400000, PTP is
+  // 120000, so 280000 is still actionable.
+  assert.equal(detail.currentRecoveryState, 'Action Required');
+  assert.equal(detail.actionableAmount, 130000); // 400000 owed - (150000 seed PTP + 120000 new PTP)
+  assert.equal(detail.coveredAmount, 270000);
   // A PTP-Scheduled outcome must get its own specific audit label, not a
   // generic "OUTCOME_RECORDED" placeholder — see outcomeAuditLabel() in
   // customerService.js, which mirrors the Dart client's local-mode logic.
@@ -88,7 +94,14 @@ test('recording a PTP Scheduled outcome creates a real PTP and closes prior open
 
   const after1 = await fetch(`${app.baseUrl}/api/tasks`, { headers: authHeaders(token) }).then((r) => r.json());
   const stillOpenForC1 = after1.filter((t) => t.customerId === 'C1' && t.status !== 'completed' && t.status !== 'closed');
-  assert.equal(stillOpenForC1.length, 0, 'recordOutcome must supersede every prior open task for the customer');
+  // The seed tasks are superseded, but a PTP that covers only part of the
+  // overdue leaves the single `source='Recovery'` call task open on the
+  // uncovered remainder (see customerService.recordOutcome's driveRecoveryTask).
+  const superseded = openForC1Before.filter((b) => stillOpenForC1.some((s) => s.id === b.id));
+  assert.equal(superseded.length, 0, 'recordOutcome must supersede every prior open task for the customer');
+  assert.equal(stillOpenForC1.length, 1, 'the single recovery task is kept for the uncovered remainder');
+  assert.equal(stillOpenForC1[0].source, 'Recovery');
+  assert.equal(stillOpenForC1[0].type, 'customerCall');
 });
 
 test('take-control is RE-only and puts the customer in RE Control', async () => {
@@ -188,7 +201,9 @@ test('reassign changes the assigned salesperson and preserves audit history, RE/
   assert.ok(detail.auditHistory.some((e) => e.type === 'SEEDED'));
 });
 
-test('repeated No Answer outcomes create a real Physical Visit task at the configured threshold (2), and the counter re-arms after each trigger', async () => {
+test('repeated No Answer outcomes keep exactly ONE recurring call task; a full day with nothing recorded rolls it into a Physical Visit', async () => {
+  const { query } = require('../src/config/db');
+  const { sweepNoAnswerCycle } = require('../src/services/missedDeadlineService');
   const token = await login(app.baseUrl, 'rahul');
   const recordNoAnswer = () =>
     fetch(`${app.baseUrl}/api/customers/C3/record-outcome`, {
@@ -196,22 +211,51 @@ test('repeated No Answer outcomes create a real Physical Visit task at the confi
       headers: authHeaders(token),
       body: JSON.stringify({ nextAction: 'Call Customer', reason: 'No Answer', details: 'Next Call needed' }),
     });
-  const countPhysicalVisits = async () => {
-    const tasks = await fetch(`${app.baseUrl}/api/tasks`, { headers: authHeaders(token) }).then((r) => r.json());
-    return tasks.filter((t) => t.customerId === 'C3' && t.type === 'physicalVisit' && t.reason === 'Non-response threshold reached').length;
-  };
+  const tasksFor = async () =>
+    (await fetch(`${app.baseUrl}/api/tasks`, { headers: authHeaders(token) }).then((r) => r.json()))
+      .filter((t) => t.customerId === 'C3');
 
   await recordNoAnswer();
-  assert.equal(await countPhysicalVisits(), 0, 'a single No Answer must not yet trigger a Physical Visit (threshold is 2)');
+  await recordNoAnswer();
+  await recordNoAnswer();
+
+  let t = await tasksFor();
+  const noAnswerCalls = t.filter((x) => x.type === 'customerCall' && x.source === 'No Answer' && x.status !== 'completed');
+  assert.equal(noAnswerCalls.length, 1, '3 No Answers keep exactly one recurring call task, never three');
+  assert.equal(t.filter((x) => x.type === 'physicalVisit' && x.status !== 'completed').length, 0, 'no Physical Visit yet — that comes only after a full day');
+
+  // Back-date the recurring task to yesterday, then run the 2-hour cycle.
+  await query("UPDATE tasks SET created_at = NOW() - INTERVAL 2 DAY, deadline = NOW() - INTERVAL 2 DAY WHERE id = :id", { id: noAnswerCalls[0].id });
+  await sweepNoAnswerCycle();
+
+  t = await tasksFor();
+  assert.equal(t.filter((x) => x.type === 'customerCall' && x.source === 'No Answer' && x.status !== 'completed').length, 0, 'the recurring call task is removed');
+  assert.equal(t.filter((x) => x.type === 'physicalVisit' && x.reason === 'Non-response threshold reached' && x.status !== 'completed').length, 1, 'a Physical Visit is created after the full day');
+});
+
+test('recording a non-No-Answer outcome closes the recurring No Answer call task', async () => {
+  const token = await login(app.baseUrl, 'rahul');
+  const recordNoAnswer = () =>
+    fetch(`${app.baseUrl}/api/customers/C3/record-outcome`, {
+      method: 'POST',
+      headers: authHeaders(token),
+      body: JSON.stringify({ nextAction: 'Call Customer', reason: 'No Answer', details: 'rang out' }),
+    });
+  const openNoAnswerCalls = async () =>
+    (await fetch(`${app.baseUrl}/api/tasks`, { headers: authHeaders(token) }).then((r) => r.json()))
+      .filter((t) => t.customerId === 'C3' && t.type === 'customerCall' && t.source === 'No Answer' && t.status !== 'completed').length;
 
   await recordNoAnswer();
-  assert.equal(await countPhysicalVisits(), 1, 'the 2nd consecutive No Answer must trigger a real Physical Visit task');
-
   await recordNoAnswer();
-  assert.equal(await countPhysicalVisits(), 1, 'the counter resets after triggering — a 3rd call alone must not create a 2nd Physical Visit yet');
+  assert.equal(await openNoAnswerCalls(), 1, 'a No Answer leaves one recurring call task');
 
-  await recordNoAnswer();
-  assert.equal(await countPhysicalVisits(), 2, 'the 4th call brings the reset counter to 2 again — the threshold must re-arm and fire a genuine second Physical Visit');
+  // A different outcome — the salesman actually reached the customer.
+  await fetch(`${app.baseUrl}/api/customers/C3/record-outcome`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: JSON.stringify({ nextAction: 'Follow-up', reason: 'Will Confirm', details: 'call back tomorrow' }),
+  });
+  assert.equal(await openNoAnswerCalls(), 0, 'recording any real outcome supersedes the No Answer call task');
 });
 
 test('a No Answer leaves the account actionable so the salesman can record the real outcome when the customer calls back', async () => {
@@ -241,7 +285,10 @@ test('a No Answer leaves the account actionable so the salesman can record the r
   });
   assert.equal(ptp.status, 200);
   const afterPtp = await ptp.json();
-  assert.equal(afterPtp.currentRecoveryState, 'Waiting / Monitoring', 'a PTP Scheduled outcome still parks the account');
+  // C5 already carries a seed PTP (P5, 60000) and dispute (D_001, 25000);
+  // adding a 15000 PTP means the whole 60000 overdue is covered, so it
+  // still parks.
+  assert.equal(afterPtp.currentRecoveryState, 'Waiting / Monitoring', 'fully-covered account parks');
 
   const ptps = await fetch(`${app.baseUrl}/api/ptps`, { headers: authHeaders(token) }).then((r) => r.json());
   assert.ok(ptps.some((p) => p.customerId === 'C5' && p.amountPromised === 15000), 'the callback PTP must have been created');

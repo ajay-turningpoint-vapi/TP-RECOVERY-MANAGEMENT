@@ -2,6 +2,8 @@ const env = require('./config/env');
 const logger = require('./config/logger');
 const createApp = require('./app');
 const db = require('./config/db');
+const sseHub = require('./realtime/sseHub');
+const heartbeatService = require('./services/heartbeatService');
 
 async function main() {
   // Fail fast, loudly, if the database is unreachable at boot — better to
@@ -15,12 +17,28 @@ async function main() {
   }
 
   const app = createApp();
+  // Redis pub/sub → SSE fan-out. Lives here, not in createApp(), so the
+  // test suite (which builds the app directly and never listens) doesn't
+  // open a subscriber connection that keeps its process alive.
+  sseHub.init();
   const server = app.listen(env.port, () => {
     logger.info(`TP-RMS server listening on port ${env.port} (${env.nodeEnv})`);
   });
 
+  // Watchdog: the API process (more likely up than the worker) checks
+  // hourly that the scheduled jobs are still beating, and raises a critical
+  // notification once per stale period if one has gone silent.
+  const heartbeatTimer = setInterval(() => {
+    heartbeatService.checkAll().catch((err) => logger.warn('[heartbeat] checkAll threw', { message: err.message }));
+  }, 60 * 60 * 1000);
+  heartbeatTimer.unref();
+  heartbeatService.checkAll().catch(() => {});
+
   function shutdown(signal) {
     logger.info(`${signal} received — shutting down gracefully...`);
+    // End every open SSE stream first — otherwise server.close() waits on
+    // them (they never finish on their own) and the 10s force-timer fires.
+    sseHub.closeAll();
     server.close(async () => {
       try {
         await db.closePool();

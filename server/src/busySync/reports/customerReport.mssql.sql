@@ -17,13 +17,18 @@
  *     stray text (e.g. 'INCENTIVE') in some rows; without the guard the
  *     whole query throws "Conversion failed... to data type int" (hit
  *     this for real, twice, on live data).
- *  2. M.PARENTGRP IN ('574140', ...) — values kept quoted (the column
- *     compares as text here; bare ints from the supplied query risk an
- *     implicit-conversion error).
+ *  2. The PARENTGRP_FILTER placeholder comment inside the inner derived
+ *     table's WHERE (after "M.MASTERTYPE = 2") —
+ *     mssqlCustomerReportRepository does a literal string replace on it to
+ *     inject "AND M.PARENTGRP IN ('code', ...)" for the branch being
+ *     synced (config/branches.js). Values are kept quoted — the column
+ *     compares as text here; bare ints risk an implicit-conversion error.
+ *     If the placeholder is missing, the pull silently spans every
+ *     PARENTGRP (all branches at once). It must appear exactly once.
  *  3. The SALESMAN_FILTER placeholder comment after "X.BALANCE_TYPE = 'DR'"
  *     (see the WHERE clause near the end of this file) —
  *     mssqlCustomerReportRepository does a literal string replace on it to
- *     inject "AND X.slesmancode = @salesmanCode" / "AND X.CUSTOMER_ID =
+ *     inject "AND X.salesmancode = @salesmanCode" / "AND X.CUSTOMER_ID =
  *     @customerId". If it is missing, per-salesman scoping silently becomes
  *     a no-op (a salesman could fetch any customer). It must appear exactly
  *     once in this file, so it is not written literally here.
@@ -70,7 +75,7 @@ SELECT
     X.GSTNO,
     X.ADDRESS,
     X.SALESMAN,
-    X.slesmancode,
+    X.salesmancode,
     X.CREDIT_DAYS,
     X.CREDIT_LIMIT,
 
@@ -730,7 +735,7 @@ FROM
             WHERE S.CODE = TRY_CONVERT(INT, A.OF2)
         ) AS SALESMAN,
 
-        TRY_CONVERT(INT, A.OF2) AS slesmancode,
+        TRY_CONVERT(INT, A.OF2) AS salesmancode,
 
         ISNULL(TRY_CONVERT(INT, M.I2),0) AS CREDIT_DAYS,
 
@@ -749,7 +754,7 @@ FROM
 
         M.MASTERTYPE = 2
 
-        AND M.PARENTGRP IN ('574140', '574141', '258335', '577533')
+        /*{{PARENTGRP_FILTER}}*/
 
 ) X
 

@@ -48,13 +48,13 @@ function dateStr(offsetDays) {
 }
 
 /** Inserts a fresh PTP row on an existing seed customer, with a controlled promise_date/status. */
-async function insertPtp({ customerId, amount, promiseDateOffsetDays, status = 'scheduled' }) {
+async function insertPtp({ customerId, amount, promiseDateOffsetDays, status = 'scheduled', promiseTime = '12:00:00' }) {
   const id = uuid();
   await ptpRepository.insert({
     id,
     customerId,
     amountPromised: amount,
-    promiseDate: `${dateStr(promiseDateOffsetDays)} 12:00:00`,
+    promiseDate: `${dateStr(promiseDateOffsetDays)} ${promiseTime}`,
     paymentMode: 'Bank Transfer',
     status,
   });
@@ -72,11 +72,20 @@ function stubReceipts(rowsByWindow) {
   return fn;
 }
 
-test('a PTP due today is promoted to pendingVerification the same day', async () => {
-  const id = await insertPtp({ customerId: 'C1', amount: 5000, promiseDateOffsetDays: 0 });
+test('a PTP whose promise time has passed is promoted to pendingVerification', async () => {
+  // Promotion is now exact-time (00:00:01 today is always already past when
+  // the test runs), not a whole-calendar-day cutoff.
+  const id = await insertPtp({ customerId: 'C1', amount: 5000, promiseDateOffsetDays: 0, promiseTime: '00:00:01' });
   await promoteDuePtps();
   const ptp = await ptpRepository.findById(id);
   assert.equal(ptp.status, 'pendingVerification');
+});
+
+test('a PTP whose promise time is still in the future stays scheduled', async () => {
+  const id = await insertPtp({ customerId: 'C1', amount: 5000, promiseDateOffsetDays: 0, promiseTime: '23:59:59' });
+  await promoteDuePtps();
+  const ptp = await ptpRepository.findById(id);
+  assert.equal(ptp.status, 'scheduled');
 });
 
 test('a PTP due in the future stays scheduled', async () => {
@@ -215,20 +224,21 @@ test('a broken PTP reopens recovery and creates an urgent follow-up task for the
   assert.equal(c3.primaryNextAction, 'CALL CUSTOMER');
 
   const tasks = await taskRepository.findByCustomer('C3');
-  const newTask = tasks.find((t) => t.source === 'PTP Verification');
+  const newTask = tasks.find((t) => t.source === 'Recovery');
   assert.ok(newTask, 'a new follow-up task must be created for the salesperson');
   assert.equal(newTask.type, 'customerCall');
   assert.equal(newTask.priority, 'High');
   assert.equal(newTask.ownerId, 'rahul');
+  assert.match(newTask.reason, /Collect ₹/, 'the task says exactly what to collect');
 
   const c3Detail = await customerRepository.findById('C3');
   assert.ok(c3Detail, 'sanity: customer still exists');
 });
 
-test('a broken PTP does NOT create a duplicate task when one is already open for that customer', async () => {
-  // C1 already has an open seed task (T1, physicalVisit) — the reopen
-  // guard (ensureFollowUpIfNeeded) must skip creating a second one, and
-  // must not touch currentRecoveryState either since nothing was reopened.
+test('a broken PTP does NOT create a call task when a physical visit has taken over', async () => {
+  // C1 already has an open seed physicalVisit task (T1) — the visit is the
+  // next step, so reopenRecoveryAfterPtpOutcome must not stack a call task,
+  // and must not touch currentRecoveryState.
   await customerRepository.update('C1', { currentRecoveryState: 'Waiting / Monitoring', primaryNextAction: '' });
   const id = await insertPtp({ customerId: 'C1', amount: 5000, promiseDateOffsetDays: -2, status: 'pendingVerification' });
   const getReceiptTotals = stubReceipts({});
@@ -238,11 +248,11 @@ test('a broken PTP does NOT create a duplicate task when one is already open for
   assert.equal(ptp.status, 'broken');
 
   const tasksBefore = await taskRepository.findByCustomer('C1');
-  const ptpVerificationTasks = tasksBefore.filter((t) => t.source === 'PTP Verification');
-  assert.equal(ptpVerificationTasks.length, 0, 'must not create a follow-up task while another task is already open');
+  const recoveryTasks = tasksBefore.filter((t) => t.source === 'Recovery');
+  assert.equal(recoveryTasks.length, 0, 'must not create a call task while a physical visit is open');
 
   const c1 = await customerRepository.findById('C1');
-  assert.equal(c1.currentRecoveryState, 'Waiting / Monitoring', 'must not touch recovery state when the guard no-ops');
+  assert.equal(c1.currentRecoveryState, 'Waiting / Monitoring', 'must not touch recovery state when the visit holds the account');
 });
 
 test('a kept PTP that still leaves a balance due creates a normal-priority follow-up — the chase continues, not just on broken', async () => {
@@ -265,7 +275,7 @@ test('a kept PTP that still leaves a balance due creates a normal-priority follo
   assert.equal(c3.primaryNextAction, 'CALL CUSTOMER');
 
   const tasks = await taskRepository.findByCustomer('C3');
-  const newTask = tasks.find((t) => t.source === 'PTP Verification');
+  const newTask = tasks.find((t) => t.source === 'Recovery');
   assert.ok(newTask, 'a follow-up task must be created even though the PTP itself was kept, not broken');
   assert.equal(newTask.type, 'customerCall');
   assert.equal(newTask.priority, 'Normal', 'kept/partiallyKept follow-ups are normal urgency, unlike broken');
@@ -282,7 +292,7 @@ test('a kept PTP that fully clears the balance does NOT create a follow-up task 
   assert.equal(ptp.status, 'kept');
 
   const tasks = await taskRepository.findByCustomer('C3');
-  const newTask = tasks.find((t) => t.source === 'PTP Verification');
+  const newTask = tasks.find((t) => t.source === 'Recovery');
   assert.equal(newTask, undefined, 'no follow-up task once the customer genuinely owes nothing');
 
   const c3 = await customerRepository.findById('C3');
@@ -304,7 +314,7 @@ test('a partially kept PTP (balance necessarily remains) creates a normal-priori
   assert.equal(c3.primaryNextAction, 'CALL CUSTOMER');
 
   const tasks = await taskRepository.findByCustomer('C3');
-  const newTask = tasks.find((t) => t.source === 'PTP Verification');
+  const newTask = tasks.find((t) => t.source === 'Recovery');
   assert.ok(newTask, 'a follow-up task must be created for the remaining balance');
   assert.equal(newTask.priority, 'Normal');
 });

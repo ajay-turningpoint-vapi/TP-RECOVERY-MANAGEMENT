@@ -25,6 +25,11 @@ const get = asyncHandler(async (req, res) => {
   if (!fs.existsSync(filePath)) {
     throw new NotFoundError('Attachment');
   }
+  // A PDF should download rather than try to render inline in whatever
+  // opened it — images still stream normally for in-app previews.
+  if (safeName.toLowerCase().endsWith('.pdf')) {
+    res.setHeader('Content-Disposition', `attachment; filename="${safeName}"`);
+  }
   res.sendFile(filePath);
 });
 

@@ -121,12 +121,14 @@ test('RE verifying a claim as successful creates a call-customer follow-up task 
   assert.equal(res.status, 200);
 
   const tasks = await fetch(`${app.baseUrl}/api/tasks`, { headers: authHeaders(reToken) }).then((r) => r.json());
-  const followUp = tasks.find((t) => t.customerId === 'C2' && t.source === 'Payment Claim Review');
+  const followUp = tasks.find((t) => t.customerId === 'C2' && t.source === 'Recovery' && t.status !== 'completed');
   assert.ok(followUp, 'a follow-up call task must be created after verifying the claim');
   assert.equal(followUp.type, 'customerCall');
   assert.equal(followUp.priority, 'Normal');
   assert.equal(followUp.ownerId, 'rahul');
-  assert.ok(followUp.note && followUp.note.includes('verified'), 'task must carry a real note describing the decision');
+  assert.match(followUp.reason, /verified/, 'task reason describes the decision');
+  assert.match(followUp.reason, /Collect ₹/, 'task says exactly what to collect');
+  assert.equal(new Date(followUp.deadline).getHours(), 21, 'due 9 PM (RE-decision default)');
 });
 
 test('RE marking a claim Failed creates a high-priority follow-up call task', async () => {
@@ -151,10 +153,11 @@ test('RE marking a claim Failed creates a high-priority follow-up call task', as
   assert.equal(res.status, 200);
 
   const tasks = await fetch(`${app.baseUrl}/api/tasks`, { headers: authHeaders(reToken) }).then((r) => r.json());
-  const followUp = tasks.find((t) => t.customerId === 'C5' && t.source === 'Payment Claim Review');
+  const followUp = tasks.find((t) => t.customerId === 'C5' && t.source === 'Recovery' && t.status !== 'completed');
   assert.ok(followUp, 'a follow-up call task must be created after rejecting the claim');
   assert.equal(followUp.priority, 'High');
-  assert.ok(followUp.note && followUp.note.includes('rejected'));
+  assert.match(followUp.reason, /could NOT be verified/, 'task reason describes the rejection');
+  assert.match(followUp.reason, /Collect ₹/);
 });
 
 test('a salesperson cannot verify a payment claim', async () => {

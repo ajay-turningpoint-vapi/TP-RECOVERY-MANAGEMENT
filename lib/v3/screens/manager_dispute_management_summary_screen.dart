@@ -73,12 +73,11 @@ class ManagerDisputeManagementSummaryScreen extends StatefulWidget {
 }
 
 class _ManagerDisputeManagementSummaryScreenState extends State<ManagerDisputeManagementSummaryScreen> {
-  late String _branch;
+  String get _branch => context.read<AppStore>().branchFilter;
 
   @override
   void initState() {
     super.initState();
-    _branch = widget.initialBranch;
   }
   String _query = '';
   _SortBy _sort = _SortBy.dateDesc;
@@ -89,7 +88,7 @@ class _ManagerDisputeManagementSummaryScreenState extends State<ManagerDisputeMa
   @override
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
-    final branches = ['All Branches', ...{for (final s in store.salesmen) ((s['branch'] as String?) ?? 'Turning Point')}];
+    final branches = store.branchOptions;
     final now = DateTime.now();
 
     final disputes = store.disputes.where((d) {
@@ -262,7 +261,7 @@ class _ManagerDisputeManagementSummaryScreenState extends State<ManagerDisputeMa
                       icon: const Icon(Icons.keyboard_arrow_down, size: 15, color: kMuted),
                       style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: kDark),
                       items: branches.map((b) => DropdownMenuItem(value: b, child: Text(b, overflow: TextOverflow.ellipsis))).toList(),
-                      onChanged: (v) { if (v != null) setState(() => _branch = v); },
+                      onChanged: (v) { if (v != null) { context.read<AppStore>().setBranchFilter(v); setState(() {}); } },
                     ),
                   ),
                 ),

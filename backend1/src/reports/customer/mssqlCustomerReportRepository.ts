@@ -1,7 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import sql from 'mssql';
-import mssqlDb from '../../config/mssql';
+import { mssqlPoolManager } from '../../config/mssql';
+import { resolveBranch } from '../../config/branches';
 import {
   CustomerReport,
   CustomerReportOptions,
@@ -40,7 +41,7 @@ function mapRow(raw: any): CustomerReport {
     address: raw.ADDRESS ?? null,
 
     salesman: raw.SALESMAN ?? null,
-    salesmanCode: raw.slesmancode ?? null,
+    salesmanCode: raw.salesmancode ?? null,
 
     creditDays: raw.CREDIT_DAYS ?? null,
     creditLimit: raw.CREDIT_LIMIT ?? null,
@@ -49,9 +50,8 @@ function mapRow(raw: any): CustomerReport {
 
 export class MssqlCustomerReportRepository implements CustomerReportRepository {
   async getCustomers(options?: CustomerReportOptions): Promise<CustomerReport[]> {
-    if (!mssqlDb.isConnected) {
-      await mssqlDb.connect();
-    }
+    const branch = resolveBranch(options?.branchId);
+    const pool = await mssqlPoolManager.getPoolForBranch(branch);
 
     let queryText = fs.readFileSync(QUERY_PATH, 'utf8');
     // T-SQL forbids ORDER BY inside a derived table unless that inner
@@ -63,10 +63,20 @@ export class MssqlCustomerReportRepository implements CustomerReportRepository {
       queryText = queryText.replace(/^SELECT\b/m, `SELECT TOP (${Number(options.limit)})`);
     }
 
-    const request = mssqlDb.getPool().request();
+    const request = pool.request();
+
+    // Branch scope — bind each PARENTGRP code as its own parameter and
+    // splice the @pg0, @pg1, ... list into the query's IN (...) clause.
+    const pgParams = branch.parentGrpCodes.map((code, i) => {
+      const name = `pg${i}`;
+      request.input(name, sql.VarChar, code);
+      return `@${name}`;
+    });
+    queryText = queryText.replace('/*{{PARENTGRP_CODES}}*/', pgParams.join(', '));
+
     if (options?.salesmanCode != null) {
       request.input('salesmanCode', sql.Int, options.salesmanCode);
-      queryText = queryText.replace('/*{{SALESMAN_FILTER}}*/', 'AND X.slesmancode = @salesmanCode');
+      queryText = queryText.replace('/*{{SALESMAN_FILTER}}*/', 'AND X.salesmancode = @salesmanCode');
     } else {
       queryText = queryText.replace('/*{{SALESMAN_FILTER}}*/', '');
     }

@@ -134,7 +134,10 @@ function computeRecoveryScoreComponents({ ownedCustomers, ownedPtps, ownedTasks,
   const keptCount = maturedPtps.filter((p) => p.status === 'kept').length;
 
   const totalOverdue = ownedCustomers.reduce((s, c) => s + c.totalDue, 0);
-  const collectionTarget = totalOverdue * 0.12;
+  // Tier 1 of the company's real recovery-target tiers (25/35/50/70% of
+  // overdue — see report_detail_screens.dart's RecoveryTargetVsActualReport)
+  // is the single ongoing per-salesman/company target used everywhere else.
+  const collectionTarget = totalOverdue * 0.25;
   const collectionAchieved = maturedPtps
     .filter((p) => p.status === 'kept' || p.status === 'partiallyKept')
     .reduce((s, p) => s + (p.amountReceived || 0), 0);

@@ -12,6 +12,7 @@ function mapPtp(row) {
     status: row.status,
     correctionRequestedAmount: row.correction_requested_amount === null ? null : Number(row.correction_requested_amount),
     correctionRequestedDate: row.correction_requested_date,
+    correctionRequestedPaymentMode: row.correction_requested_payment_mode || null,
     correctionReason: row.correction_reason,
     correctionStatus: row.correction_status,
     amountReceived: row.amount_received === null || row.amount_received === undefined ? null : Number(row.amount_received),
@@ -83,6 +84,7 @@ const COLUMN_MAP = {
   status: 'status',
   correctionRequestedAmount: 'correction_requested_amount',
   correctionRequestedDate: 'correction_requested_date',
+  correctionRequestedPaymentMode: 'correction_requested_payment_mode',
   correctionReason: 'correction_reason',
   correctionStatus: 'correction_status',
   amountReceived: 'amount_received',
@@ -107,6 +109,25 @@ async function findScheduledPastDue(cutoff, connection) {
        AND (correction_status IS NULL OR correction_status <> 'Pending')
      ORDER BY promise_date`,
     { cutoff }
+  );
+  const rows = connection ? result[0] : result;
+  return rows.map(mapPtp);
+}
+
+/**
+ * PTPs whose exact promise datetime has passed — still Scheduled, not
+ * frozen by a pending correction. Promoted to 'pendingVerification' the
+ * instant the promise time is reached, evaluated by the daily 12:10 IST
+ * `ptp-verify` pass (promote + verify), not a whole-calendar-day cutoff.
+ */
+async function findScheduledDueByTime(connection) {
+  const run = connection ? (sql, params) => connection.query(sql, params) : query;
+  const result = await run(
+    `SELECT * FROM ptps
+     WHERE status = 'scheduled'
+       AND promise_date <= NOW()
+       AND (correction_status IS NULL OR correction_status <> 'Pending')
+     ORDER BY promise_date`
   );
   const rows = connection ? result[0] : result;
   return rows.map(mapPtp);
@@ -153,6 +174,7 @@ module.exports = {
   findById,
   findPendingCorrections,
   findScheduledPastDue,
+  findScheduledDueByTime,
   findPendingVerificationDue,
   hasActivePtpForCustomer,
   insert,

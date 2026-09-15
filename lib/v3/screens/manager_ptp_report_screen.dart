@@ -34,13 +34,12 @@ class ManagerPtpReportScreen extends StatefulWidget {
 enum _SortBy { dateDesc, dateAsc, amountDesc }
 
 class _ManagerPtpReportScreenState extends State<ManagerPtpReportScreen> {
-  late String _branch;
+  String get _branch => context.read<AppStore>().branchFilter;
   late PtpReportQuickFilter _quickFilter;
 
   @override
   void initState() {
     super.initState();
-    _branch = widget.initialBranch;
     _quickFilter = widget.initialQuickFilter;
   }
   String _salesman = 'All Salesmen';
@@ -52,7 +51,7 @@ class _ManagerPtpReportScreenState extends State<ManagerPtpReportScreen> {
   @override
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
-    final branches = ['All Branches', ...{for (final s in store.salesmen) ((s['branch'] as String?) ?? 'Turning Point')}];
+    final branches = store.branchOptions;
     final salesmenNames = ['All Salesmen', ...store.salesmen.map((s) => s['name'] as String)];
     final now = DateTime.now();
 
@@ -294,7 +293,7 @@ class _ManagerPtpReportScreenState extends State<ManagerPtpReportScreen> {
         const SizedBox(height: 10),
         Row(
           children: [
-            Expanded(child: _dropdownPill(Icons.apartment_outlined, kBlue, _branch, branches, (v) => setState(() => _branch = v))),
+            Expanded(child: _dropdownPill(Icons.apartment_outlined, kBlue, _branch, branches, (v) { context.read<AppStore>().setBranchFilter(v); setState(() {}); })),
             const SizedBox(width: 10),
             Expanded(child: _dropdownPill(Icons.person_outline, kGreen, _salesman, salesmenNames, (v) => setState(() => _salesman = v))),
           ],

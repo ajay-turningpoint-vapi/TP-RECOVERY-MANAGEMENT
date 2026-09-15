@@ -15,6 +15,12 @@
 -- TOTAL_ENTRIES, RECEIPT_AMOUNT, and JOURNAL_AMOUNT are informational only
 -- (e.g. for audit/debugging) — the verification decision is made purely on
 -- TOTAL_AMOUNT, the combined sum of both voucher types.
+--
+-- The `/*{{PARENTGRP_FILTER}}*/` placeholder is replaced by
+-- mssqlReceiptTotalsRepository with `AND M.PARENTGRP IN (...)` for the
+-- branch whose PTP is being verified (config/branches.js) — the query
+-- also runs against that branch's own BUSY database. If the placeholder
+-- is missing, the totals span every PARENTGRP at once.
 SELECT
     M.CODE                          AS CUSTOMER_ID,
     M.NAME                          AS CUSTOMER_NAME,
@@ -38,13 +44,7 @@ INNER JOIN MASTER1 M
 
 WHERE
     T.VchType IN (14,16)
-    AND M.PARENTGRP IN
-    (
-        574140,
-        574141,
-        258335,
-        577533
-    )
+    /*{{PARENTGRP_FILTER}}*/
     AND CONVERT(DATE, T.[Date]) >= @startDate
     AND CONVERT(DATE, T.[Date]) <= @endDate
 

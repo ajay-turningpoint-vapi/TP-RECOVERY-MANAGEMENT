@@ -81,15 +81,13 @@ class PtpCorrectionReviewScreen extends StatelessWidget {
         ]),
         const SizedBox(height: 18),
         const SectionLabel('REQUESTED CORRECTION'),
+        // (payment-mode row added below)
         InfoCard(children: [
           KeyValueRow('Amount', _rupee.format(p.correctionRequestedAmount ?? p.amountPromised), valueColor: _teal),
-          KeyValueRow('Date', p.correctionRequestedDate != null ? DateFormat('dd MMM yyyy, hh:mm a').format(p.correctionRequestedDate!) : '-', valueColor: _teal),
+          KeyValueRow('Date & Time', p.correctionRequestedDate != null ? DateFormat('dd MMM yyyy, hh:mm a').format(p.correctionRequestedDate!) : '-', valueColor: _teal),
+          KeyValueRow('Payment Mode', p.correctionRequestedPaymentMode ?? p.paymentMode, valueColor: _teal),
           KeyValueRow('Reason', p.correctionReason ?? '-'),
         ]),
-        const SizedBox(height: 18),
-        AttachmentsSection(refId: ptpId),
-        const SizedBox(height: 18),
-        NotesSection(refId: ptpId),
       ],
     );
   }

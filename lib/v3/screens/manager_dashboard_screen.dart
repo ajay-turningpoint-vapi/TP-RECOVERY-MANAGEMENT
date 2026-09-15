@@ -122,7 +122,7 @@ class _ManagerDashboardScreenState extends State<ManagerDashboardScreen> {
     // unguarded `as String` here crashed this whole screen for every
     // Manager on load. 'Turning Point' groups them under one real, honest
     // filter option rather than a crash.
-    final branches = ['All Branches', ...{for (final s in store.salesmen) (s['branch'] as String?) ?? 'Turning Point'}];
+    final branches = store.branchOptions;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(

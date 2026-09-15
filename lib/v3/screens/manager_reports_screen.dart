@@ -17,6 +17,7 @@ import 'package:salesman_mobile/v3/screens/manager_priority_accounts_screen.dart
 import 'package:salesman_mobile/v3/screens/manager_alerts_reminders_screen.dart';
 import 'package:salesman_mobile/v3/screens/manager_management_attention_screen.dart';
 import 'package:salesman_mobile/v3/screens/manager_recovery_owner_screen.dart';
+import 'package:salesman_mobile/v3/screens/manager_re_performance_screen.dart';
 
 final _rupee = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
 
@@ -32,12 +33,12 @@ class ManagerReportsScreen extends StatefulWidget {
 }
 
 class _ManagerReportsScreenState extends State<ManagerReportsScreen> {
-  String _branch = 'All Branches';
+  String get _branch => context.read<AppStore>().branchFilter;
 
   @override
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
-    final branches = ['All Branches', ...{for (final s in store.salesmen) ((s['branch'] as String?) ?? 'Turning Point')}];
+    final branches = store.branchOptions;
 
     final target = store.recoveryTarget;
     final received = store.totalReceivedAllTime;
@@ -48,6 +49,7 @@ class _ManagerReportsScreenState extends State<ManagerReportsScreen> {
 
     final reports = [
       (Icons.warning_amber_rounded, kRed, 'Management Attention', 'L4 cases requiring an executive decision.', (BuildContext c) => const ManagerManagementAttentionScreen()),
+      (Icons.speed_outlined, kTeal, 'RE Performance', 'Recovery Executive queue, turnaround and escalations owned.', (BuildContext c) => const ManagerRePerformanceScreen()),
       (Icons.assignment_outlined, kBlue, 'Daily Recovery Summary', 'Target vs Received summary for the day.', (BuildContext c) => ManagerDailyRecoverySummaryScreen(initialBranch: _branch)),
       (Icons.groups_outlined, kPurple, 'Team Recovery', 'Salesmen team performance and recovery overview.', (BuildContext c) => ManagerTeamRecoveryScreen(initialBranch: _branch)),
       (Icons.badge_outlined, kTeal, 'Recovery Owner', 'Every recovery owner with a real target/received/achievement summary.', (BuildContext c) => const ManagerRecoveryOwnerScreen()),
@@ -123,7 +125,7 @@ class _ManagerReportsScreenState extends State<ManagerReportsScreen> {
                               icon: const Icon(Icons.keyboard_arrow_down, size: 15, color: kMuted),
                               style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: kDark),
                               items: branches.map((b) => DropdownMenuItem(value: b, child: Text(b, overflow: TextOverflow.ellipsis))).toList(),
-                              onChanged: (v) { if (v != null) setState(() => _branch = v); },
+                              onChanged: (v) { if (v != null) { context.read<AppStore>().setBranchFilter(v); setState(() {}); } },
                             ),
                           ),
                         ),

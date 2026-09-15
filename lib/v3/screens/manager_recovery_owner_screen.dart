@@ -18,13 +18,13 @@ class ManagerRecoveryOwnerScreen extends StatefulWidget {
 }
 
 class _ManagerRecoveryOwnerScreenState extends State<ManagerRecoveryOwnerScreen> {
-  String _branch = 'All Branches';
+  String get _branch => context.read<AppStore>().branchFilter;
   String _query = '';
 
   @override
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
-    final branches = ['All Branches', ...{for (final s in store.salesmen) ((s['branch'] as String?) ?? 'Turning Point')}];
+    final branches = store.branchOptions;
 
     var owners = store.salesmen.where((s) => _branch == 'All Branches' || ((s['branch'] as String?) ?? 'Turning Point') == _branch).toList();
     if (_query.trim().isNotEmpty) {
@@ -151,7 +151,7 @@ class _ManagerRecoveryOwnerScreenState extends State<ManagerRecoveryOwnerScreen>
                       icon: const Icon(Icons.keyboard_arrow_down, size: 15, color: kMuted),
                       style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: kDark),
                       items: branches.map((b) => DropdownMenuItem(value: b, child: Text(b, overflow: TextOverflow.ellipsis))).toList(),
-                      onChanged: (v) { if (v != null) setState(() => _branch = v); },
+                      onChanged: (v) { if (v != null) { context.read<AppStore>().setBranchFilter(v); setState(() {}); } },
                     ),
                   ),
                 ),

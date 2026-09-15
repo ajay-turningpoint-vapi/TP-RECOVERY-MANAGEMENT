@@ -12,13 +12,14 @@ const COLUMNS = [
   'ref_amount',
   'pending_amount',
   'message',
+  'branch',
   'last_synced_at',
 ];
 
 const UPDATABLE_COLUMNS = COLUMNS.filter((c) => c !== 'ref_code');
 const CHUNK_SIZE = 200;
 
-function toRowValues(row, syncStartedAt) {
+function toRowValues(row, syncStartedAt, branchLabel) {
   return [
     row.refCode,
     row.customerId,
@@ -30,6 +31,7 @@ function toRowValues(row, syncStartedAt) {
     row.refAmount,
     row.pendingAmount,
     row.message,
+    branchLabel,
     syncStartedAt,
   ];
 }
@@ -42,7 +44,7 @@ function chunk(items, size) {
   return out;
 }
 
-async function upsertChunk(connection, rows, syncStartedAt) {
+async function upsertChunk(connection, rows, syncStartedAt, branchLabel) {
   const placeholders = rows.map(() => `(${COLUMNS.map(() => '?').join(', ')})`).join(', ');
   const updateClause = UPDATABLE_COLUMNS.map((c) => `${c} = VALUES(${c})`).join(', ');
   const sqlQuery = `
@@ -50,23 +52,25 @@ async function upsertChunk(connection, rows, syncStartedAt) {
     VALUES ${placeholders}
     ON DUPLICATE KEY UPDATE ${updateClause}
   `;
-  const values = rows.flatMap((row) => toRowValues(row, syncStartedAt));
+  const values = rows.flatMap((row) => toRowValues(row, syncStartedAt, branchLabel));
   await connection.query(sqlQuery, values);
 }
 
-async function syncInvoiceSnapshot(rows, syncStartedAt) {
+async function syncInvoiceSnapshot(rows, syncStartedAt, branchLabel = 'Turning Point') {
   return withTransaction(async (connection) => {
     for (const batch of chunk(rows, CHUNK_SIZE)) {
-      await upsertChunk(connection, batch, syncStartedAt);
+      await upsertChunk(connection, batch, syncStartedAt, branchLabel);
     }
 
+    // Scoped to this branch — each branch's run has its own timestamp, so
+    // a global sweep would delete the other branch's invoices.
     const [deleteResult] = await connection.query(
-      'DELETE FROM customer_invoice_snapshot WHERE last_synced_at < ?',
-      [syncStartedAt]
+      'DELETE FROM customer_invoice_snapshot WHERE branch = ? AND last_synced_at < ?',
+      [branchLabel, syncStartedAt]
     );
 
     logger.info(
-      `[BUSY_INVOICE_DATA] Upserted ${rows.length} row(s), swept ${deleteResult.affectedRows} stale row(s).`
+      `[BUSY_INVOICE_DATA] (${branchLabel}) Upserted ${rows.length} row(s), swept ${deleteResult.affectedRows} stale row(s).`
     );
 
     return { upserted: rows.length, deleted: deleteResult.affectedRows };

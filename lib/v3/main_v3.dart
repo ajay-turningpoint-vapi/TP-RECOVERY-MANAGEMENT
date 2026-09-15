@@ -1,5 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
+import 'package:salesman_mobile/services/api_client.dart';
+import 'package:salesman_mobile/widgets/app_message.dart';
 import 'package:salesman_mobile/v2/stores/app_store.dart';
 import 'package:salesman_mobile/v2/screens/main_scaffold.dart';
 import 'package:salesman_mobile/v2/screens/login_screen.dart';
@@ -10,14 +15,91 @@ import 'package:salesman_mobile/v2/screens/mobile_frame.dart';
 import 'package:salesman_mobile/v2/screens/sync_freeze_overlay.dart';
 
 void main() {
-  runApp(
-    MultiProvider(
-      providers: [
-        ChangeNotifierProvider(create: (_) => AppStore()..restoreSession()),
-      ],
-      child: const TPRMSV3App(),
-    ),
-  );
+  // Everything runs inside one guarded zone so that *any* failure the app
+  // doesn't catch itself — an uncaught async error, a framework error, a
+  // bad server response nobody handled — surfaces as a proper popup dialog
+  // (see showGlobalError) instead of a red error screen or silence.
+  runZonedGuarded(() {
+    WidgetsFlutterBinding.ensureInitialized();
+
+    // Framework-level (build/layout/paint) errors.
+    final priorOnError = FlutterError.onError;
+    FlutterError.onError = (details) {
+      priorOnError?.call(details);
+      FlutterError.presentError(details);
+      if (!_isNoisyFrameworkError(details)) {
+        showGlobalError(_friendlyMessage(details.exception));
+      }
+    };
+
+    // Uncaught errors that bubble out of the platform dispatcher
+    // (un-awaited futures, platform channels, gestures).
+    PlatformDispatcher.instance.onError = (error, stack) {
+      debugPrint('Uncaught error: $error\n$stack');
+      showGlobalError(_friendlyMessage(error));
+      return true;
+    };
+
+    runApp(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider(create: (_) => AppStore()..restoreSession()),
+        ],
+        child: const TPRMSV3App(),
+      ),
+    );
+  }, (error, stack) {
+    debugPrint('Uncaught zone error: $error\n$stack');
+    showGlobalError(_friendlyMessage(error));
+  });
+}
+
+/// Turns whatever was thrown into a sentence a user can read. Known
+/// server/network failures already carry a friendly message; anything
+/// else gets a generic line rather than a raw exception / stack trace.
+String _friendlyMessage(Object error) {
+  if (error is ApiException) {
+    // statusCode 0 == a client-side network failure (server unreachable /
+    // request timed out). Say plainly that it's a connection problem and
+    // that the app recovers on its own — the data/sync layer retries every
+    // reconnect, so the user doesn't need to do anything.
+    if (error.statusCode == 0 || _looksLikeConnectionError(error.message)) {
+      return "Can't reach the server right now — your connection may be down. "
+          'The app will keep trying and refresh automatically once it’s back.';
+    }
+    return error.message;
+  }
+  if (_looksLikeConnectionError(error.toString())) {
+    return "Can't reach the server right now — your connection may be down. "
+        'The app will keep trying and refresh automatically once it’s back.';
+  }
+  return 'Something went wrong and the last action could not be completed. '
+      'Please try again — the app keeps retrying in the background, so this often clears on its own.';
+}
+
+bool _looksLikeConnectionError(String text) {
+  final t = text.toLowerCase();
+  return t.contains('reach the server') ||
+      t.contains('taking too long to respond') ||
+      t.contains('socketexception') ||
+      t.contains('timeoutexception') ||
+      t.contains('connection') && (t.contains('closed') || t.contains('refused') || t.contains('reset') || t.contains('failed')) ||
+      t.contains('network is unreachable') ||
+      t.contains('failed host lookup');
+}
+
+/// Layout-overflow stripes and similar debug-only framework noise are
+/// "errors" but shouldn't throw a modal in the user's face — let the
+/// console keep them, skip the popup.
+bool _isNoisyFrameworkError(FlutterErrorDetails details) {
+  final text = details.exception.toString();
+  return text.contains('overflowed by') ||
+      text.contains('RenderFlex') ||
+      // Dev-time widget-tree assertions — real bugs to fix, but never
+      // something an end user can act on, so don't throw a modal for them.
+      text.contains('Incorrect use of ParentDataWidget') ||
+      text.contains('ParentDataWidget') ||
+      details.library == 'image resource service';
 }
 
 class TPRMSV3App extends StatelessWidget {
@@ -45,6 +127,7 @@ class TPRMSV3App extends StatelessWidget {
 
     return MaterialApp(
       title: 'TP-RMS V3',
+      navigatorKey: appNavigatorKey,
       theme: AppTheme.lightTheme,
       home: getHomeScreen(),
       builder: (context, child) {

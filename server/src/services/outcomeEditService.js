@@ -22,6 +22,43 @@ function num(v) {
   return Number.isFinite(n) ? n : 0;
 }
 
+function isValidDate(v) {
+  return v != null && !Number.isNaN(new Date(v).getTime());
+}
+
+// Never throws — a missing/garbage date renders as a readable placeholder
+// instead of crashing summarize() (and the whole request) with a RangeError.
+function fmtDate(v, len = 10) {
+  if (!isValidDate(v)) return '(unknown date)';
+  return new Date(v).toISOString().slice(0, len).replace('T', ' ');
+}
+
+// Structural check on the salesperson-supplied requested values, so a
+// malformed payload comes back as a 400, not a 500 from deeper code.
+function validateRequestedPayload(kind, p) {
+  if (p == null || typeof p !== 'object') {
+    throw new ValidationError('requestedPayload is required and must be an object.');
+  }
+  switch (kind) {
+    case 'PTP':
+      if (!(num(p.amount) > 0)) throw new ValidationError('A positive PTP amount is required.');
+      if (!isValidDate(p.promiseDate)) throw new ValidationError('A valid promiseDate is required for a PTP edit.');
+      break;
+    case 'PaymentClaim':
+      if (!(num(p.amount) > 0)) throw new ValidationError('A positive claim amount is required.');
+      if (p.claimDate != null && !isValidDate(p.claimDate)) throw new ValidationError('claimDate is not a valid date.');
+      break;
+    case 'Dispute':
+      if (!(num(p.amount) > 0)) throw new ValidationError('A positive dispute amount is required.');
+      break;
+    case 'FollowUp':
+      if (!isValidDate(p.deadline)) throw new ValidationError('A valid deadline is required for a follow-up edit.');
+      break;
+    // 'Simple' and 'NoAnswerReplacement' are free-form — nothing structural
+    // to enforce here.
+  }
+}
+
 /**
  * Loads the live artifact this request targets and returns
  * { originalPayload, apply(conn, customer, requestedPayload, actorName) }.
@@ -157,13 +194,13 @@ function summarize(kind, payload) {
   if (!payload) return kind;
   switch (kind) {
     case 'PTP':
-      return `PTP ₹${payload.amount} on ${new Date(payload.promiseDate).toISOString().slice(0, 10)} via ${payload.paymentMode}`;
+      return `PTP ₹${payload.amount} on ${fmtDate(payload.promiseDate)} via ${payload.paymentMode || '—'}`;
     case 'Dispute':
       return `Dispute ₹${payload.amount} — ${payload.reason}`;
     case 'PaymentClaim':
       return `Claim ₹${payload.amount} ref ${payload.reference || '—'}`;
     case 'FollowUp':
-      return `Follow-up on ${new Date(payload.deadline).toISOString().slice(0, 16).replace('T', ' ')}`;
+      return `Follow-up on ${fmtDate(payload.deadline, 16)}`;
     case 'Simple':
       return payload.reason;
     case 'NoAnswerReplacement':
@@ -192,6 +229,7 @@ async function getOrThrow(id) {
  */
 async function request(customerId, user, { outcomeKind, artifactId, requestedPayload, editReason }) {
   if (!KINDS.includes(outcomeKind)) throw new ValidationError(`Unknown outcome kind "${outcomeKind}"`);
+  validateRequestedPayload(outcomeKind, requestedPayload);
   const customer = await customerRepository.findById(customerId);
   if (!customer) throw new NotFoundError('Customer');
   if (user.role === 'SALESPERSON' && customer.assignedSalesmanId !== user.id) {

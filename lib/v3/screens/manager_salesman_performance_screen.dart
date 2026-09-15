@@ -51,13 +51,12 @@ class ManagerSalesmanPerformanceScreen extends StatefulWidget {
 enum _SortBy { achievementDesc, achievementAsc, nameAsc, targetDesc }
 
 class _ManagerSalesmanPerformanceScreenState extends State<ManagerSalesmanPerformanceScreen> {
-  late String _branch;
+  String get _branch => context.read<AppStore>().branchFilter;
   late String _salesman;
 
   @override
   void initState() {
     super.initState();
-    _branch = widget.initialBranch;
     _salesman = widget.initialSalesman;
   }
   String _query = '';
@@ -66,7 +65,7 @@ class _ManagerSalesmanPerformanceScreenState extends State<ManagerSalesmanPerfor
   @override
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
-    final branches = ['All Branches', ...{for (final s in store.salesmen) ((s['branch'] as String?) ?? 'Turning Point')}];
+    final branches = store.branchOptions;
     final allSalesmenNames = ['All Salesmen', ...store.salesmen.map((s) => s['name'] as String)];
 
     var salesmen = store.salesmen.where((s) => (_branch == 'All Branches' || ((s['branch'] as String?) ?? 'Turning Point') == _branch) && (_salesman == 'All Salesmen' || s['name'] == _salesman)).toList();
@@ -255,7 +254,7 @@ class _ManagerSalesmanPerformanceScreenState extends State<ManagerSalesmanPerfor
         const SizedBox(height: 10),
         Row(
           children: [
-            Expanded(child: _dropdownPill(Icons.apartment_outlined, kBlue, _branch, branches, (v) => setState(() => _branch = v))),
+            Expanded(child: _dropdownPill(Icons.apartment_outlined, kBlue, _branch, branches, (v) { context.read<AppStore>().setBranchFilter(v); setState(() {}); })),
             const SizedBox(width: 10),
             Expanded(child: _dropdownPill(Icons.person_outline, kGreen, _salesman, salesmenNames, (v) => setState(() => _salesman = v))),
           ],

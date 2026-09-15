@@ -7,6 +7,7 @@ import 'package:salesman_mobile/v3/screens/re_tasks_screen.dart';
 import 'package:salesman_mobile/v3/screens/disputes_tab.dart';
 import 'package:salesman_mobile/v3/screens/reports_screen.dart';
 import 'package:salesman_mobile/v2/screens/profile_screen.dart';
+import 'package:salesman_mobile/widgets/data_loading.dart' show InitialDataLoader;
 
 /// Bottom navigation matches the company's fixed IA: Dashboard, Customers,
 /// Tasks, Disputes, Reports, Profile (same as salesman v2). Approvals,
@@ -23,7 +24,13 @@ class ReScaffoldV3 extends StatefulWidget {
 class _ReScaffoldV3State extends State<ReScaffoldV3> {
   int _currentIndex = 0;
 
-  void _goTo(int index) => setState(() => _currentIndex = index);
+  void _goTo(int index) {
+    setState(() => _currentIndex = index);
+    // Pull fresh lists on every tab switch so a page that's been sitting
+    // in the IndexedStack (e.g. the dashboard) reflects what other users
+    // have done since it was last shown.
+    context.read<AppStore>().refreshLiveData();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -42,7 +49,9 @@ class _ReScaffoldV3State extends State<ReScaffoldV3> {
 
     return Scaffold(
       body: SafeArea(
-        child: IndexedStack(index: _currentIndex, children: pages),
+        child: InitialDataLoader(
+          child: IndexedStack(index: _currentIndex, children: pages),
+        ),
       ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,

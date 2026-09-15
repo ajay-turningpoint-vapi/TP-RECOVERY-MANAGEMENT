@@ -1,8 +1,10 @@
+import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:salesman_mobile/v2/theme/app_theme.dart';
 import 'package:salesman_mobile/v2/stores/app_store.dart';
 
@@ -67,9 +69,18 @@ class _BaseOutcomeFormState extends State<BaseOutcomeForm> with SingleTickerProv
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(widget.title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1B2B48))),
-              const Text('* All fields marked are mandatory', style: TextStyle(fontSize: 10, color: Color(0xFF5A6B87))),
+              Flexible(
+                child: Text(widget.title,
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1B2B48))),
+              ),
+              const SizedBox(width: 8),
+              const Flexible(
+                child: Text('* All fields marked are mandatory',
+                    textAlign: TextAlign.end,
+                    style: TextStyle(fontSize: 10, color: Color(0xFF5A6B87))),
+              ),
             ],
           ),
           const SizedBox(height: 20),
@@ -166,6 +177,9 @@ class _SwipeToConfirmButtonState extends State<SwipeToConfirmButton> with Ticker
   /// while the thumb snaps all the way back to zero, so the rejection is
   /// unmistakable rather than a silent no-op.
   void _rejectWithShake() {
+    // Two haptics — heavyImpact reads on phones where the plain vibrate()
+    // long-buzz is suppressed by system touch-feedback settings.
+    HapticFeedback.heavyImpact();
     HapticFeedback.vibrate();
     _snapBack();
     _shakeCtrl.forward(from: 0);
@@ -232,7 +246,7 @@ class _SwipeToConfirmButtonState extends State<SwipeToConfirmButton> with Ticker
                                 style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15, letterSpacing: 1.0)),
                             if (!_confirmed) ...[
                               const SizedBox(width: 6),
-                              Icon(Icons.double_arrow_rounded, color: Colors.white70, size: 18),
+                              const Icon(Icons.double_arrow_rounded, color: Colors.white70, size: 18),
                             ],
                           ],
                         ),
@@ -242,37 +256,39 @@ class _SwipeToConfirmButtonState extends State<SwipeToConfirmButton> with Ticker
                       const Center(
                         child: Icon(Icons.check_circle, color: Colors.white, size: 24),
                       ),
-                    // Draggable thumb
-                    AnimatedPositioned(
-                      duration: (_snapCtrl.isAnimating || _dragging) ? Duration.zero : const Duration(milliseconds: 60),
-                      left: 3 + _dragX + hintNudge,
-                      top: 3,
-                      child: GestureDetector(
-                        onHorizontalDragStart: _confirmed ? null : (_) => setState(() => _dragging = true),
-                        onHorizontalDragUpdate: _confirmed
-                            ? null
-                            : (details) {
-                                setState(() {
-                                  _dragX = (_dragX + details.delta.dx).clamp(0.0, _maxDrag);
-                                });
-                              },
-                        onHorizontalDragEnd: _confirmed ? null : _handleDragEnd,
-                        child: Container(
-                          width: _thumbSize,
-                          height: _thumbSize,
-                          decoration: const BoxDecoration(
-                            color: Colors.white,
-                            shape: BoxShape.circle,
-                            boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 2))],
-                          ),
-                          child: Icon(
-                            _confirmed ? Icons.check : Icons.arrow_forward_rounded,
-                            color: trackColorNow,
-                            size: 22,
+                    // Draggable thumb — only while the action is still
+                    // pending. Once confirmed it's removed so the button
+                    // shows just the single big centred check, not also a
+                    // small white-disc tick sitting on the track.
+                    if (!_confirmed)
+                      AnimatedPositioned(
+                        duration: (_snapCtrl.isAnimating || _dragging) ? Duration.zero : const Duration(milliseconds: 60),
+                        left: 3 + _dragX + hintNudge,
+                        top: 3,
+                        child: GestureDetector(
+                          onHorizontalDragStart: (_) => setState(() => _dragging = true),
+                          onHorizontalDragUpdate: (details) {
+                            setState(() {
+                              _dragX = (_dragX + details.delta.dx).clamp(0.0, _maxDrag);
+                            });
+                          },
+                          onHorizontalDragEnd: _handleDragEnd,
+                          child: Container(
+                            width: _thumbSize,
+                            height: _thumbSize,
+                            decoration: const BoxDecoration(
+                              color: Colors.white,
+                              shape: BoxShape.circle,
+                              boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 2))],
+                            ),
+                            child: Icon(
+                              Icons.arrow_forward_rounded,
+                              color: trackColorNow,
+                              size: 22,
+                            ),
                           ),
                         ),
                       ),
-                    ),
                   ],
                 ),
               ),
@@ -334,6 +350,66 @@ Future<XFile?> _pickImage(BuildContext context) async {
   );
   if (source == null) return null;
   return ImagePicker().pickImage(source: source, imageQuality: 85);
+}
+
+/// Camera / gallery / PDF picker for evidence that may be a document, not
+/// just a photo (Internal Action). PDFs come back as an [XFile] built from
+/// their bytes so the same `screenshot:` upload path handles them.
+Future<XFile?> _pickEvidenceFile(BuildContext context) async {
+  final choice = await showModalBottomSheet<String>(
+    context: context,
+    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+    builder: (ctx) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(height: 12),
+          const Text('Add attachment', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF1B2B48))),
+          const SizedBox(height: 2),
+          ListTile(
+            leading: const CircleAvatar(backgroundColor: Color(0xFFE3EDFB), child: Icon(Icons.photo_camera, color: Color(0xFF0052CC))),
+            title: const Text('Take photo', style: TextStyle(fontWeight: FontWeight.bold)),
+            onTap: () => Navigator.pop(ctx, 'camera'),
+          ),
+          ListTile(
+            leading: const CircleAvatar(backgroundColor: Color(0xFFDCFCE7), child: Icon(Icons.photo_library, color: Color(0xFF16A34A))),
+            title: const Text('Choose from gallery', style: TextStyle(fontWeight: FontWeight.bold)),
+            onTap: () => Navigator.pop(ctx, 'gallery'),
+          ),
+          ListTile(
+            leading: const CircleAvatar(backgroundColor: Color(0xFFFEE2E2), child: Icon(Icons.picture_as_pdf, color: Color(0xFFDC2626))),
+            title: const Text('Upload PDF', style: TextStyle(fontWeight: FontWeight.bold)),
+            onTap: () => Navigator.pop(ctx, 'pdf'),
+          ),
+          const SizedBox(height: 8),
+        ],
+      ),
+    ),
+  );
+  if (choice == null) return null;
+  if (choice == 'pdf') {
+    final r = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['pdf'], withData: true);
+    final f = r?.files.isNotEmpty == true ? r!.files.first : null;
+    if (f == null) return null;
+    final name = f.name.trim().isNotEmpty ? f.name.trim() : 'document.pdf';
+    // The picker's own cached path is best — a real file means XFile.name
+    // and readAsBytes both work. cross_file's io XFile.fromData otherwise
+    // drops the name (XFile.name reads the path basename), which left the
+    // attach button and the upload with an empty filename.
+    if (f.path != null && f.path!.isNotEmpty && File(f.path!).existsSync()) {
+      return XFile(f.path!, mimeType: 'application/pdf');
+    }
+    if (f.bytes == null) return null;
+    final dir = Directory('${Directory.systemTemp.path}/tp_evidence/${DateTime.now().millisecondsSinceEpoch}');
+    await dir.create(recursive: true);
+    final tmp = File('${dir.path}/$name');
+    await tmp.writeAsBytes(f.bytes!);
+    return XFile(tmp.path, mimeType: 'application/pdf');
+  }
+  return ImagePicker().pickImage(
+    source: choice == 'camera' ? ImageSource.camera : ImageSource.gallery,
+    imageQuality: 85,
+  );
 }
 
 // 1. PTP
@@ -574,7 +650,7 @@ class _WillConfirmFormState extends State<WillConfirmForm> {
 
 // 3. Payment Already Made
 class PaymentAlreadyMadeForm extends StatefulWidget {
-  final Function(double) onSubmit;
+  final Function(double, XFile?) onSubmit;
   final double maxOutstanding;
   const PaymentAlreadyMadeForm({super.key, required this.onSubmit, this.maxOutstanding = 0});
   @override
@@ -612,7 +688,7 @@ class _PaymentAlreadyMadeFormState extends State<PaymentAlreadyMadeForm> {
         }
 
         if (hasError) return false;
-        widget.onSubmit(amt);
+        widget.onSubmit(amt, _imageFile);
         return true;
       },
       child: Column(
@@ -647,7 +723,7 @@ class _PaymentAlreadyMadeFormState extends State<PaymentAlreadyMadeForm> {
 
 // 4. Dispute
 class DisputeForm extends StatefulWidget {
-  final Function(double, String) onSubmit;
+  final Function(double, String, XFile?) onSubmit;
   final double maxOutstanding;
   const DisputeForm({super.key, required this.onSubmit, this.maxOutstanding = 0});
   @override
@@ -686,7 +762,7 @@ class _DisputeFormState extends State<DisputeForm> {
         }
 
         if (hasError) return false;
-        widget.onSubmit(amt, _reasonCtrl.text.trim());
+        widget.onSubmit(amt, _reasonCtrl.text.trim(), _imageFile);
         return true;
       },
       child: Column(
@@ -720,7 +796,7 @@ class _DisputeFormState extends State<DisputeForm> {
 
 // 5. Internal Action
 class InternalActionForm extends StatefulWidget {
-  final Function(String) onSubmit;
+  final Function(String, XFile?) onSubmit;
   const InternalActionForm({super.key, required this.onSubmit});
   @override
   State<InternalActionForm> createState() => _InternalActionFormState();
@@ -730,6 +806,7 @@ class _InternalActionFormState extends State<InternalActionForm> {
   String _dependency = 'Updated Ledger Required';
   final _otherCtrl = TextEditingController();
   String? _otherError;
+  XFile? _attachment;
 
   @override
   Widget build(BuildContext context) {
@@ -741,7 +818,7 @@ class _InternalActionFormState extends State<InternalActionForm> {
           setState(() => _otherError = 'Please enter the dependency');
           return false;
         }
-        widget.onSubmit(_dependency == 'Other' ? _otherCtrl.text.trim() : _dependency);
+        widget.onSubmit(_dependency == 'Other' ? _otherCtrl.text.trim() : _dependency, _attachment);
         return true;
       },
       child: Column(
@@ -769,7 +846,103 @@ class _InternalActionFormState extends State<InternalActionForm> {
               maxLines: 2,
             ),
           ],
+          const SizedBox(height: 16),
+          OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(
+              foregroundColor: _attachment != null ? AppTheme.accentEmerald : null,
+              minimumSize: const Size.fromHeight(46),
+            ),
+            onPressed: () async {
+              final f = await _pickEvidenceFile(context);
+              if (f != null) setState(() => _attachment = f);
+            },
+            icon: Icon(_attachment != null ? Icons.check : Icons.attach_file,
+                color: _attachment != null ? AppTheme.accentEmerald : null),
+            label: Text(
+              _attachment != null ? 'Attached: ${_attachment!.name}' : 'Attach photo or PDF (optional)',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (_attachment != null) ...[
+            const SizedBox(height: 10),
+            _AttachmentPreview(file: _attachment!),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: () => setState(() => _attachment = null),
+                child: const Text('Remove', style: TextStyle(fontSize: 12)),
+              ),
+            ),
+          ],
         ],
+      ),
+    );
+  }
+}
+
+/// Small inline preview for a just-picked evidence file: a thumbnail for an
+/// image, a red PDF card for a PDF (which comes back as a bytes-backed
+/// [XFile] with no readable path, so there's nothing to render but the
+/// icon + name).
+class _AttachmentPreview extends StatelessWidget {
+  final XFile file;
+  const _AttachmentPreview({required this.file});
+
+  bool get _isPdf =>
+      file.mimeType == 'application/pdf' ||
+      file.name.toLowerCase().endsWith('.pdf');
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isPdf) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFEF2F2),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: const Color(0xFFFECACA)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.picture_as_pdf, color: Color(0xFFDC2626), size: 30),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(file.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 12.5,
+                          color: Color(0xFF1B2B48))),
+                  const SizedBox(height: 2),
+                  const Text('PDF document attached',
+                      style: TextStyle(fontSize: 10.5, color: Color(0xFFB91C1C))),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    // Image evidence — camera/gallery XFiles have a real path on disk.
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(10),
+      child: Image.file(
+        File(file.path),
+        height: 120,
+        width: double.infinity,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => Container(
+          height: 120,
+          alignment: Alignment.center,
+          color: const Color(0xFFF1F5F9),
+          child: const Icon(Icons.image_outlined, color: Color(0xFF94A3B8), size: 32),
+        ),
       ),
     );
   }
@@ -863,12 +1036,14 @@ class _UnableToCommitFormState extends State<UnableToCommitForm> {
   String _reason = 'Cash flow problem';
   final _notesCtrl = TextEditingController();
   DateTime? _selectedDate;
+  TimeOfDay? _selectedTime;
   String? _notesError;
   String? _dateError;
-  
+
   @override
   Widget build(BuildContext context) {
-    String dateStr = _selectedDate == null ? 'Schedule Next Action Date (Required)' : 'Next Action: ${DateFormat('yyyy-MM-dd').format(_selectedDate!)}';
+    String dateStr = _selectedDate == null ? 'Next Action Date (Required)' : DateFormat('yyyy-MM-dd').format(_selectedDate!);
+    String timeStr = _selectedTime == null ? 'Next Action Time (Required)' : _selectedTime!.format(context);
 
     return BaseOutcomeForm(
       title: 'Unable To Commit',
@@ -879,8 +1054,8 @@ class _UnableToCommitFormState extends State<UnableToCommitForm> {
         });
         bool hasError = false;
 
-        if (_selectedDate == null) {
-          setState(() => _dateError = 'Please select Next Action Date');
+        if (_selectedDate == null || _selectedTime == null) {
+          setState(() => _dateError = 'Please select the Next Action date and time');
           hasError = true;
         }
         if (_reason == 'Other' && _notesCtrl.text.trim().isEmpty) {
@@ -889,7 +1064,9 @@ class _UnableToCommitFormState extends State<UnableToCommitForm> {
         }
 
         if (hasError) return false;
-        widget.onSubmit(_reason, _notesCtrl.text.trim(), _selectedDate!);
+        final when = DateTime(_selectedDate!.year, _selectedDate!.month, _selectedDate!.day,
+            _selectedTime!.hour, _selectedTime!.minute);
+        widget.onSubmit(_reason, _notesCtrl.text.trim(), when);
         return true;
       },
       child: Column(
@@ -911,15 +1088,31 @@ class _UnableToCommitFormState extends State<UnableToCommitForm> {
           const SizedBox(height: 16),
           TextField(controller: _notesCtrl, decoration: InputDecoration(labelText: 'Additional Notes', errorText: _notesError), maxLines: 2),
           const SizedBox(height: 16),
-          OutlinedButton.icon(
-            style: OutlinedButton.styleFrom(foregroundColor: _selectedDate != null ? AppTheme.accentEmerald : null),
-            onPressed: () async {
-              final d = await _pickDate(context);
-              if (d != null) setState(() => _selectedDate = d);
-            }, 
-            icon: Icon(_selectedDate != null ? Icons.check : Icons.calendar_month),
-            label: Text(dateStr),
-          ),
+          Row(children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(foregroundColor: _selectedDate != null ? AppTheme.accentEmerald : null),
+                onPressed: () async {
+                  final d = await _pickDate(context);
+                  if (d != null) setState(() => _selectedDate = d);
+                },
+                icon: Icon(_selectedDate != null ? Icons.check : Icons.calendar_month, size: 18),
+                label: Text(dateStr, overflow: TextOverflow.ellipsis),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(foregroundColor: _selectedTime != null ? AppTheme.accentEmerald : null),
+                onPressed: () async {
+                  final t = await _pickTime(context);
+                  if (t != null) setState(() => _selectedTime = t);
+                },
+                icon: Icon(_selectedTime != null ? Icons.check : Icons.access_time, size: 18),
+                label: Text(timeStr, overflow: TextOverflow.ellipsis),
+              ),
+            ),
+          ]),
           if (_dateError != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(_dateError!, style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12))),
         ],
       ),

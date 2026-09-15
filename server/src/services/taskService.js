@@ -3,6 +3,7 @@ const taskRepository = require('../repositories/taskRepository');
 const customerRepository = require('../repositories/customerRepository');
 const ptpRepository = require('../repositories/ptpRepository');
 const auditRepository = require('../repositories/auditRepository');
+const userRepository = require('../repositories/userRepository');
 const { notifyDecision } = require('./decisionNotify');
 const { NotFoundError, ForbiddenError } = require('../errors/AppError');
 
@@ -71,7 +72,7 @@ async function ensureFollowUpIfNeeded(
       type: 'customerCall',
       customerId,
       ownerId,
-      deadline: deadline ?? addDays(new Date(), 1),
+      deadline: deadline ?? defaultCallDeadline(),
       priority,
       reason: taskReason,
       source,
@@ -119,13 +120,59 @@ async function completeTask(taskId, user) {
       },
       conn
     );
-    await ensureFollowUpIfNeeded(
-      task.customerId,
-      task.ownerId,
-      { reason: `Task "${task.reason}" completed`, auditType: 'TASK_COMPLETED_MONEY_STILL_DUE_REOPENED', source: 'Task Completion Guard' },
-      conn
-    );
   });
+
+  // A salesperson marking a call / visit task "done" WITHOUT recording an
+  // outcome must not break the chase chain — recording an outcome
+  // supersedes the task, so a bare completion means "no outcome". Re-drive
+  // the single `source='Recovery'` task (retarget or adopt this one, never
+  // duplicate) while real money is still actionable. driveRecoveryTask is
+  // now the sole authority for this, replacing the old in-transaction
+  // ensureFollowUpIfNeeded (whose separate `source='Task Completion Guard'`
+  // task collided with the recovery task) — it self-guards on actionable
+  // balance and an open physical visit / RE follow-up, so it is a no-op
+  // when nothing is owed or another step already holds the account.
+  const isSalesperson =
+    !task.ownerId || (await userRepository.findById(task.ownerId))?.role === 'SALESPERSON';
+  if (['customerCall', 'physicalVisit'].includes(task.type) && isSalesperson) {
+    const customer = await customerRepository.findById(task.customerId);
+    const reController = customer && customer.currentRecoveryState === 'RE Control';
+
+    if (task.source === 'No Answer' && customer && Number(customer.totalDue) > 0 && !reController) {
+      // You don't "complete" a No-Answer task, you record an outcome.
+      // A bare completion = "still nothing to record" — put the single
+      // No-Answer task straight back so `sweepNoAnswerCycle` keeps owning
+      // the customer (2-hourly nag → all-day → physical visit → L2). A
+      // generic Recovery task here would bypass that escalation counter.
+      const stillOpen = (await taskRepository.findByCustomer(task.customerId)).some(
+        (t) => t.source === 'No Answer' && !['completed', 'closed', 'cancelled'].includes(t.status)
+      );
+      if (!stillOpen) {
+        await taskRepository.insert({
+          type: 'customerCall',
+          customerId: task.customerId,
+          ownerId: task.ownerId,
+          deadline: new Date(Date.now() + 2 * 60 * 60 * 1000),
+          priority: 'Normal',
+          reason: task.reason,
+          source: 'No Answer',
+        });
+        await auditRepository.record(task.customerId, {
+          type: 'NO_ANSWER_TASK_REOPENED',
+          description: 'No-Answer task was completed with no outcome recorded — re-opened so the non-response cycle keeps running.',
+          actor: 'System',
+          source: 'No Answer',
+        });
+      }
+    } else {
+      const { driveRecoveryTask } = require('./recoveryTaskService');
+      await driveRecoveryTask(task.customerId, {
+        headline: 'Previous task closed with no outcome — call the customer again.',
+        priority: 'Normal',
+        deadlineHour: 21,
+      });
+    }
+  }
 
   return taskRepository.findById(taskId);
 }
@@ -328,4 +375,16 @@ function addDays(date, days) {
   return d;
 }
 
-module.exports = { listForUser, completeTask, requestExtension, approveEdit, rejectEdit, reassignTask, reschedule, markReviewed, ensureFollowUpIfNeeded };
+/**
+ * Default due time for an auto-created "call customer" task: 9:00 PM
+ * (server-local). Today at 21:00 if it's still before then, otherwise
+ * tomorrow at 21:00.
+ */
+function defaultCallDeadline(now = new Date()) {
+  const d = new Date(now);
+  d.setHours(21, 0, 0, 0);
+  if (d <= now) d.setDate(d.getDate() + 1);
+  return d;
+}
+
+module.exports = { listForUser, completeTask, requestExtension, approveEdit, rejectEdit, reassignTask, reschedule, markReviewed, ensureFollowUpIfNeeded, defaultCallDeadline };

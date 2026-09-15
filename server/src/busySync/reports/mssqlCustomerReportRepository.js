@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
-const { sql, mssqlDb } = require('../config/mssqlClient');
+const { sql, mssqlDb, poolForDatabase } = require('../config/mssqlClient');
+const { parentGroupClause } = require('./parentGroupFilter');
 
 const QUERY_PATH = path.resolve(__dirname, 'customerReport.mssql.sql');
 
@@ -11,9 +12,9 @@ const QUERY_PATH = path.resolve(__dirname, 'customerReport.mssql.sql');
  * lastReceiptDate, lastReceiptAmount, amountAlreadyDue, futureDueAmount,
  * age0_30, age31_60, age61_90, age90Plus, maxDaysOverdue,
  * outstandingStatus, mobile, gstNo, address, salesman, salesmanCode,
- * creditDays, creditLimit.
+ * creditDays, creditLimit, branch.
  */
-function mapRow(raw) {
+function mapRow(raw, branchLabel = 'Turning Point') {
   const ledgerClosingBalance = raw.LEDGER_CLOSING_BALANCE ?? 0;
   return {
     customerId: raw.CUSTOMER_ID,
@@ -43,19 +44,26 @@ function mapRow(raw) {
     address: raw.ADDRESS ?? null,
 
     salesman: raw.SALESMAN ?? null,
-    salesmanCode: raw.slesmancode ?? null,
+    salesmanCode: raw.salesmancode ?? null,
 
     creditDays: raw.CREDIT_DAYS ?? null,
     creditLimit: raw.CREDIT_LIMIT ?? null,
+
+    // Not a BUSY column — the query is scoped to one branch database +
+    // PARENTGRP list, so the caller (customerAgeingSync's branch loop)
+    // knows which branch every row belongs to and stamps it here.
+    branch: branchLabel,
   };
 }
 
 /**
- * @param {{ limit?: number, salesmanCode?: number, customerId?: number|string }} [options]
+ * @param {{ limit?: number, salesmanCode?: number, customerId?: number|string,
+ *           database?: string, parentGroups?: string[], branchLabel?: string }} [options]
  */
 async function getCustomers(options = {}) {
-  if (!mssqlDb.isConnected) {
-    await mssqlDb.connect();
+  const conn = options.database ? await poolForDatabase(options.database) : mssqlDb;
+  if (!conn.isConnected) {
+    await conn.connect();
   }
 
   let queryText = fs.readFileSync(QUERY_PATH, 'utf8');
@@ -68,11 +76,13 @@ async function getCustomers(options = {}) {
     queryText = queryText.replace(/^SELECT\b/m, `SELECT TOP (${Number(options.limit)})`);
   }
 
-  const request = mssqlDb.getPool().request();
+  queryText = queryText.replace('/*{{PARENTGRP_FILTER}}*/', parentGroupClause(options.parentGroups));
+
+  const request = conn.getPool().request();
   const filters = [];
   if (options.salesmanCode != null) {
     request.input('salesmanCode', sql.Int, options.salesmanCode);
-    filters.push('AND X.slesmancode = @salesmanCode');
+    filters.push('AND X.salesmancode = @salesmanCode');
   }
   if (options.customerId != null) {
     request.input('customerId', sql.Int, Number(options.customerId));
@@ -81,7 +91,7 @@ async function getCustomers(options = {}) {
   queryText = queryText.replace('/*{{SALESMAN_FILTER}}*/', filters.join(' '));
 
   const result = await request.query(queryText);
-  return result.recordset.map(mapRow);
+  return result.recordset.map((r) => mapRow(r, options.branchLabel));
 }
 
 /** One customer, scoped to a salesman — both filters are applied server-side together, so a salesman can never fetch another's customer by guessing an ID. */

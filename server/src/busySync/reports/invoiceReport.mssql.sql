@@ -50,6 +50,7 @@ INNER JOIN MASTER1 M
     ON M.Code = B.MasterCode1
 WHERE
     M.MasterType = 2
+    /*{{PARENTGRP_FILTER}}*/
     /*{{CUSTOMER_FILTER}}*/
     AND (ABS(B.BillAmount) - ISNULL(A.AdjAmount,0)) > 0
 ORDER BY

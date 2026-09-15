@@ -6,4 +6,8 @@ const list = asyncHandler(async (req, res) => {
   res.json(roster);
 });
 
-module.exports = { list };
+const dismissUnderperformance = asyncHandler(async (req, res) => {
+  res.json(await salesmanService.dismissUnderperformance(req.params.id, req.user));
+});
+
+module.exports = { list, dismissUnderperformance };

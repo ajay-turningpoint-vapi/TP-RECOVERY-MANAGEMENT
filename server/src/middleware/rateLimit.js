@@ -18,6 +18,11 @@ const apiLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   handler,
+  // The SSE stream at /api/events is one long-lived connection; its
+  // reconnect backoff tops out well under the limit, but never let a
+  // retry storm during an outage lock the client out of its own event
+  // feed. (Mounted at '/api', so req.path here is '/events'.)
+  skip: (req) => req.path === '/events',
 });
 
 // Tighter limit specifically on login, keyed by IP — the classic place

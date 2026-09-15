@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:salesman_mobile/v2/models/customer.dart';
+import 'package:salesman_mobile/v2/models/ptp.dart';
+import 'package:salesman_mobile/v2/models/task.dart';
+import 'package:salesman_mobile/widgets/data_loading.dart' show LoadingAppBarStrip;
 import 'package:salesman_mobile/v2/screens/customer_360_screen.dart';
 import 'package:salesman_mobile/v2/stores/app_store.dart';
 import 'package:intl/intl.dart';
@@ -122,11 +125,16 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
   }
 
   String _getInitials(String name) {
-    final parts = name.split(' ');
+    // A blank name (some BUSY-sourced rows have one), a single letter, or a
+    // leading space all used to throw a RangeError here mid-build.
+    final parts =
+        name.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
+    if (parts.isEmpty) return '?';
     if (parts.length > 1) {
       return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
     }
-    return name.substring(0, 2).toUpperCase();
+    final one = parts.first;
+    return (one.length >= 2 ? one.substring(0, 2) : one).toUpperCase();
   }
 
   // Was deriving a fake escalation level from currentRecoveryState string
@@ -203,6 +211,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
         title: Text(widget.title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 20, color: Colors.white)),
         backgroundColor: const Color(0xFF0052CC),
         elevation: 0,
+        bottom: const LoadingAppBarStrip(),
         centerTitle: false,
         iconTheme: const IconThemeData(color: Colors.white),
         actions: [
@@ -337,15 +346,76 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                       // here: Record Outcome stays directly enabled for
                       // those on the customer screen, with no "Edit
                       // Recorded Outcome" step to go through.
+                      // The 3rd No Answer auto-creates a Physical Visit task
+                      // and the salesman's next step is that visit, not
+                      // another call — so this row is done for today: greyed,
+                      // no "New Record Outcome" button.
+                      final hasOpenPhysicalVisit = store.tasks.any((t) =>
+                          t.customerId == c.id &&
+                          t.type == TaskType.physicalVisit &&
+                          t.status != TaskStatus.completed);
+                      final openPtps = store.ptps.where((p) =>
+                          p.customerId == c.id &&
+                          (p.status == PtpStatus.scheduled || p.status == PtpStatus.pendingVerification));
+                      final hasEditablePtp = openPtps.isNotEmpty;
+                      // The salesman's PTP edit is a ONE-TIME action. The
+                      // moment a correction is requested it stays locked
+                      // through the RE's decision (Pending) and after it
+                      // (Approved / Rejected) — only an untouched PTP
+                      // ('none') can still be edited from here.
+                      final ptpCorrectionUsed = openPtps.any((p) =>
+                          p.correctionStatus == 'Pending' ||
+                          p.correctionStatus == 'Approved' ||
+                          p.correctionStatus == 'Rejected');
+                      final ptpCorrectionPending =
+                          openPtps.any((p) => p.correctionStatus == 'Pending');
+                      final canEditPtp = hasEditablePtp && !ptpCorrectionUsed;
+                      final workedToday =
+                          store.recoveryDoneTodayCustomerIds.contains(c.id);
+                      // An open "Recovery" task ("Collect ₹X — record a new
+                      // outcome", raised after a PTP verifies) is live work —
+                      // the row must NOT grey out even if an outcome was
+                      // logged earlier today.
+                      final hasOpenRecoveryTask = store.tasks.any((t) =>
+                          t.customerId == c.id &&
+                          t.source == 'Recovery' &&
+                          t.status != TaskStatus.completed);
+                      // ANY recorded outcome greys the row for the rest of
+                      // the day — Internal Action, Dispute, Payment claim,
+                      // Follow-up, PTP (full or partial) alike. A 3rd No
+                      // Answer's Physical Visit stays LIVE (the salesman must
+                      // visit and record what happened).
                       final isDone = widget.todaysRecoveryView &&
-                          (c.isPendingNoAnswerEdit ||
-                              (c.currentRecoveryState == 'Waiting / Monitoring' && store.recoveryDoneTodayCustomerIds.contains(c.id)));
-                      final editPending = isDone && store.hasPendingOutcomeEdit(c.id);
+                          !hasOpenRecoveryTask &&
+                          !hasOpenPhysicalVisit &&
+                          (c.isPendingNoAnswerEdit || workedToday);
+                      // A scheduled PTP that can STILL be edited (no
+                      // correction used yet) gets the light-blue "promise in
+                      // progress" card with the Edit action. Once the
+                      // one-time edit is spent it's a plain grey done row.
+                      final ptpEditRow = widget.todaysRecoveryView &&
+                          !hasOpenPhysicalVisit &&
+                          canEditPtp;
+                      final editPending =
+                          (isDone || ptpEditRow) && store.hasPendingOutcomeEdit(c.id);
+                      // Edit is offered from here for exactly two recorded
+                      // outcomes: a No Answer (re-record what really happened)
+                      // and a scheduled PTP (adjust amount/date, via RE).
+                      // Every other outcome is final here — ask the RE. A
+                      // Physical Visit taking over supersedes both.
+                      final showOutcomeAction = (isDone || ptpEditRow) &&
+                          !editPending &&
+                          !hasOpenPhysicalVisit &&
+                          (c.isPendingNoAnswerEdit || canEditPtp);
+                      final ptpPartial = ptpEditRow &&
+                          c.currentRecoveryState != 'Waiting / Monitoring';
 
                       return Card(
                         margin: const EdgeInsets.only(bottom: 12),
                         elevation: 0,
-                        color: isDone ? const Color(0xFFF1F3F5) : Colors.white,
+                        color: ptpEditRow
+                            ? const Color(0xFFF8FAFF)
+                            : (isDone ? const Color(0xFFF1F3F5) : Colors.white),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(16),
                           side: BorderSide(color: Colors.grey.withOpacity(0.15)),
@@ -359,7 +429,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                             final money = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
                             final highlight = widget.highlightAmountByCustomerId?[c.id];
                             return Opacity(
-                              opacity: isDone ? 0.55 : 1.0,
+                              opacity: (isDone && !ptpEditRow) ? 0.55 : 1.0,
                               child: Padding(
                               padding: const EdgeInsets.all(16.0),
                               child: Column(
@@ -458,10 +528,74 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                                       ],
                                     ],
                                   ),
-                                  if (isDone) ...[
+                                  if (hasOpenPhysicalVisit && !editPending) ...[
                                     const SizedBox(height: 10),
                                     const Divider(height: 1, color: Color(0xFFEDF2F7)),
                                     const SizedBox(height: 8),
+                                    const Row(
+                                      children: [
+                                        Icon(Icons.directions_walk, size: 15, color: Color(0xFFE53935)),
+                                        SizedBox(width: 6),
+                                        Expanded(
+                                          child: Text('Physical visit required — non-response threshold reached. Visit, then record what happened.',
+                                              style: TextStyle(fontSize: 11.5, color: Color(0xFFE53935), fontWeight: FontWeight.w600)),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Align(
+                                      alignment: Alignment.centerLeft,
+                                      child: OutlinedButton.icon(
+                                        onPressed: () => Navigator.push(context, MaterialPageRoute(
+                                            builder: (_) => Customer360Screen(customer: c, editOutcome: true))),
+                                        icon: const Icon(Icons.add_circle_outline, size: 18),
+                                        label: const Text('Record Visit Outcome'),
+                                        style: OutlinedButton.styleFrom(
+                                          foregroundColor: const Color(0xFF0052CC),
+                                          side: const BorderSide(color: Color(0xFF0052CC)),
+                                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                  // One-time PTP edit already spent — locked
+                                  // through the RE's decision and after it.
+                                  if (!ptpEditRow && !hasOpenPhysicalVisit && ptpCorrectionPending) ...[
+                                    const SizedBox(height: 10),
+                                    const Divider(height: 1, color: Color(0xFFEDF2F7)),
+                                    const SizedBox(height: 8),
+                                    const Row(
+                                      children: [
+                                        Icon(Icons.lock_clock, size: 14, color: Color(0xFF8A6D0B)),
+                                        SizedBox(width: 6),
+                                        Expanded(
+                                          child: Text('PTP correction sent — awaiting RE decision. No further edits.',
+                                              style: TextStyle(fontSize: 11.5, color: Color(0xFF8A6D0B), fontWeight: FontWeight.w600)),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                  if (!hasOpenPhysicalVisit && (editPending || showOutcomeAction)) ...[
+                                    const SizedBox(height: 10),
+                                    const Divider(height: 1, color: Color(0xFFEDF2F7)),
+                                    const SizedBox(height: 8),
+                                    if (ptpEditRow && !editPending && !c.isPendingNoAnswerEdit) ...[
+                                      Row(
+                                        children: [
+                                          const Icon(Icons.hourglass_bottom, size: 14, color: Color(0xFF0052CC)),
+                                          const SizedBox(width: 6),
+                                          Expanded(
+                                            child: Text(
+                                                ptpPartial
+                                                    ? 'Promise recorded — still recovering the uncovered balance.'
+                                                    : 'Promise to Pay recorded — awaiting the payment date.',
+                                                style: const TextStyle(fontSize: 11.5, color: Color(0xFF0052CC), fontWeight: FontWeight.w600)),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 8),
+                                    ],
                                     if (editPending)
                                       Container(
                                         width: double.infinity,
@@ -469,6 +603,22 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                                         decoration: BoxDecoration(color: const Color(0xFFFFF7ED), borderRadius: BorderRadius.circular(8)),
                                         child: const Text('Outcome edit pending — awaiting RE review.',
                                             style: TextStyle(fontSize: 11.5, color: Color(0xFFC2410C), fontWeight: FontWeight.w600)),
+                                      )
+                                    else if (c.isPendingNoAnswerEdit)
+                                      Align(
+                                        alignment: Alignment.centerLeft,
+                                        child: OutlinedButton.icon(
+                                          onPressed: () => Navigator.push(context, MaterialPageRoute(
+                                              builder: (_) => Customer360Screen(customer: c, editOutcome: true))),
+                                          icon: const Icon(Icons.add_circle_outline, size: 18),
+                                          label: const Text('New Record Outcome'),
+                                          style: OutlinedButton.styleFrom(
+                                            foregroundColor: const Color(0xFF0052CC),
+                                            side: const BorderSide(color: Color(0xFF0052CC)),
+                                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                          ),
+                                        ),
                                       )
                                     else
                                       Align(

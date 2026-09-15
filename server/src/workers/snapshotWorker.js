@@ -1,7 +1,7 @@
 const { Worker } = require('bullmq');
 const { connection } = require('../config/redis');
 const env = require('../config/env');
-const { withTransaction, ping: pingDb } = require('../config/db');
+const { ping: pingDb } = require('../config/db');
 const { QUEUE_NAME } = require('../queues/snapshotQueue');
 const customerRepository = require('../repositories/customerRepository');
 const ptpRepository = require('../repositories/ptpRepository');
@@ -10,7 +10,6 @@ const auditRepository = require('../repositories/auditRepository');
 const metricsRepository = require('../repositories/metricsRepository');
 const salesmanService = require('../services/salesmanService');
 const scoringService = require('../services/scoringService');
-const taskService = require('../services/taskService');
 const notificationRepository = require('../repositories/notificationRepository');
 const logger = require('../config/logger');
 
@@ -53,72 +52,47 @@ async function recordDailyMetrics(customers) {
 }
 
 /**
- * The 5 PM control-batch snapshot: a safety net over the whole customer
- * book, not just the customer a single request happens to be touching.
- * Anything left with money due and no open task/PTP — a broken PTP that
- * never got a follow-up task, a manually-edited record, anything — gets
- * one created here, same guard as `taskService.completeTask`.
+ * The 5 PM control-batch snapshot is PERMANENTLY PAUSED as a recovery
+ * actor. It used to auto-create a "no open action" follow-up task for
+ * every at-risk customer once a day, every day — hundreds of tasks nobody
+ * worked. That half is gone: the ONLY nightly recovery backstop is
+ * `recoveryReconcileService.reconcileAll` (runs after the noon BUSY sync),
+ * which retargets the single `source='Recovery'` task and never mass-creates.
  *
- * Runs one customer per transaction rather than one big transaction, so a
- * problem with a single customer can't roll back the whole batch.
+ * All this job does now is record one row of today's company-wide trend
+ * metrics (`recordDailyMetrics`). It touches no tasks and no customer
+ * state. It is also not scheduled or started by `worker.js` — it stays
+ * here only so the trends report has a way to be refreshed if wanted.
  */
 async function runSnapshot() {
   await pingDb();
   const customers = await customerRepository.findAll();
-  const atRisk = customers.filter((c) => c.totalDue > 0);
-
-  let reopenedCount = 0;
-  for (const customer of atRisk) {
-    try {
-      const reopened = await withTransaction((conn) =>
-        taskService.ensureFollowUpIfNeeded(
-          customer.id,
-          null,
-          {
-            reason: '5 PM control snapshot found no open action',
-            auditType: 'SNAPSHOT_REOPENED_RECOVERY',
-            source: 'Daily Snapshot',
-          },
-          conn
-        )
-      );
-      if (reopened) reopenedCount += 1;
-    } catch (err) {
-      logger.error('Snapshot failed for customer', { customerId: customer.id, message: err.message });
-    }
-  }
-
   await recordDailyMetrics(customers);
+  const checked = customers.filter((c) => c.totalDue > 0).length;
 
   await notificationRepository.insert({
-    severity: reopenedCount > 0 ? 'warning' : 'info',
-    title: '5 PM control snapshot complete',
-    body: `Checked ${atRisk.length} customer(s) with money due. Reopened recovery on ${reopenedCount} that had no open task or PTP.`,
+    severity: 'info',
+    title: 'Daily trend metrics recorded',
+    body: `Recorded today's company-wide recovery metrics across ${checked} customer(s) with money due. No tasks or customer state were changed.`,
   });
 
-  logger.info('Daily snapshot complete', { checked: atRisk.length, reopened: reopenedCount });
-  return { checked: atRisk.length, reopened: reopenedCount };
+  logger.info('Daily metrics snapshot complete', { checked });
+  return { checked, metricsRecorded: true };
 }
 
 function createSnapshotWorker() {
   const worker = new Worker(QUEUE_NAME, async () => runSnapshot(), { connection, prefix: env.redis.prefix, concurrency: 1 });
 
   worker.on('failed', (job, err) => {
-    logger.error('Snapshot job failed', { jobId: job?.id, message: err.message });
-
-    // Same reasoning as busySyncWorker's failure notification: 'failed'
-    // fires on every attempt, so only alert once retries are exhausted —
-    // a run that throws before reaching its own success-notification never
-    // tells anyone anything otherwise (no reopened-recovery safety net ran
-    // today, silently).
+    logger.error('Snapshot (metrics) job failed', { jobId: job?.id, message: err.message });
     const attemptsMade = job?.attemptsMade ?? 0;
     const maxAttempts = job?.opts?.attempts ?? 1;
     if (job && attemptsMade >= maxAttempts) {
       notificationRepository
         .insert({
-          severity: 'critical',
-          title: '5 PM control snapshot failed',
-          body: `The daily 5 PM control-batch snapshot failed after ${attemptsMade} attempt(s): ${err.message}. Today's automatic "no open action" safety-net check did not run.`,
+          severity: 'warning',
+          title: 'Daily trend metrics not recorded',
+          body: `The daily metrics snapshot failed after ${attemptsMade} attempt(s): ${err.message}. Trend history has a gap for today.`,
         })
         .catch((notifyErr) => {
           logger.error('Failed to record snapshot failure notification', { message: notifyErr.message });

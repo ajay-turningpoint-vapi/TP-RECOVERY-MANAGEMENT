@@ -1,5 +1,6 @@
 const { enqueueNotification } = require('../queues/notificationQueue');
 const customerRepository = require('../repositories/customerRepository');
+const { emitChange, RESOURCE_ALL } = require('../realtime/eventBus');
 
 /**
  * Fire-and-forget in-app notification to one salesperson about an RE
@@ -13,6 +14,12 @@ const customerRepository = require('../repositories/customerRepository');
  */
 async function notifyDecision(userId, { title, body, customerId = null, approved }) {
   if (!userId) return;
+  // The generic post-write hook (middleware/emitOnWrite.js) already tells
+  // every RE/Manager client. This adds the affected SALESPERSON to the
+  // fan-out for an RE decision on their artifact (new task, status change,
+  // reduced balance) — the emitOnWrite hook can't, since its req.user is
+  // the RE, not this salesman.
+  emitChange(RESOURCE_ALL, { customerId, salesmanId: userId, reason: 'decision' });
   try {
     await enqueueNotification({
       userId,

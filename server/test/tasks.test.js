@@ -19,9 +19,10 @@ after(async () => {
   await teardownAll(app);
 });
 
-test('completing a task does NOT auto-reopen recovery when an active PTP already covers the customer', async () => {
+test('completing a task with a PTP covering only part of the balance keeps a recovery task for the uncovered remainder', async () => {
   const token = await login(app.baseUrl, 'rahul');
-  // Seed: C1 has task T1 and an active (scheduled) PTP P1.
+  // Seed: C1 owes 400000, has task T1 and an active (scheduled) PTP P1 for
+  // 150000 — so 250000 is still the salesperson's to recover.
   const before1 = await tasksFor(token);
   const t1 = before1.find((t) => t.id === 'T1');
   assert.equal(t1.status, 'pending');
@@ -32,7 +33,11 @@ test('completing a task does NOT auto-reopen recovery when an active PTP already
 
   const after1 = await tasksFor(token);
   const openForC1 = after1.filter((t) => t.customerId === 'C1' && t.status !== 'completed' && t.status !== 'closed');
-  assert.equal(openForC1.length, 0, 'an active PTP should prevent the completion guard from creating a redundant follow-up task');
+  // A partial PTP no longer parks the whole customer — driveRecoveryTask
+  // keeps the single `source='Recovery'` call task on the uncovered slice.
+  assert.equal(openForC1.length, 1);
+  assert.equal(openForC1[0].source, 'Recovery');
+  assert.equal(openForC1[0].type, 'customerCall');
 });
 
 test('completing the last open task with money still due and no active PTP reopens recovery', async () => {
@@ -55,11 +60,11 @@ test('completing the last open task with money still due and no active PTP reope
   assert.equal(completeRes.status, 200);
 
   const afterTasks = await tasksFor(token);
-  const reopened = afterTasks.find((t) => t.customerId === 'C3' && t.status !== 'completed' && t.source === 'Task Completion Guard');
-  assert.ok(reopened, 'C3 still has ₹45,000 due with nothing else open — completion guard should have created a follow-up');
+  const reopened = afterTasks.find((t) => t.customerId === 'C3' && t.status !== 'completed' && t.source === 'Recovery');
+  assert.ok(reopened, 'C3 still has ₹45,000 due with nothing else open — driveRecoveryTask should have created the recovery call task');
 
   const detail = await fetch(`${app.baseUrl}/api/customers/C3`, { headers: authHeaders(token) }).then((r) => r.json());
-  assert.ok(detail.auditHistory.some((e) => e.type === 'TASK_COMPLETED_MONEY_STILL_DUE_REOPENED'));
+  assert.ok(detail.auditHistory.some((e) => e.type === 'RECOVERY_TASK_CREATED'));
 });
 
 test('a salesperson cannot complete another salesperson\'s task', async () => {

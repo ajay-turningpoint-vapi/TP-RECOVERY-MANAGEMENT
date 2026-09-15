@@ -2,12 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:salesman_mobile/v2/stores/app_store.dart';
-import 'package:salesman_mobile/v3/screens/request_detail_scaffold.dart' show taskTypeLabel;
-import 'package:salesman_mobile/v3/screens/dispute_review_screen.dart';
+import 'package:salesman_mobile/v3/screens/dispute_detail_screen.dart';
 import 'package:salesman_mobile/v3/screens/ptp_correction_review_screen.dart';
-import 'package:salesman_mobile/v3/screens/task_extension_review_screen.dart';
 import 'package:salesman_mobile/v3/screens/outcome_edit_detail_screen.dart';
 import 'package:salesman_mobile/v3/screens/outcome_edit_review_screen.dart';
+import 'package:salesman_mobile/widgets/app_message.dart';
 
 const _bg = Color(0xFFF8FAFC);
 const _dark = Color(0xFF0F172A);
@@ -26,14 +25,70 @@ class _ApprovalItem {
   _ApprovalItem({required this.type, required this.color, required this.title, required this.subtitle, required this.amount, required this.critical, required this.onTap});
 }
 
+/// Verify / fail a "Payment Already Made" claim inline — the RE's only
+/// action on it (reconcile against BUSY), same as the task-detail path.
+void _verifyClaimSheet(BuildContext context, AppStore store, Map<String, dynamic> claim) {
+  showModalBottomSheet<void>(
+    context: context,
+    builder: (sheetCtx) {
+      return SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('${claim['customer'] ?? ''} — ${_rupee.format((claim['amount'] as num?) ?? 0)}',
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: _dark)),
+              const SizedBox(height: 4),
+              const Text('Reconcile this claimed payment against BUSY.',
+                  style: TextStyle(fontSize: 12.5, color: _muted)),
+              const SizedBox(height: 18),
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF16A34A), foregroundColor: Colors.white),
+                icon: const Icon(Icons.check_circle_outline, size: 18),
+                label: const Text('Verify Deposit'),
+                onPressed: () async {
+                  final rootNav = Navigator.of(context);
+                  Navigator.of(sheetCtx).pop();
+                  try {
+                    await store.verifyPaymentClaim(claim['id'] as String, true);
+                    showAppMessageAfter(rootNav, message: 'Payment verified — balance reduced.');
+                  } catch (e) {
+                    showAppMessageAfter(rootNav, message: 'Could not verify: $e', isError: true);
+                  }
+                },
+              ),
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(foregroundColor: const Color(0xFFDC2626), side: const BorderSide(color: Color(0xFFDC2626))),
+                icon: const Icon(Icons.cancel_outlined, size: 18),
+                label: const Text('Fail Verification'),
+                onPressed: () async {
+                  final rootNav = Navigator.of(context);
+                  Navigator.of(sheetCtx).pop();
+                  try {
+                    await store.verifyPaymentClaim(claim['id'] as String, false);
+                    showAppMessageAfter(rootNav, message: 'Claim failed — customer returned to recovery.');
+                  } catch (e) {
+                    showAppMessageAfter(rootNav, message: 'Could not verify: $e', isError: true);
+                  }
+                },
+              ),
+            ],
+          ),
+        ),
+      );
+    },
+  );
+}
+
 /// Every pending "salesperson asked for a decision" item across the app —
-/// disputes awaiting review, PTP correction requests, task extension
-/// requests, outcome edit requests, and outcome correction requests —
-/// brought together into one real list instead of five separate places an
-/// RE would otherwise have to check one at a time. `onlyCritical` narrows
-/// it to the subset already flagged high-priority or tied to an escalated
-/// account — nothing is invented here, every item routes straight to its
-/// own existing review screen (same Approve/Reject flow as always).
+/// disputes awaiting review, PTP correction / outcome edit / outcome
+/// correction requests, and payment-claim verifications — in one list
+/// instead of several places the RE would check one at a time.
+/// `onlyCritical` narrows it to items flagged high-priority or tied to an
+/// escalated account; every item routes to its existing review flow.
 class ApprovalsListScreen extends StatelessWidget {
   final bool onlyCritical;
   const ApprovalsListScreen({super.key, this.onlyCritical = false});
@@ -51,7 +106,7 @@ class ApprovalsListScreen extends StatelessWidget {
 
     final items = <_ApprovalItem>[];
 
-    for (final d in store.disputes) {
+    for (final d in store.visibleDisputes) {
       if (d['status'] != 'Pending Approval') continue;
       final priority = (d['priority'] as String?) ?? 'Medium';
       items.add(_ApprovalItem(
@@ -61,7 +116,7 @@ class ApprovalsListScreen extends StatelessWidget {
         subtitle: 'Dispute · ${d['reason'] ?? '-'}',
         amount: _rupee.format((d['amount'] as num?) ?? 0),
         critical: priority == 'High',
-        onTap: () => go(DisputeReviewScreen(disputeId: d['id'] as String)),
+        onTap: () => go(DisputeDetailScreen(disputeId: d['id'] as String)),
       ));
     }
 
@@ -75,19 +130,6 @@ class ApprovalsListScreen extends StatelessWidget {
         amount: _rupee.format(p.amountPromised),
         critical: customerEscalated(p.customerId),
         onTap: () => go(PtpCorrectionReviewScreen(ptpId: p.id)),
-      ));
-    }
-
-    for (final t in store.tasks) {
-      if (t.approvalStatus != 'Pending') continue;
-      items.add(_ApprovalItem(
-        type: 'TASK EXTENSION',
-        color: const Color(0xFFB45309),
-        title: t.customerName,
-        subtitle: '${taskTypeLabel(t.type)} · requested by ${store.salesmanDisplayName(t.ownerId)}',
-        amount: t.pendingDeadline != null ? DateFormat('dd MMM yyyy').format(t.pendingDeadline!) : '-',
-        critical: t.priority == 'Critical' || t.priority == 'High',
-        onTap: () => go(TaskExtensionReviewScreen(taskId: t.id)),
       ));
     }
 
@@ -112,6 +154,19 @@ class ApprovalsListScreen extends StatelessWidget {
         amount: DateFormat('dd MMM yyyy').format(r.requestedAt),
         critical: customerEscalated(r.customerId),
         onTap: () => go(OutcomeEditReviewScreen(requestId: r.id)),
+      ));
+    }
+
+    for (final p in store.pendingPaymentClaims) {
+      final cid = '${p['customerCode']}';
+      items.add(_ApprovalItem(
+        type: 'PAYMENT CLAIM',
+        color: const Color(0xFF16A34A),
+        title: (p['customer'] as String?) ?? cid,
+        subtitle: 'Payment Already Made · claimed ${p['date'] ?? ''}',
+        amount: _rupee.format((p['amount'] as num?) ?? 0),
+        critical: customerEscalated(cid),
+        onTap: () => _verifyClaimSheet(context, store, p),
       ));
     }
 

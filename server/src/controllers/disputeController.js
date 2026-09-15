@@ -6,5 +6,14 @@ const approve = asyncHandler(async (req, res) => res.json(await disputeService.a
 const reject = asyncHandler(async (req, res) => res.json(await disputeService.reject(req.params.id, req.user, req.body.reason)));
 const requestInfo = asyncHandler(async (req, res) => res.json(await disputeService.requestInfo(req.params.id, req.user, req.body)));
 const resolve = asyncHandler(async (req, res) => res.json(await disputeService.resolve(req.params.id, req.user, req.body)));
+const answerClarification = asyncHandler(async (req, res) =>
+  res.json(await disputeService.answerClarification(req.params.id, req.user, req.body))
+);
+const postMessage = asyncHandler(async (req, res) =>
+  res.json(await disputeService.postMessage(req.params.id, req.user, req.body))
+);
+const resolveByOwner = asyncHandler(async (req, res) =>
+  res.json(await disputeService.resolveByOwner(req.params.id, req.user, req.body))
+);
 
-module.exports = { list, approve, reject, requestInfo, resolve };
+module.exports = { list, approve, reject, requestInfo, resolve, answerClarification, postMessage, resolveByOwner };

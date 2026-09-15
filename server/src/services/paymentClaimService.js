@@ -1,8 +1,8 @@
 const paymentClaimRepository = require('../repositories/paymentClaimRepository');
 const customerRepository = require('../repositories/customerRepository');
 const auditRepository = require('../repositories/auditRepository');
-const taskService = require('./taskService');
 const { notifyDecision, salesmanForCustomer } = require('./decisionNotify');
+const { driveRecoveryTask, rupees } = require('./recoveryTaskService');
 const { withTransaction } = require('../config/db');
 const { NotFoundError } = require('../errors/AppError');
 
@@ -69,29 +69,19 @@ async function verify(claimId, user, success) {
     customerId: claim.customerId,
   });
 
-  // Whichever way this was decided, the customer needs to be told —
-  // never let this go silent. Post-commit, best-effort, same pattern as
-  // ptpService.reopenRecoveryAfterPtpOutcome. requireDueBalance: false —
-  // this is about informing the customer of the decision, not chasing a
-  // balance, so it fires regardless of what's still due.
-  await withTransaction(async (conn) => {
-    const created = await taskService.ensureFollowUpIfNeeded(
-      claim.customerId,
-      null,
-      {
-        reason: success ? 'Payment claim verified' : 'Payment claim rejected — no matching BUSY deposit found',
-        auditType: success ? 'PAYMENT_CLAIM_VERIFIED_FOLLOWUP' : 'PAYMENT_CLAIM_REJECTED_FOLLOWUP',
-        source: 'Payment Claim Review',
-        priority: success ? 'Normal' : 'High',
-        note: `${user.fullName} ${success ? 'verified' : 'rejected'} the ₹${claim.amount.toFixed(0)} payment claim (ref: ${claim.reference}).`,
-        attachmentPath: claim.attachmentPath,
-        requireDueBalance: false,
-      },
-      conn
-    );
-    if (created) {
-      await customerRepository.update(claim.customerId, { currentRecoveryState: 'Action Required', primaryNextAction: 'CALL CUSTOMER' }, conn);
-    }
+  // Drive the ONE recovery task to what the customer still owes now:
+  //   Approve → payment posted, totalDue already dropped → "collect the rest"
+  //   Reject  → nothing posted → "collect the full outstanding"
+  // Both close any RE / prior task and open a fresh salesperson call task
+  // due 9 PM today (the RE-decision default deadline). While that task is
+  // open the app re-enables Record Outcome for this customer.
+  const headline = success
+    ? `Payment of ${rupees(claim.amount)} verified.`
+    : `Payment of ${rupees(claim.amount)} could NOT be verified — no matching BUSY receipt.`;
+  await driveRecoveryTask(claim.customerId, {
+    headline,
+    priority: success ? 'Normal' : 'High',
+    deadlineHour: 21,
   });
 
   return paymentClaimRepository.findById(claimId);

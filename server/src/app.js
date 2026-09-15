@@ -7,6 +7,7 @@ const env = require('./config/env');
 const requestLogger = require('./middleware/requestLogger');
 const { notFoundHandler, errorHandler } = require('./middleware/errorHandler');
 const { apiLimiter } = require('./middleware/rateLimit');
+const emitOnWrite = require('./middleware/emitOnWrite');
 const routes = require('./routes');
 
 /**
@@ -58,10 +59,19 @@ function createApp() {
     }
     next();
   });
-  app.use(compression());
+  // compression() buffers/gzips the response body — fatal for the SSE
+  // stream at /api/events, which must flush each event immediately.
+  app.use(
+    compression({
+      filter: (req, res) => req.path !== '/api/events' && compression.filter(req, res),
+    })
+  );
   app.use(express.json({ limit: '2mb' }));
   app.use(requestLogger);
   app.use('/api', apiLimiter);
+  // Fan a real-time "your lists changed" event to connected clients after
+  // every successful mutating /api request (post-response, never blocks it).
+  app.use('/api', emitOnWrite);
 
   // BUSY sync status/controls dashboard — a MANAGEMENT-gated static page;
   // its data calls go through /api/busy-sync/*, which enforce auth

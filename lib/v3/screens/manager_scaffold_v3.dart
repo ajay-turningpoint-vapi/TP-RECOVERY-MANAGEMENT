@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:salesman_mobile/v2/stores/app_store.dart';
 import 'package:salesman_mobile/v3/screens/manager_dashboard_screen.dart';
 import 'package:salesman_mobile/v3/screens/company_recovery_queue_screen.dart';
 import 'package:salesman_mobile/v3/screens/manager_tasks_screen.dart';
 import 'package:salesman_mobile/v3/screens/manager_reports_screen.dart';
 import 'package:salesman_mobile/v3/screens/manager_profile_screen.dart';
+import 'package:salesman_mobile/widgets/data_loading.dart' show InitialDataLoader;
 
 /// Manager's fixed bottom navigation: Dashboard, Customers, Tasks, Reports,
 /// Profile.
@@ -17,7 +20,10 @@ class ManagerScaffoldV3 extends StatefulWidget {
 class _ManagerScaffoldV3State extends State<ManagerScaffoldV3> {
   int _currentIndex = 0;
 
-  void _goTo(int index) => setState(() => _currentIndex = index);
+  void _goTo(int index) {
+    setState(() => _currentIndex = index);
+    context.read<AppStore>().refreshLiveData();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -31,7 +37,9 @@ class _ManagerScaffoldV3State extends State<ManagerScaffoldV3> {
 
     return Scaffold(
       body: SafeArea(
-        child: IndexedStack(index: _currentIndex, children: pages),
+        child: InitialDataLoader(
+          child: IndexedStack(index: _currentIndex, children: pages),
+        ),
       ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,

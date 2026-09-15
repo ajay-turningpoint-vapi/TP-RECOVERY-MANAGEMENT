@@ -4,7 +4,9 @@ const { pool: mariaDbPool } = require('../../config/db');
 const mssqlCustomerReportRepository = require('../reports/mssqlCustomerReportRepository');
 const { syncSnapshot } = require('../repositories/customerAgeingRepository');
 const { upsertFromBusy } = require('../../repositories/customerRepository');
+const { upsertBusySalesmen } = require('../../repositories/salesmanRepository');
 const { startRun, completeRun } = require('../repositories/syncRunsRepository');
+const { BRANCHES } = require('../config/branches');
 const syncLockService = require('../../services/syncLockService');
 
 // MySQL/MariaDB named lock — atomic, unlike a "check sync_runs then INSERT"
@@ -15,8 +17,8 @@ const syncLockService = require('../../services/syncLockService');
 // future CLI all calling in at once), not just within one Node process.
 const LOCK_NAME = 'busy_sync_customer_ageing';
 
-/** @type {{ phase: 'idle'|'connecting'|'fetching'|'writing', runId: number|null, rowsFetched: number|null }} */
-let progress = { phase: 'idle', runId: null, rowsFetched: null };
+/** @type {{ phase: 'idle'|'connecting'|'fetching'|'writing', runId: number|null, rowsFetched: number|null, branch: string|null }} */
+let progress = { phase: 'idle', runId: null, rowsFetched: null, branch: null };
 
 function getSyncProgress() {
   return progress;
@@ -105,54 +107,82 @@ async function runLockedInner() {
   // Date carries milliseconds — floor to whole seconds so the value we
   // write to last_synced_at and the value we later compare against in the
   // sweep DELETE are byte-for-byte the same, and freshly-upserted rows are
-  // never mistaken for stale ones.
+  // never mistaken for stale ones. Shared across all branches in this run.
   const startedAt = new Date(Math.floor(Date.now() / 1000) * 1000);
-  const runId = await startRun(startedAt);
-  logger.info(`[busy-sync] customer_ageing run #${runId} started at ${startedAt.toISOString()}`);
-  progress = { phase: 'connecting', runId, rowsFetched: null };
 
-  try {
-    progress = { phase: 'fetching', runId, rowsFetched: null };
-    const rows = await withRetry('BUSY customer report fetch', () => mssqlCustomerReportRepository.getCustomers());
+  const branchErrors = [];
+  const runIds = [];
 
-    progress = { phase: 'writing', runId, rowsFetched: rows.length };
-    // Two independent stages: the raw disposable mirror (staging/audit,
-    // hard-delete sweep) and the real RMS customers table (soft-deactivate
-    // — see customerRepository.upsertFromBusy's doc comment for why).
-    // Each is its own transaction; a failure in one doesn't corrupt the
-    // other, and both are safely re-run by the next sync attempt either way.
-    const { upserted, deleted } = await syncSnapshot(rows, startedAt);
-    const { deactivated } = await upsertFromBusy(rows, startedAt);
+  for (const branch of BRANCHES) {
+    const runId = await startRun(startedAt, branch.label);
+    runIds.push(runId);
     logger.info(
-      `[busy-sync] customer_ageing run #${runId}: customers table — ${rows.length} upserted, ${deactivated} deactivated.`
+      `[busy-sync] customer_ageing run #${runId} (${branch.label}) started at ${startedAt.toISOString()}`
     );
+    progress = { phase: 'connecting', runId, rowsFetched: null, branch: branch.label };
 
-    await completeRun(runId, {
-      status: 'success',
-      finishedAt: new Date(),
-      rowsFetched: rows.length,
-      rowsUpserted: upserted,
-      rowsDeleted: deleted,
-    });
+    try {
+      progress = { phase: 'fetching', runId, rowsFetched: null, branch: branch.label };
+      const rows = await withRetry(`BUSY customer report fetch (${branch.label})`, () =>
+        mssqlCustomerReportRepository.getCustomers({
+          database: branch.database,
+          parentGroups: branch.parentGroups,
+          branchLabel: branch.label,
+        })
+      );
 
-    logger.info(
-      `[busy-sync] customer_ageing run #${runId} succeeded: fetched ${rows.length}, upserted ${upserted}, deleted ${deleted}.`
-    );
-    return { ran: true, runId };
-  } catch (err) {
-    logger.error(`[busy-sync] customer_ageing run #${runId} failed: ${err.message}`, { stack: err.stack });
-    await completeRun(runId, {
-      status: 'failed',
-      finishedAt: new Date(),
-      rowsFetched: 0,
-      rowsUpserted: 0,
-      rowsDeleted: 0,
-      errorMessage: err.message || String(err),
-    });
-    throw err;
-  } finally {
-    progress = { phase: 'idle', runId: null, rowsFetched: null };
+      progress = { phase: 'writing', runId, rowsFetched: rows.length, branch: branch.label };
+      // Two independent stages: the raw disposable mirror (staging/audit,
+      // hard-delete sweep) and the real RMS customers table (soft-deactivate
+      // — see customerRepository.upsertFromBusy's doc comment for why).
+      // Each is its own transaction, each sweep scoped to this branch.
+      const { upserted, deleted } = await syncSnapshot(rows, startedAt, branch.label);
+      // Roster first: the distinct (salesmanCode, salesman name) pairs on the
+      // feed ARE the SALESPERSON roster now. Run before upsertFromBusy so the
+      // brand-new salesman rows exist when it resolves customer ->
+      // assigned_salesman_id by busy_salesman_code in the same run.
+      const { created: salesmenCreated, renamed: salesmenRenamed } = await upsertBusySalesmen(rows, branch);
+      const { deactivated } = await upsertFromBusy(rows, startedAt, branch);
+      logger.info(
+        `[busy-sync] customer_ageing run #${runId} (${branch.label}): customers — ${rows.length} upserted, ` +
+          `${deactivated} deactivated; salesmen — ${salesmenCreated} created, ${salesmenRenamed} renamed.`
+      );
+
+      await completeRun(runId, {
+        status: 'success',
+        finishedAt: new Date(),
+        rowsFetched: rows.length,
+        rowsUpserted: upserted,
+        rowsDeleted: deleted,
+      });
+      logger.info(
+        `[busy-sync] customer_ageing run #${runId} (${branch.label}) succeeded: fetched ${rows.length}, ` +
+          `upserted ${upserted}, deleted ${deleted}.`
+      );
+    } catch (err) {
+      logger.error(
+        `[busy-sync] customer_ageing run #${runId} (${branch.label}) failed: ${err.message}`,
+        { stack: err.stack }
+      );
+      await completeRun(runId, {
+        status: 'failed',
+        finishedAt: new Date(),
+        rowsFetched: 0,
+        rowsUpserted: 0,
+        rowsDeleted: 0,
+        errorMessage: err.message || String(err),
+      });
+      branchErrors.push(branch.label);
+      // Keep going — one branch's DB being unreachable must not block the other.
+    }
   }
+
+  progress = { phase: 'idle', runId: null, rowsFetched: null, branch: null };
+
+  if (branchErrors.length) {
+    throw new Error(`BUSY customer_ageing sync failed for: ${branchErrors.join(', ')}`);
+  }
+  return { ran: true, runIds };
 }
 
 module.exports = { runCustomerAgeingSync, startCustomerAgeingSyncInBackground, getSyncProgress };

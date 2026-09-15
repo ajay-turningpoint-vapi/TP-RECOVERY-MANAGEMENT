@@ -208,6 +208,30 @@ class DisputeDetailsView extends StatelessWidget {
                         const KeyValueRow('Impact',
                             'Recovery on disputed amount is paused after approval; undisputed amount continues normal recovery.'),
                       ]),
+                      if ((d['attachmentPath'] as String?)?.isNotEmpty ?? false) ...[
+                        const SizedBox(height: 18),
+                        const SectionLabel('EVIDENCE FROM SALESMAN'),
+                        InfoCard(children: [TaskAttachmentThumbnail(path: d['attachmentPath'] as String)]),
+                      ],
+                      if ((needsVerification || ((d['messages'] as List?) ?? const []).isNotEmpty)) ...[
+                        const SizedBox(height: 18),
+                        SectionLabel(needsVerification ? 'DISPUTE THREAD' : 'CLARIFICATION THREAD'),
+                        InfoCard(children: [
+                          _clarificationThread(((d['messages'] as List?) ?? const [])),
+                          if (needsVerification) ...[
+                            const SizedBox(height: 8),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: OutlinedButton.icon(
+                                style: OutlinedButton.styleFrom(side: const BorderSide(color: _indigo), foregroundColor: _indigo),
+                                onPressed: () => _sendMessage(context, store, d),
+                                icon: const Icon(Icons.reply, size: 15),
+                                label: const Text('Message resolution owner', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                              ),
+                            ),
+                          ],
+                        ]),
+                      ],
                       const SizedBox(height: 18),
                       const SectionLabel('RESOLUTION PLAN'),
                       InfoCard(children: [
@@ -458,6 +482,88 @@ class DisputeDetailsView extends StatelessWidget {
     );
   }
 
+  /// RE-question / salesman-answer bubbles for the back-and-forth
+  /// clarification thread (populated via the "Clarify" action → salesman
+  /// answers from their linked task).
+  Widget _clarificationThread(List messages) {
+    if (messages.isEmpty) {
+      return const Text('No messages yet.', style: TextStyle(fontSize: 11.5, color: kMuted));
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: messages.map<Widget>((m) {
+        final isAnswer = m['authorRole'] == 'SALESPERSON';
+        final c = isAnswer ? kGreen : _indigo;
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Column(
+            crossAxisAlignment:
+                isAnswer ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+            children: [
+              Text(isAnswer ? 'Salesman' : 'RE',
+                  style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: c)),
+              const SizedBox(height: 2),
+              Container(
+                constraints: const BoxConstraints(maxWidth: 280),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                    color: c.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: c.withOpacity(0.25))),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(m['body'] as String, style: const TextStyle(fontSize: 12, color: kDark)),
+                    if ((m['attachmentPath'] as String?)?.isNotEmpty ?? false) ...[
+                      const SizedBox(height: 6),
+                      TaskAttachmentThumbnail(path: m['attachmentPath'] as String),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                  '${m['authorName']} · ${DateFormat('dd MMM, hh:mm a').format(m['createdAt'] as DateTime)}',
+                  style: const TextStyle(fontSize: 9, color: kMuted)),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  void _sendMessage(BuildContext context, AppStore store, Map<String, dynamic> d) {
+    final controller = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Message resolution owner', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+        content: TextField(controller: controller, maxLines: 3, autofocus: true,
+            decoration: const InputDecoration(hintText: 'Type a message…', border: OutlineInputBorder())),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: _indigo, foregroundColor: Colors.white),
+            onPressed: () async {
+              final body = controller.text.trim();
+              if (body.isEmpty) return;
+              final navigator = Navigator.of(context);
+              Navigator.pop(dialogCtx);
+              try {
+                await store.postDisputeMessage(d['id'], body: body);
+                showAppMessageAfter(navigator, message: 'Message sent.');
+              } catch (e) {
+                showAppMessageAfter(navigator, message: 'Could not send: $e', isError: true);
+              }
+            },
+            child: const Text('Send', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _reject(BuildContext context, AppStore store, Map<String, dynamic> d) {
     final reasonController = TextEditingController();
     showDialog(
@@ -497,8 +603,15 @@ class DisputeDetailsView extends StatelessWidget {
   }
 
   void _clarify(BuildContext context, AppStore store, Map<String, dynamic> d) {
-    String selectedSalesman =
-        store.salesmen.isNotEmpty ? store.salesmen.first['name'] as String : '';
+    // Default to the salesman who raised the dispute (the customer's
+    // assigned salesperson) — not whoever sorts first alphabetically.
+    final raiserId = store.customers
+        .firstWhere((c) => c.name == d['customer'], orElse: () => store.customers.first)
+        .assignedSalesmanId;
+    final inRoster = store.salesmen.any((s) => s['name'] == raiserId);
+    String selectedSalesman = inRoster
+        ? raiserId
+        : (store.salesmen.isNotEmpty ? store.salesmen.first['name'] as String : '');
     final descController = TextEditingController();
     DateTime deadline = DateTime.now().add(const Duration(days: 1));
     showDialog(

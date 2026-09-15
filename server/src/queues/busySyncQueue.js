@@ -15,7 +15,16 @@ const busySyncQueue = new Queue(QUEUE_NAME, {
   connection,
   prefix: env.redis.prefix,
   defaultJobOptions: {
-    attempts: 2,
+    // Was `attempts: 2` with no backoff — the two tries fired back-to-back
+    // (seconds apart), so a BUSY source that was briefly unreachable meant
+    // customer data stayed stale until the next day's 12:00 run, with the
+    // app showing a "sync failed" state that never cleared on its own.
+    // Now: 4 tries with exponential backoff (~10m, ~20m, ~40m), so a
+    // transient network / BUSY outage heals itself within the hour and the
+    // failure message the client shows is genuinely "it will retry
+    // automatically", not "wait until tomorrow".
+    attempts: 4,
+    backoff: { type: 'exponential', delay: 10 * 60 * 1000 },
     removeOnComplete: { count: 30 },
     removeOnFail: { count: 30 },
   },

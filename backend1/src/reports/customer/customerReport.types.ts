@@ -49,6 +49,12 @@ export interface CustomerReportOptions {
   limit?: number;
   /** Restrict to one salesman's customers (matches CustomerReport.salesmanCode). */
   salesmanCode?: number;
+  /**
+   * Which branch to read. For the MSSQL repository this selects both the
+   * company database to connect to and the PARENTGRP codes to scope by.
+   * Omitted → DEFAULT_BRANCH_ID. The MariaDB repository accepts 'all' too.
+   */
+  branchId?: string;
 }
 
 /**

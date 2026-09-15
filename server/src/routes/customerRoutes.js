@@ -40,6 +40,9 @@ const instructionSchema = z.object({
   // judgment). RE can instead assign a plain 'customerCall' or
   // 'physicalVisit' task — same endpoint, just a different task type/label.
   taskType: z.enum(['managementInstruction', 'customerCall', 'physicalVisit']).optional(),
+  // Optional evidence the RE attaches when creating a call/visit task.
+  note: z.string().optional(),
+  attachmentPath: z.string().optional(),
 });
 
 router.get('/', controller.list);

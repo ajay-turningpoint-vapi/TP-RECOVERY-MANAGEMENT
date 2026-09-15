@@ -14,6 +14,7 @@ const { startCustomerAgeingSyncInBackground, getSyncProgress } = require('../bus
 const mssqlCustomerReportRepository = require('../busySync/reports/mssqlCustomerReportRepository');
 const mariaDbCustomerReportRepository = require('../busySync/reports/mariaDbCustomerReportRepository');
 const { compareCustomerReports } = require('../busySync/validation/customerReportComparator');
+const { BRANCHES } = require('../busySync/config/branches');
 
 const router = Router();
 router.use(authenticate, authorize('MANAGEMENT'));
@@ -21,7 +22,7 @@ router.use(authenticate, authorize('MANAGEMENT'));
 router.get(
   '/sync/status',
   asyncHandler(async (req, res) => {
-    const [latestRun, running, totalCustomers, mariaDbHealthy] = await Promise.all([
+    const [latestRun, running, totalCustomers, mariaDbHealthy, branchRuns] = await Promise.all([
       syncRunsRepository.getLatestRun(),
       syncRunsRepository.isRunInProgress(),
       customerAgeingRepository.getTotalCustomerCount(),
@@ -29,12 +30,20 @@ router.get(
         .ping()
         .then(() => true)
         .catch(() => false),
+      Promise.all(
+        BRANCHES.map(async (b) => ({
+          branch: b.label,
+          database: b.database,
+          lastRun: await syncRunsRepository.getLatestRun(b.label),
+        }))
+      ),
     ]);
 
     res.json({
       isRunning: running,
       progress: running ? getSyncProgress() : null,
       lastRun: latestRun,
+      branches: branchRuns,
       totalCustomers,
       connectivity: {
         mssqlConnected: mssqlDb.isConnected,

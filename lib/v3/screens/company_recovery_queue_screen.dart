@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:salesman_mobile/widgets/data_loading.dart' show LoadingAppBarStrip;
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:salesman_mobile/v2/stores/app_store.dart';
@@ -30,7 +31,7 @@ enum _QueueSort { priority, nameAsc, nameDesc, amountDesc, amountAsc }
 
 class _CompanyRecoveryQueueScreenState extends State<CompanyRecoveryQueueScreen> {
   String _salesmanFilter = 'All';
-  String _branchFilter = 'All';
+  String get _branchFilter => context.read<AppStore>().branchFilter;
   String _quickFilter = 'All'; // All, Broken PTP, Escalated, No Owner, No Next Action
   String _query = '';
   _QueueSort _sort = _QueueSort.priority;
@@ -52,10 +53,9 @@ class _CompanyRecoveryQueueScreenState extends State<CompanyRecoveryQueueScreen>
     final store = context.watch<AppStore>();
     final fmt = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
 
-    List<Customer> queue = store.customers.where((c) => widget.showOutstanding ? c.totalOutstanding > 0 : c.totalDue > 0).toList();
+    List<Customer> queue = store.visibleCustomers.where((c) => widget.showOutstanding ? c.totalOutstanding > 0 : c.totalDue > 0).toList();
     if (_salesmanFilter != 'All') queue = queue.where((c) => c.assignedSalesmanId == _salesmanFilter).toList();
-    if (_branchFilter != 'All') queue = queue.where((c) => c.branch == _branchFilter).toList();
-    if (_quickFilter == 'Broken PTP') {
+        if (_quickFilter == 'Broken PTP') {
       final ids = store.brokenPtps.map((p) => p.customerId).toSet();
       queue = queue.where((c) => ids.contains(c.id)).toList();
     } else if (_quickFilter == 'Escalated') {
@@ -92,7 +92,7 @@ class _CompanyRecoveryQueueScreenState extends State<CompanyRecoveryQueueScreen>
         break;
     }
 
-    final branches = ['All', ...{for (final c in store.customers) c.branch}];
+    final branches = store.branchOptions;
     final salesmen = ['All', ...store.salesmen.map((s) => s['name'] as String)];
 
     return Scaffold(
@@ -102,6 +102,7 @@ class _CompanyRecoveryQueueScreenState extends State<CompanyRecoveryQueueScreen>
         backgroundColor: Colors.white,
         elevation: 0,
         foregroundColor: _dark,
+        bottom: const LoadingAppBarStrip(color: Color(0xFF2563EB)),
       ),
       body: LayoutBuilder(
         builder: (context, constraints) {
@@ -140,7 +141,7 @@ class _CompanyRecoveryQueueScreenState extends State<CompanyRecoveryQueueScreen>
                               child: _dropdown('Salesman', _salesmanFilter, salesmen, (v) => setState(() => _salesmanFilter = v!),
                                   displayFor: (o) => o == 'All' ? o : store.salesmanDisplayName(o))),
                           const SizedBox(width: 8),
-                          Expanded(child: _dropdown('Branch', _branchFilter, branches, (v) => setState(() => _branchFilter = v!))),
+                          Expanded(child: _dropdown('Branch', _branchFilter, branches, (v) { if (v != null) context.read<AppStore>().setBranchFilter(v); setState(() {}); })),
                         ],
                       ),
                     ),

@@ -40,6 +40,9 @@ class AppTask {
   // a Payment Already Made / Dispute / Internal Action outcome.
   final String? note;
   final String? attachmentPath;
+  /// Set when this task is an RE dispute-clarification request — the
+  /// salesperson answers from the task instead of recording an outcome.
+  final String? disputeId;
 
   AppTask({
     required this.id,
@@ -61,6 +64,7 @@ class AppTask {
     this.reviewedByRE = false,
     this.note,
     this.attachmentPath,
+    this.disputeId,
   });
 
   bool get isOverdue => status != TaskStatus.completed && status != TaskStatus.closed && deadline.isBefore(DateTime.now());
@@ -95,6 +99,7 @@ class AppTask {
       reviewedByRE: json['reviewedByRE'] as bool? ?? false,
       note: json['note'] as String?,
       attachmentPath: json['attachmentPath'] as String?,
+      disputeId: json['disputeId'] as String?,
     );
   }
 
@@ -118,6 +123,7 @@ class AppTask {
     bool? reviewedByRE,
     String? note,
     String? attachmentPath,
+    String? disputeId,
   }) {
     return AppTask(
       id: id ?? this.id,
@@ -139,6 +145,7 @@ class AppTask {
       reviewedByRE: reviewedByRE ?? this.reviewedByRE,
       note: note ?? this.note,
       attachmentPath: attachmentPath ?? this.attachmentPath,
+      disputeId: disputeId ?? this.disputeId,
     );
   }
 }

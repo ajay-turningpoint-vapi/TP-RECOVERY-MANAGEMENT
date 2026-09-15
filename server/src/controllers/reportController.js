@@ -11,4 +11,9 @@ const trends = asyncHandler(async (req, res) => {
   res.json(data);
 });
 
-module.exports = { dashboard, trends };
+const rePerformance = asyncHandler(async (req, res) => {
+  const data = await reportService.getRePerformance();
+  res.json(data);
+});
+
+module.exports = { dashboard, trends, rePerformance };

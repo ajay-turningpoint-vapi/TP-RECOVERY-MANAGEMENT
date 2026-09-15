@@ -181,6 +181,19 @@ class ApiClient {
   Future<dynamic> _get(String path) => _authedSend('GET', path);
   Future<dynamic> _post(String path, [Map<String, dynamic>? body]) => _authedSend('POST', path, body);
 
+  /// Force a token refresh, reusing the same single-flight guard the 401
+  /// retry path uses. The realtime SSE stream calls this when the server
+  /// closes it with a 401 (its long-lived connection outlives the 1h
+  /// access token). Returns true if a fresh token is now in place.
+  Future<bool> ensureFreshToken() => _tryRefresh();
+
+  /// Auth headers for a long-lived SSE GET to `$baseUrl/api/events`.
+  Map<String, String> get eventStreamHeaders => {
+        if (_accessToken != null) 'Authorization': 'Bearer $_accessToken',
+        'Accept': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+      };
+
   Future<Map<String, dynamic>> login(String username, String password) async {
     final res = await _rawSend('POST', '/api/auth/login', {'username': username, 'password': password});
     final body = await _handle(res) as Map<String, dynamic>;
@@ -271,6 +284,12 @@ class ApiClient {
       await _post('/api/disputes/$disputeId/request-info', body) as Map<String, dynamic>;
   Future<Map<String, dynamic>> resolveDispute(String disputeId, Map<String, dynamic> body) async =>
       await _post('/api/disputes/$disputeId/resolve', body) as Map<String, dynamic>;
+  Future<Map<String, dynamic>> answerDisputeClarification(String disputeId, Map<String, dynamic> body) async =>
+      await _post('/api/disputes/$disputeId/answer', body) as Map<String, dynamic>;
+  Future<Map<String, dynamic>> postDisputeMessage(String disputeId, Map<String, dynamic> body) async =>
+      await _post('/api/disputes/$disputeId/message', body) as Map<String, dynamic>;
+  Future<Map<String, dynamic>> resolveDisputeByOwner(String disputeId, Map<String, dynamic> body) async =>
+      await _post('/api/disputes/$disputeId/resolve-by-owner', body) as Map<String, dynamic>;
 
   // ---- Outcome correction requests ----
   Future<List<dynamic>> getOutcomeCorrections() async => await _get('/api/outcome-corrections') as List<dynamic>;
@@ -302,10 +321,13 @@ class ApiClient {
 
   // ---- Salesmen ----
   Future<List<dynamic>> getSalesmen() async => await _get('/api/salesmen') as List<dynamic>;
+  Future<Map<String, dynamic>> dismissUnderperformance(String salesmanId) async =>
+      await _post('/api/salesmen/$salesmanId/dismiss-underperformance') as Map<String, dynamic>;
 
   // ---- Reports ----
   Future<Map<String, dynamic>> getDashboardReport() async => await _get('/api/reports/dashboard') as Map<String, dynamic>;
   Future<List<dynamic>> getTrends() async => await _get('/api/reports/trends') as List<dynamic>;
+  Future<Map<String, dynamic>> getRePerformance() async => await _get('/api/reports/re-performance') as Map<String, dynamic>;
   Future<Map<String, dynamic>?> getNextCustomer() async => await _get('/api/customers/next') as Map<String, dynamic>?;
 
   // ---- Notifications ----
@@ -328,9 +350,21 @@ class ApiClient {
   /// when recording the outcome this is evidence for.
   Future<String> uploadAttachment(List<int> bytes, {required String filename, required String contentType}) async {
     final uri = Uri.parse('$baseUrl/api/attachments');
+    // The filename MUST be non-empty: a multipart file part with an empty
+    // `filename=""` is parsed as an ordinary form field, not a file, so
+    // the server then reports "no file uploaded". PDFs picked via
+    // XFile.fromData come through here with an empty name (cross_file's
+    // io impl ignores the `name:` arg), which is exactly how this bit.
+    final ext = contentType == 'application/pdf' ? '.pdf' : '.jpg';
+    var safeName = filename.trim();
+    if (safeName.isEmpty) safeName = 'attachment$ext';
+    // Only the auth header — never _headers, whose 'Content-Type:
+    // application/json' would fight the multipart boundary content-type.
     final request = http.MultipartRequest('POST', uri)
-      ..headers.addAll(_headers)
-      ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename, contentType: MediaType.parse(contentType)));
+      ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: safeName, contentType: MediaType.parse(contentType)));
+    if (_accessToken != null) {
+      request.headers['Authorization'] = 'Bearer $_accessToken';
+    }
     try {
       final streamed = await request.send().timeout(_requestTimeout);
       final res = await http.Response.fromStream(streamed);
@@ -349,6 +383,11 @@ class ApiClient {
   /// [attachmentAuthHeaders] on `Image.network` (the endpoint requires
   /// authentication, which `Image.network` doesn't send by default).
   String attachmentUrl(String path) => '$baseUrl/api/attachments/$path';
+
+  /// Same URL but with the access token as a query param — for opening a
+  /// PDF in an external viewer via url_launcher, which can't send headers.
+  String attachmentDownloadUrl(String path) =>
+      '$baseUrl/api/attachments/$path${_accessToken != null ? '?token=$_accessToken' : ''}';
 
   Map<String, String> get attachmentAuthHeaders => _headers;
 }

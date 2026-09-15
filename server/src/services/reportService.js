@@ -2,9 +2,11 @@ const customerRepository = require('../repositories/customerRepository');
 const ptpRepository = require('../repositories/ptpRepository');
 const taskRepository = require('../repositories/taskRepository');
 const disputeRepository = require('../repositories/disputeRepository');
+const paymentClaimRepository = require('../repositories/paymentClaimRepository');
 const escalationRepository = require('../repositories/escalationRepository');
 const auditRepository = require('../repositories/auditRepository');
 const outcomeCorrectionRepository = require('../repositories/outcomeCorrectionRepository');
+const userRepository = require('../repositories/userRepository');
 const salesmanService = require('./salesmanService');
 const scoringService = require('./scoringService');
 const metricsRepository = require('../repositories/metricsRepository');
@@ -83,9 +85,16 @@ async function getDashboard(user) {
   const noFollowUpThresholdDays = 4;
   const tasksByCustomer = scoringService.groupBy(allTasks, (t) => t.customerId);
   const auditByCustomer = scoringService.groupBy(allAudit, (a) => a.customerId);
-  const noFollowUpAccounts = dueCustomers.filter(
-    (c) => scoringService.daysSinceLastFollowUp(c, tasksByCustomer.get(c.id) || [], auditByCustomer.get(c.id) || []) >= noFollowUpThresholdDays
-  );
+  // The client can't recompute this itself: GET /api/customers (what backs
+  // every report's customer list) never carries auditHistory, only this
+  // detail-fetch path does — a client-side re-derivation would silently
+  // ignore real audit activity and overstate staleness. So the real
+  // day-count this filter already computed is attached to each row instead
+  // of being thrown away.
+  const noFollowUpAccounts = dueCustomers
+    .map((c) => ({ c, days: scoringService.daysSinceLastFollowUp(c, tasksByCustomer.get(c.id) || [], auditByCustomer.get(c.id) || []) }))
+    .filter(({ days }) => days >= noFollowUpThresholdDays)
+    .map(({ c, days }) => ({ ...c, daysSinceLastFollowUp: days }));
 
   const l4Cases = openEscalations.filter((e) => e.level === 'L4' && (user.role !== 'SALESPERSON' || customerIds.has(e.customerId)));
   const scopedOpenEscalations = user.role === 'SALESPERSON' ? openEscalations.filter((e) => customerIds.has(e.customerId)) : openEscalations;
@@ -160,7 +169,9 @@ async function getDashboard(user) {
     overdueCustomersCount: overdue.length,
     overdueCustomersAmount: overdue.reduce((s, c) => s + c.totalDue, 0),
     ptpKeptMtdPercent: maturedPtps.length === 0 ? 0 : Math.round((keptPtps.length / maturedPtps.length) * 100),
-    recoveryTarget: totalOverdueAmount * 0.12,
+    // Tier 1 of the real recovery-target tiers (25/35/50/70% of overdue —
+    // see report_detail_screens.dart's RecoveryTargetVsActualReport).
+    recoveryTarget: totalOverdueAmount * 0.25,
     outstandingAgeingBuckets: ageingBuckets,
     topOverdueCustomers,
     customers30PlusOverdueCount: dueCustomers.filter((c) => c.oldestOverdueDays >= 30).length,
@@ -204,4 +215,97 @@ async function getTrends() {
   return metricsRepository.listRecent(90);
 }
 
-module.exports = { getDashboard, getTrends };
+const DAY_MS = 86400000;
+const daysBetween = (a, b) => Math.max(0, Math.round((new Date(b).getTime() - new Date(a).getTime()) / DAY_MS));
+const ageDays = (from) => daysBetween(from, Date.now());
+
+function queueStat(ages) {
+  if (ages.length === 0) return { count: 0, oldestDays: 0, avgAgeDays: 0 };
+  return {
+    count: ages.length,
+    oldestDays: Math.max(...ages),
+    avgAgeDays: Math.round(ages.reduce((s, a) => s + a, 0) / ages.length),
+  };
+}
+
+/**
+ * RE performance scorecard for the Manager — "how much is waiting on the
+ * RE, for how long, how fast do they turn decisions around, and how are
+ * they doing on the escalations they own". Aggregated across the RE team
+ * for the shared queues (disputes / claims / corrections have no
+ * per-RE owner), and broken out per RE for escalation ownership.
+ */
+async function getRePerformance() {
+  const [disputes, claims, allPtps, allTasks, escalations, users] = await Promise.all([
+    disputeRepository.findAll(),
+    paymentClaimRepository.findAll(),
+    ptpRepository.findAll(),
+    taskRepository.findAll(),
+    escalationRepository.findAll(),
+    userRepository.findAll(),
+  ]);
+
+  const now = Date.now();
+  const since30 = now - 30 * DAY_MS;
+  const res = users.filter((u) => u.role === 'RECOVERY_EXECUTIVE');
+
+  // ---- Pending queue (waiting on the RE right now) ----
+  const disputesPending = disputes.filter((d) => d.status === 'Pending Approval');
+  const claimsPending = claims.filter((c) => ['Awaiting Verification', 'Sync Pending'].includes(c.status));
+  const ptpCorrectionsPending = allPtps.filter((p) => p.correctionStatus === 'Pending');
+  const internalActionsPending = allTasks.filter(
+    (t) => t.type === 'financialTeamFollowUp' && t.source === 'Record Outcome' && !['completed', 'closed'].includes(t.status)
+  );
+
+  const queue = {
+    disputes: queueStat(disputesPending.map((d) => ageDays(d.raisedDate))),
+    paymentClaims: queueStat(claimsPending.map((c) => ageDays(c.claimDate))),
+    ptpCorrections: { count: ptpCorrectionsPending.length, oldestDays: 0, avgAgeDays: 0 },
+    internalActions: queueStat(internalActionsPending.map((t) => ageDays(t.createdAt))),
+  };
+  queue.totalPending =
+    queue.disputes.count + queue.paymentClaims.count + queue.ptpCorrections.count + queue.internalActions.count;
+  queue.oldestPendingDays = Math.max(
+    queue.disputes.oldestDays,
+    queue.paymentClaims.oldestDays,
+    queue.internalActions.oldestDays
+  );
+
+  // ---- Turnaround (disputes carry both raised + last_updated) ----
+  const disputesDecided = disputes.filter(
+    (d) => ['Approved', 'Rejected', 'Resolved', 'Returned to Recovery'].includes(d.status) &&
+      new Date(d.lastUpdated).getTime() >= since30
+  );
+  const turnaroundDays = disputesDecided.map((d) => daysBetween(d.raisedDate, d.lastUpdated));
+  const approvedCount = disputesDecided.filter((d) => ['Approved', 'Resolved'].includes(d.status)).length;
+  const turnaround = {
+    disputesDecided30d: disputesDecided.length,
+    avgDecisionDays: turnaroundDays.length
+      ? Math.round((turnaroundDays.reduce((s, a) => s + a, 0) / turnaroundDays.length) * 10) / 10
+      : 0,
+    approvedPct: disputesDecided.length ? Math.round((approvedCount / disputesDecided.length) * 100) : 0,
+  };
+
+  // ---- Escalations owned, per RE ----
+  const byRe = res.map((re) => {
+    const owned = escalations.filter((e) => e.ownerId === re.id);
+    const open = owned.filter((e) => e.isOpen);
+    const overdue = open.filter((e) => e.deadline && new Date(e.deadline).getTime() < now);
+    const resolved30 = owned.filter((e) => !e.isOpen && new Date(e.updatedAt).getTime() >= since30);
+    const resolveDays = resolved30.map((e) => daysBetween(e.createdAt, e.updatedAt));
+    return {
+      reId: re.id,
+      reName: re.full_name || re.username,
+      openEscalations: open.length,
+      overdueEscalations: overdue.length,
+      resolvedEscalations30d: resolved30.length,
+      avgResolveDays: resolveDays.length
+        ? Math.round((resolveDays.reduce((s, a) => s + a, 0) / resolveDays.length) * 10) / 10
+        : 0,
+    };
+  });
+
+  return { generatedAt: new Date().toISOString(), queue, turnaround, escalationsByRe: byRe };
+}
+
+module.exports = { getDashboard, getTrends, getRePerformance };

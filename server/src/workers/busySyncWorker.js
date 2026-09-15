@@ -5,9 +5,11 @@ const logger = require('../config/logger');
 const { QUEUE_NAME } = require('../queues/busySyncQueue');
 const { runCustomerAgeingSync } = require('../busySync/sync/customerAgeingSync');
 const { runCustomerInvoiceSync } = require('../busySync/sync/customerInvoiceSync');
-const { verifyDuePtps } = require('../services/ptpVerificationService');
+const recoveryReconcileService = require('../services/recoveryReconcileService');
 const notificationRepository = require('../repositories/notificationRepository');
 const syncLockService = require('../services/syncLockService');
+const { beat } = require('../services/heartbeatService');
+const { publish, emitChange } = require('../realtime/eventBus');
 
 function createBusySyncWorker() {
   const worker = new Worker(
@@ -23,25 +25,40 @@ function createBusySyncWorker() {
       try {
         const resultAgeing = await runCustomerAgeingSync();
         if (resultAgeing.ran) {
-          logger.info(`[busySyncWorker] customerAgeingSync completed. Run ID: ${resultAgeing.runId}`);
+          logger.info(`[busySyncWorker] customerAgeingSync completed. Run IDs: ${(resultAgeing.runIds || []).join(', ')}`);
         } else {
           logger.info(`[busySyncWorker] customerAgeingSync skipped (already in progress).`);
         }
 
         const resultInvoice = await runCustomerInvoiceSync();
         if (resultInvoice.ran) {
-          logger.info(`[busySyncWorker] customerInvoiceSync completed. Run ID: ${resultInvoice.runId}`);
+          logger.info(`[busySyncWorker] customerInvoiceSync completed. Run IDs: ${(resultInvoice.runIds || []).join(', ')}`);
         } else {
           logger.info(`[busySyncWorker] customerInvoiceSync skipped (already in progress).`);
         }
 
-        // PTP verification against real BUSY receipts (see
-        // services/ptpVerificationService.js) — has no dependency on the two
-        // syncs above succeeding, so it always runs as the third daily-sync step.
-        const resultVerification = await verifyDuePtps();
-        logger.info(`[busySyncWorker] ptpVerification completed.`, resultVerification);
+        // PTP promote + verify now runs as its own scheduled job at 12:10
+        // IST (queues/ptpVerifyQueue.js) — a few minutes after this sync so
+        // customer balances are fresh, with its own 5-min exponential
+        // backoff / retry. It is NOT run here any more.
 
-        return { resultAgeing, resultInvoice, resultVerification };
+        // Backstop: with fresh balances, re-point
+        // every salesperson's recovery task at the still-uncovered slice of
+        // their customer's overdue (and un-park anyone the RE never got to).
+        try {
+          const resultReconcile = await recoveryReconcileService.reconcileAll();
+          logger.info('[busySyncWorker] recovery reconcile sweep completed.', resultReconcile);
+        } catch (reconcileErr) {
+          logger.error('[busySyncWorker] recovery reconcile sweep failed', { message: reconcileErr.message });
+        }
+
+        // A sync rewrites customers, the salesman roster, PTPs and
+        // invoices wholesale — every client should pull fresh lists once
+        // the freeze lifts.
+        emitChange(['customers', 'ptps', 'tasks', 'salesmen', 'escalations'], { reason: 'busy.sync' });
+
+        await beat('busy-sync');
+        return { resultAgeing, resultInvoice };
       } finally {
         // Cleared on success AND failure — a failed sync must never leave
         // the whole app frozen indefinitely for every user.
@@ -69,8 +86,9 @@ function createBusySyncWorker() {
         .insert({
           severity: 'critical',
           title: 'BUSY sync failed — customer data may be stale',
-          body: `The daily BUSY customer sync failed after ${attemptsMade} attempt(s): ${err.message}. Real customer balances/ageing will not reflect BUSY until this is resolved and a sync succeeds.`,
+          body: `The BUSY customer sync failed after ${attemptsMade} automatic attempt(s): ${err.message}. Customer balances/ageing will not reflect BUSY until the connection is back and a sync succeeds; the next scheduled run is 12:00 IST.`,
         })
+        .then(() => publish({ type: 'notification', scope: { broadcast: true } }))
         .catch((notifyErr) => {
           logger.error('Failed to record BUSY sync failure notification', { message: notifyErr.message });
         });

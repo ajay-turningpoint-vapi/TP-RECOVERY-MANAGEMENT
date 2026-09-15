@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:salesman_mobile/v2/utils/initials.dart';
 import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:salesman_mobile/v2/stores/app_store.dart';
@@ -79,21 +80,6 @@ class _Customer360ScreenState extends State<Customer360Screen> {
   // '61-90' | '90+'); filters the Invoices tab to invoices in that bucket.
   String? _invoiceAgeBucket;
 
-  // Set for the lifetime of one outcome-sheet round trip started from
-  // "Edit Recorded Outcome" on a No Answer recorded *today* (see
-  // _openEditRecordedOutcome) — tells _finish to send
-  // `replacingNoAnswer: true` so the server erases the old No Answer
-  // record immediately instead of layering this one on top of it.
-  // Consumed (reset to false) as soon as _finish reads it.
-  bool _replacingNoAnswerRecord = false;
-
-  // Same round trip, but for a No Answer recorded on a *previous* day —
-  // past the same-day self-service window (see _openEditRecordedOutcome's
-  // store.recoveryDoneTodayCustomerIds check), so nothing applies
-  // immediately: _finish instead sends this to the RE
-  // for approval (AppStore.requestNoAnswerReplacement), same as every
-  // other recorded-outcome edit already goes through.
-  bool _requestingNoAnswerApproval = false;
 
   @override
   void initState() {
@@ -116,42 +102,54 @@ class _Customer360ScreenState extends State<Customer360Screen> {
     });
   }
 
-  /// Resolves what outcome was recorded for this customer and opens its
-  /// edit form: a PTP gets its own pre-filled sheet; a No Answer has
-  /// nothing to pre-fill, so it's replaced outright instead — self-service
-  /// (erased immediately, see AppStore.recordOutcome's `replacingNoAnswer`)
-  /// only the same day it was recorded, otherwise sent to the RE for
-  /// approval like any other outcome edit (AppStore.requestNoAnswerReplacement).
-  /// Any other recorded outcome kind still tells the salesman to ask their RE.
+  /// Resolves what outcome was recorded for this customer and opens the
+  /// right sheet: a PTP gets its own pre-filled edit sheet; a No Answer
+  /// (which never resolved anything) just opens a plain Record Outcome so
+  /// the salesman can log what really happened — another No Answer bumps
+  /// the attempt count, anything else resolves the account, no RE
+  /// approval. Any other recorded outcome kind tells the salesman to ask
+  /// their RE.
+  /// The latest still-open (scheduled / pending-verification) PTP for a
+  /// customer, or null. Used both to route "Edit recorded outcome" to the
+  /// PTP sheet and to keep the Recorded Outcome card visible after a
+  /// partial PTP un-parks the account (covered/actionable model).
+  PromiseToPay? _openScheduledPtp(AppStore store, String customerId) {
+    PromiseToPay? ptp;
+    for (final p in store.ptps) {
+      if (p.customerId == customerId &&
+          (p.status == PtpStatus.scheduled || p.status == PtpStatus.pendingVerification)) {
+        if (ptp == null || p.promiseDate.isAfter(ptp.promiseDate)) ptp = p;
+      }
+    }
+    return ptp;
+  }
+
   void _openEditRecordedOutcome() {
     final store = context.read<AppStore>();
     final c = store.customers.firstWhere((x) => x.id == widget.customer.id, orElse: () => widget.customer);
-    PromiseToPay? ptp;
-    for (final p in store.ptps) {
-      if (p.customerId == c.id && (p.status == PtpStatus.scheduled || p.status == PtpStatus.pendingVerification)) {
-        if (ptp == null || p.promiseDate.isAfter(ptp.promiseDate)) {
-          ptp = p;
-        }
-      }
-    }
+    final ptp = _openScheduledPtp(store, c.id);
     if (ptp != null) {
+      if (ptp.correctionStatus != 'none') {
+        // One-time edit already used — locked through the RE decision and
+        // after it (Pending / Approved / Rejected).
+        showAppMessage(context,
+            message: ptp.correctionStatus == 'Pending'
+                ? 'You already sent a correction for this PTP — wait for the RE to decide it.'
+                : 'The RE has already reviewed your PTP correction. It can’t be edited again here.',
+            title: 'PTP edit locked');
+        return;
+      }
       _showEditPtpSheet(ptp);
       return;
     }
-    if (c.isPendingNoAnswerEdit) {
-      // Grounded in the real audit trail (a Record-Outcome-sourced audit
-      // event today), not c.updatedAt — updatedAt is bumped for the whole
-      // portfolio by the daily BUSY sync regardless of activity, which
-      // would otherwise let the free same-day self-edit window "reopen"
-      // for a No Answer that was actually logged days ago, right after
-      // that sync runs. Since isPendingNoAnswerEdit already confirms this
-      // customer's *current* state is the No Answer in question, being in
-      // this today-set at all means that's when it was logged.
-      if (store.recoveryDoneTodayCustomerIds.contains(c.id)) {
-        _replacingNoAnswerRecord = true;
-      } else {
-        _requestingNoAnswerApproval = true;
-      }
+    final hasOpenPhysicalVisit = store.tasks.any((t) =>
+        t.customerId == c.id &&
+        t.type == TaskType.physicalVisit &&
+        t.status != TaskStatus.completed);
+    if (c.isPendingNoAnswerEdit || hasOpenPhysicalVisit) {
+      // A No Answer / 3rd-No-Answer Physical Visit never resolved anything —
+      // this isn't an "edit", it's a fresh Record Outcome (record what
+      // happened on the call-back or the visit). No RE approval.
       _showOutcomeBottomSheet();
       return;
     }
@@ -167,13 +165,41 @@ class _Customer360ScreenState extends State<Customer360Screen> {
     final currentCustomer = store.customers.firstWhere(
         (c) => c.id == widget.customer.id,
         orElse: () => widget.customer);
-    // A recorded No Answer locks Record Outcome here too, same as a fully
-    // resolved outcome — the only way back in is Today's Recovery Tasks'
-    // "Edit Recorded Outcome" (see initState's editOutcome handling and
-    // _openEditRecordedOutcome below), which erases the old No Answer
-    // record and lets the salesman record what really happened.
-    final isLocked = currentCustomer.currentRecoveryState == 'Waiting / Monitoring' ||
-        currentCustomer.isPendingNoAnswerEdit;
+    // Any recorded outcome locks Record Outcome — a parked account
+    // ("Waiting / Monitoring"), or an outcome logged today for this
+    // customer at all (Internal Action, Dispute, Follow-up, PTP, Payment
+    // Made — see store.recoveryDoneTodayCustomerIds, grounded in the real
+    // "source: Record Outcome" audit trail). The ONE exception is a
+    // recorded No Answer, which isn't a resolution: the button stays live,
+    // relabelled "NEW RECORD OUTCOME", so the salesman can log what
+    // actually happened once the customer calls back (or another No
+    // Answer, which just bumps the attempt count).
+    final isNoAnswerRerecord = currentCustomer.isPendingNoAnswerEdit;
+    final outcomeRecorded =
+        currentCustomer.currentRecoveryState == 'Waiting / Monitoring' ||
+            store.recoveryDoneTodayCustomerIds.contains(currentCustomer.id);
+    // An open "Recovery" task ("Collect ₹X — record a new outcome", raised
+    // automatically after a PTP verifies) explicitly asks for the next
+    // outcome, so Record Outcome must stay live even if an outcome was
+    // already logged today.
+    final hasOpenRecoveryTask = store.tasks.any((t) =>
+        t.customerId == currentCustomer.id &&
+        t.source == 'Recovery' &&
+        t.status != TaskStatus.completed);
+    // A 3rd-No-Answer Physical Visit is open — the salesman must visit and
+    // record the outcome, so keep the button live.
+    final hasOpenPhysicalVisit = store.tasks.any((t) =>
+        t.customerId == currentCustomer.id &&
+        t.type == TaskType.physicalVisit &&
+        t.status != TaskStatus.completed);
+    final isLocked = outcomeRecorded &&
+        !isNoAnswerRerecord &&
+        !hasOpenRecoveryTask &&
+        !hasOpenPhysicalVisit;
+    // "No next action set" — the account has nothing operational queued.
+    // The inline button that used to live in the red alert card is gone;
+    // the bottom CREATE TASK button turns red instead to carry that urgency.
+    final noNextActionSet = !(currentCustomer.hasValidNextAction && currentCustomer.primaryNextAction.trim().isNotEmpty);
     // Management must always be read-only here, regardless of whether the
     // screen that navigated here remembered to pass readOnly: true — most
     // don't. Deriving it from the real role means no call site can ever
@@ -268,9 +294,11 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                     ],
                   ],
                   if (store.userRole == 'SALESPERSON' &&
-                      currentCustomer.currentRecoveryState ==
-                          'Waiting / Monitoring' &&
-                      currentCustomer.primaryNextAction.isNotEmpty) ...[
+                      ((currentCustomer.currentRecoveryState ==
+                                  'Waiting / Monitoring' &&
+                              currentCustomer.primaryNextAction.isNotEmpty) ||
+                          _openScheduledPtp(store, currentCustomer.id) !=
+                              null)) ...[
                     const SizedBox(height: 16),
                     _buildRecordedOutcomeCard(context, currentCustomer, store),
                   ],
@@ -326,7 +354,9 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                         width: double.infinity,
                         child: ElevatedButton(
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF0052CC),
+                            backgroundColor: noNextActionSet
+                                ? const Color(0xFFDC2626)
+                                : const Color(0xFF0052CC),
                             foregroundColor: Colors.white,
                             shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(8)),
@@ -359,7 +389,11 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                         ),
                         onPressed: isLocked ? null : _showOutcomeBottomSheet,
                         child: Text(
-                            isLocked ? 'OUTCOME RECORDED' : 'RECORD OUTCOME',
+                            isLocked
+                                ? 'OUTCOME RECORDED'
+                                : isNoAnswerRerecord
+                                    ? 'NEW RECORD OUTCOME'
+                                    : 'RECORD OUTCOME',
                             style: const TextStyle(
                                 fontWeight: FontWeight.bold, fontSize: 16)),
                       ),
@@ -784,7 +818,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                             color: Color(0xFFB91C1C))),
                     SizedBox(height: 3),
                     Text(
-                      'This account has no valid operational next action. Assign a task or instruction now before leaving this screen.',
+                      'This account has no valid operational next action. Use the red CREATE TASK button below to assign one before leaving this screen.',
                       style: TextStyle(fontSize: 11.5, color: Color(0xFF7F1D1D), height: 1.35),
                     ),
                   ],
@@ -792,24 +826,6 @@ class _Customer360ScreenState extends State<Customer360Screen> {
               ),
             ],
           ),
-          if (!readOnly) ...[
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFDC2626),
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  padding: const EdgeInsets.symmetric(vertical: 11),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                ),
-                onPressed: () => _showCreateTaskDialog(context, store, c),
-                icon: const Icon(Icons.add_task, size: 16),
-                label: const Text('Create Task', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-              ),
-            ),
-          ],
         ],
       ),
     );
@@ -1045,8 +1061,10 @@ class _Customer360ScreenState extends State<Customer360Screen> {
             labelText: label, border: const OutlineInputBorder(), isDense: true);
         return Padding(
           padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(20, 18, 20, 26),
+          child: SafeArea(
+            top: false,
+            child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1117,11 +1135,12 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                 const SizedBox(height: 18),
                 SizedBox(
                   width: double.infinity,
-                  height: 46,
                   child: ElevatedButton(
                     style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF0052CC),
                         foregroundColor: Colors.white,
+                        minimumSize: const Size.fromHeight(50),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
                     onPressed: () async {
                       final amt = double.tryParse(amountCtrl.text.trim()) ?? 0;
@@ -1137,19 +1156,16 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                       final store = context.read<AppStore>();
                       final when = DateTime(date.year, date.month, date.day, time.hour, time.minute);
                       try {
-                        await store.requestOutcomeEdit(widget.customer.id, {
-                          'outcomeKind': 'PTP',
-                          'artifactId': ptp.id,
-                          'requestedPayload': {
-                            'amount': amt,
-                            'promiseDate': when.toUtc().toIso8601String(),
-                            'paymentMode': mode,
-                          },
-                          'editReason': reasonCtrl.text.trim(),
-                        });
+                        // PTP edits go through the PTP Correction flow (full
+                        // field edit — amount, date + time, payment mode),
+                        // not the generic non-PTP Outcome Edit request.
+                        await store.requestPtpCorrection(
+                          ptp.id, amt, when, reasonCtrl.text.trim(),
+                          paymentMode: mode,
+                        );
                         navigator.pop();
                         showAppMessageAfter(navigator,
-                            message: 'Edit request sent to the Recovery Executive for approval.',
+                            message: 'PTP correction request sent to the Recovery Executive for approval.',
                             type: AppMessageType.info,
                             title: 'Sent for Approval');
                       } catch (e) {
@@ -1157,11 +1173,16 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                       }
                     },
                     child: const Text('Submit for RE Approval',
+                        maxLines: 1,
+                        overflow: TextOverflow.visible,
+                        textAlign: TextAlign.center,
                         style: TextStyle(fontWeight: FontWeight.bold)),
                   ),
                 ),
+                const SizedBox(height: 8),
               ],
             ),
+          ),
           ),
         );
       }),
@@ -1170,9 +1191,31 @@ class _Customer360ScreenState extends State<Customer360Screen> {
 
   Widget _buildRecordedOutcomeCard(
       BuildContext context, Customer c, AppStore store) {
-    final alreadyRequested = store.hasPendingOutcomeEdit(c.id) ||
+    // If the account is still actionable (not parked) but carries an open
+    // PTP, it's the covered/actionable case: a promise was recorded that
+    // only covers part of the overdue. Show the PTP itself as the recorded
+    // outcome, plus the split, rather than the reconcile "CALL CUSTOMER".
+    final openPtp = _openScheduledPtp(store, c.id);
+    // The salesman's PTP edit is one-time: locked the moment a correction
+    // is requested (Pending) and stays locked after the RE decides it
+    // (Approved / Rejected) — only an untouched PTP can still be edited.
+    final ptpCorrectionUsed =
+        openPtp != null && openPtp.correctionStatus != 'none';
+    final ptpCorrectionPending =
+        openPtp != null && openPtp.correctionStatus == 'Pending';
+    final alreadyRequested = ptpCorrectionUsed ||
+        store.hasPendingOutcomeEdit(c.id) ||
         store.outcomeCorrectionRequests
             .any((r) => r.customerId == c.id && r.status == 'Pending');
+    final isPartial = c.currentRecoveryState != 'Waiting / Monitoring' && openPtp != null;
+    final money = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
+    final headline = isPartial
+        ? 'Promise to Pay — ${money.format(openPtp.amountPromised)}'
+        : c.primaryNextAction;
+    final subline = isPartial
+        ? 'Due ${DateFormat('EEE, dd MMM yyyy').format(openPtp.promiseDate)}'
+            '${c.actionableAmount > 0 ? ' · ${money.format(c.actionableAmount)} still to recover' : ''}'
+        : c.reasonForAction;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -1196,13 +1239,13 @@ class _Customer360ScreenState extends State<Customer360Screen> {
             ],
           ),
           const SizedBox(height: 10),
-          Text(c.primaryNextAction,
+          Text(headline,
               style: const TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 13,
                   color: Color(0xFF0052CC))),
           const SizedBox(height: 2),
-          Text(c.reasonForAction,
+          Text(subline,
               style: const TextStyle(fontSize: 12, color: Color(0xFF5A6B87))),
           const SizedBox(height: 10),
           if (alreadyRequested)
@@ -1211,9 +1254,11 @@ class _Customer360ScreenState extends State<Customer360Screen> {
               decoration: BoxDecoration(
                   color: const Color(0xFFFFF7ED),
                   borderRadius: BorderRadius.circular(8)),
-              child: const Text(
-                  'Outcome edit submitted — awaiting RE review.',
-                  style: TextStyle(
+              child: Text(
+                  ptpCorrectionUsed && !ptpCorrectionPending
+                      ? 'PTP correction was reviewed by the RE — no further edits.'
+                      : 'Outcome edit submitted — awaiting RE review. No further edits.',
+                  style: const TextStyle(
                       fontSize: 11.5,
                       color: Color(0xFFC2410C),
                       fontWeight: FontWeight.w600)),
@@ -1319,24 +1364,25 @@ class _Customer360ScreenState extends State<Customer360Screen> {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.grey.withOpacity(0.15)),
       ),
-      child: Row(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          CircleAvatar(
-            radius: 24,
-            backgroundColor: const Color(0xFFE3F2FD),
-            child: Text(c.name.substring(0, 2).toUpperCase(),
-                style: const TextStyle(
-                    color: Color(0xFF0052CC),
-                    fontWeight: FontWeight.bold,
-                    fontSize: 18)),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              CircleAvatar(
+                radius: 24,
+                backgroundColor: const Color(0xFFE3F2FD),
+                child: Text(avatarInitials(c.name),
+                    style: const TextStyle(
+                        color: Color(0xFF0052CC),
+                        fontWeight: FontWeight.bold,
+                        fontSize: 18)),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Expanded(
                         child: Text(c.name,
@@ -1344,6 +1390,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                                 fontSize: 18,
                                 fontWeight: FontWeight.bold,
                                 color: Color(0xFF1B2B48)))),
+                    const SizedBox(width: 8),
                     Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 8, vertical: 4),
@@ -1358,27 +1405,31 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    const Icon(Icons.location_on_outlined,
-                        size: 14, color: Color(0xFF5A6B87)),
-                    const SizedBox(width: 4),
-                    Expanded(
-                        child: Text(c.address ?? 'Ghatkopar, Mumbai',
-                            style: const TextStyle(
-                                color: Color(0xFF5A6B87), fontSize: 12))),
-                    CallablePhoneNumber(
-                      phoneNumber: c.contactNumber,
-                      iconColor: const Color(0xFF5A6B87),
-                      iconSize: 14,
-                      style: const TextStyle(fontSize: 12),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          )
+              ),
+            ],
+          ),
+          // Address sits full-width below the avatar + name, not squeezed
+          // beside them.
+          const SizedBox(height: 12),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.location_on_outlined,
+                  size: 14, color: Color(0xFF5A6B87)),
+              const SizedBox(width: 4),
+              Expanded(
+                  child: Text(c.address ?? 'Ghatkopar, Mumbai',
+                      style: const TextStyle(
+                          color: Color(0xFF5A6B87), fontSize: 12, height: 1.35))),
+              const SizedBox(width: 8),
+              CallablePhoneNumber(
+                phoneNumber: c.contactNumber,
+                iconColor: const Color(0xFF5A6B87),
+                iconSize: 14,
+                style: const TextStyle(fontSize: 12),
+              ),
+            ],
+          ),
         ],
       ),
     );
@@ -1428,6 +1479,23 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                   'Credit Days', '${c.creditDays}', const Color(0xFF1B2B48)),
             ],
           ),
+          if (c.coveredAmount > 0) ...[
+            const Divider(height: 32, color: Color(0xFFEDF2F7)),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                _buildDataCol(
+                    'Under PTP / Dispute / Claim',
+                    _rupee.format(c.coveredAmount),
+                    const Color(0xFF8A6D0B)),
+                _buildDataCol(
+                    'To Recover Now',
+                    _rupee.format(c.actionableAmount),
+                    const Color(0xFFE53935)),
+                const SizedBox(width: 80),
+              ],
+            ),
+          ],
           const Divider(height: 32, color: Color(0xFFEDF2F7)),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -2108,65 +2176,83 @@ class _Customer360ScreenState extends State<Customer360Screen> {
     return out;
   }
 
-  Widget _buildHistoryRow(AuditEvent audit) {
-    Color iconColor;
-    Color iconBg;
-    IconData icon;
-    final t = audit.type.toLowerCase();
-
+  /// Icon + colour for an audit event, by type keyword. Shared by the
+  /// History card and the timeline rail so the node dot matches the card.
+  ({Color color, Color bg, IconData icon}) _auditVisuals(String type) {
+    final t = type.toLowerCase();
     if (t.contains('no answer') || t.contains('no response')) {
-      iconColor = const Color(0xFFE53935);
-      iconBg = const Color(0xFFFFEBEE);
-      icon = Icons.phone_missed;
+      return (color: const Color(0xFFE53935), bg: const Color(0xFFFFEBEE), icon: Icons.phone_missed);
     } else if (t.contains('broken') || t.contains('reject')) {
-      iconColor = const Color(0xFFE53935);
-      iconBg = const Color(0xFFFFEBEE);
-      icon = Icons.link_off;
+      return (color: const Color(0xFFE53935), bg: const Color(0xFFFFEBEE), icon: Icons.link_off);
     } else if (t.contains('ptp') ||
         t.contains('promise to pay') ||
         t.contains('payment') ||
         t.contains('paid') ||
         t.contains('receipt')) {
-      iconColor = const Color(0xFF388E3C);
-      iconBg = const Color(0xFFE8F5E9);
-      icon = Icons.check_circle_outline;
+      return (color: const Color(0xFF388E3C), bg: const Color(0xFFE8F5E9), icon: Icons.check_circle_outline);
     } else if (t.contains('approv')) {
-      iconColor = const Color(0xFF388E3C);
-      iconBg = const Color(0xFFE8F5E9);
-      icon = Icons.thumb_up_outlined;
+      return (color: const Color(0xFF388E3C), bg: const Color(0xFFE8F5E9), icon: Icons.thumb_up_outlined);
     } else if (t.contains('escalat')) {
-      iconColor = const Color(0xFFDC2626);
-      iconBg = const Color(0xFFFDECEC);
-      icon = Icons.priority_high;
+      return (color: const Color(0xFFDC2626), bg: const Color(0xFFFDECEC), icon: Icons.priority_high);
     } else if (t.contains('dispute')) {
-      iconColor = const Color(0xFF4F46E5);
-      iconBg = const Color(0xFFEEF0FF);
-      icon = Icons.gavel_outlined;
+      return (color: const Color(0xFF4F46E5), bg: const Color(0xFFEEF0FF), icon: Icons.gavel_outlined);
     } else if (t.contains('control') || t.contains('supervis')) {
-      iconColor = const Color(0xFF0052CC);
-      iconBg = const Color(0xFFE3EDFB);
-      icon = Icons.shield_outlined;
+      return (color: const Color(0xFF0052CC), bg: const Color(0xFFE3EDFB), icon: Icons.shield_outlined);
     } else if (t.contains('reassign') || t.contains('owner') || t.contains('instruction')) {
-      iconColor = const Color(0xFF0D9488);
-      iconBg = const Color(0xFFE0F2F1);
-      icon = Icons.swap_horiz;
+      return (color: const Color(0xFF0D9488), bg: const Color(0xFFE0F2F1), icon: Icons.swap_horiz);
     } else if (t.contains('task')) {
-      iconColor = const Color(0xFF8E24AA);
-      iconBg = const Color(0xFFF3E5F5);
-      icon = Icons.check_box_outlined;
+      return (color: const Color(0xFF8E24AA), bg: const Color(0xFFF3E5F5), icon: Icons.check_box_outlined);
     } else if (t.contains('snapshot') || t.contains('reopen')) {
-      iconColor = const Color(0xFF8E24AA);
-      iconBg = const Color(0xFFF3E5F5);
-      icon = Icons.autorenew;
+      return (color: const Color(0xFF8E24AA), bg: const Color(0xFFF3E5F5), icon: Icons.autorenew);
     } else if (t.contains('callback') || t.contains('follow-up') || t.contains('confirm')) {
-      iconColor = const Color(0xFFF57C00);
-      iconBg = const Color(0xFFFFF3E0);
-      icon = Icons.phone_callback;
-    } else {
-      iconColor = const Color(0xFF8E24AA);
-      iconBg = const Color(0xFFF3E5F5);
-      icon = Icons.bolt_outlined;
+      return (color: const Color(0xFFF57C00), bg: const Color(0xFFFFF3E0), icon: Icons.phone_callback);
     }
+    return (color: const Color(0xFF8E24AA), bg: const Color(0xFFF3E5F5), icon: Icons.bolt_outlined);
+  }
+
+  /// Wraps a History card in a vertical timeline rail (node dot + connector).
+  Widget _timelineEntry({
+    required Color color,
+    required bool isFirst,
+    required bool isLast,
+    required Widget child,
+  }) {
+    const railColor = Color(0xFFD8DEE8);
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SizedBox(
+            width: 24,
+            child: Column(
+              children: [
+                Container(width: 2, height: 16, color: isFirst ? Colors.transparent : railColor),
+                Container(
+                  width: 13,
+                  height: 13,
+                  decoration: BoxDecoration(
+                    color: color,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 2),
+                    boxShadow: [BoxShadow(color: color.withOpacity(0.25), blurRadius: 4)],
+                  ),
+                ),
+                Expanded(child: Container(width: 2, color: isLast ? Colors.transparent : railColor)),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(child: child),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHistoryRow(AuditEvent audit) {
+    final visuals = _auditVisuals(audit.type);
+    final Color iconColor = visuals.color;
+    final Color iconBg = visuals.bg;
+    final IconData icon = visuals.icon;
 
     final showTransition = audit.previousState != null &&
         audit.newState != null &&
@@ -2609,7 +2695,12 @@ class _Customer360ScreenState extends State<Customer360Screen> {
             padding: const EdgeInsets.symmetric(horizontal: 16),
             sliver: SliverList(
               delegate: SliverChildBuilderDelegate(
-                (ctx, i) => _buildHistoryRow(shown[i]),
+                (ctx, i) => _timelineEntry(
+                  color: _auditVisuals(shown[i].type).color,
+                  isFirst: i == 0,
+                  isLast: i == shown.length - 1 && !hasMore,
+                  child: _buildHistoryRow(shown[i]),
+                ),
                 childCount: shown.length,
               ),
             ),
@@ -2728,18 +2819,6 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                           ],
                         ),
                       ),
-                      if (_requestingNoAnswerApproval)
-                        Container(
-                          width: double.infinity,
-                          margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                              color: const Color(0xFFFFF7ED),
-                              borderRadius: BorderRadius.circular(8)),
-                          child: const Text(
-                              'This No Answer was recorded on a previous day — whatever you pick here goes to your Recovery Executive for approval before it takes effect.',
-                              style: TextStyle(fontSize: 11.5, color: Color(0xFFC2410C), fontWeight: FontWeight.w600)),
-                        ),
                       if (_selectedOutcome == null)
                         Padding(
                           padding: const EdgeInsets.all(16.0),
@@ -2869,10 +2948,21 @@ class _Customer360ScreenState extends State<Customer360Screen> {
   }
 
   Widget _buildOutcomeForm() {
+    // Cap the amount fields at the still-uncovered slice of the overdue.
+    // While part of the balance is already under a PTP / dispute / payment
+    // claim, the salesperson can only act on what's left — actionableAmount
+    // (server-derived, customer detail only; 0 on plain list rows, in which
+    // case fall back to the full outstanding).
+    final fresh = context.read<AppStore>().customers.firstWhere(
+        (x) => x.id == widget.customer.id,
+        orElse: () => widget.customer);
+    final amountCeiling = fresh.actionableAmount > 0
+        ? fresh.actionableAmount
+        : fresh.totalOutstanding;
     switch (_selectedOutcome) {
       case 'Promise to Pay (PTP)':
         return PtpOutcomeForm(
-            maxOutstanding: widget.customer.totalOutstanding,
+            maxOutstanding: amountCeiling,
             initialPerson: _lastContactPerson() ?? widget.customer.name,
             onSubmit: (data) {
           final amt = data['amount'];
@@ -2911,31 +3001,26 @@ class _Customer360ScreenState extends State<Customer360Screen> {
         });
       case 'Payment Already Made':
         return PaymentAlreadyMadeForm(
-            maxOutstanding: widget.customer.totalOutstanding,
-            onSubmit: (amt) => _finish(context, 'Verification Pending',
-                'Payment claimed', 'Amount: ₹$amt'));
+            maxOutstanding: amountCeiling,
+            onSubmit: (amt, file) => _finish(context, 'Verification Pending',
+                'Payment claimed', 'Amount: ₹$amt', screenshot: file));
       case 'No Answer':
-        // When replacing a prior No Answer, the attempt this submission
-        // represents is one less than the raw counter reads — the erase
-        // that's about to happen on submit hasn't landed yet (see
-        // AppStore.recordOutcome's `replacingNoAnswer`), so the counter
-        // still includes the attempt being replaced.
-        final rawAttemptNumber =
-            context.read<AppStore>().noAnswerAttemptCount(widget.customer.id);
         return NoAnswerForm(
-          attemptNumber: _replacingNoAnswerRecord ? rawAttemptNumber - 1 : rawAttemptNumber,
+          attemptNumber:
+              context.read<AppStore>().noAnswerAttemptCount(widget.customer.id),
           onSubmit: (screenshot) => _finish(
               context, 'Call Customer', 'No Answer', 'Next Call needed',
               screenshot: screenshot),
         );
       case 'Dispute Raised':
         return DisputeForm(
-            maxOutstanding: widget.customer.totalOutstanding,
-            onSubmit: (amt, reason) => _finish(
+            maxOutstanding: amountCeiling,
+            onSubmit: (amt, reason, file) => _finish(
                 context,
                 'Management Instruction',
                 'Dispute Raised',
-                'Reason: $reason, Amt: ₹$amt'));
+                'Reason: $reason, Amt: ₹$amt',
+                screenshot: file));
       case 'Unable / Refused':
         return UnableToCommitForm(
             onSubmit: (reason, notes, nextActionDate) => _finish(
@@ -2946,8 +3031,9 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                 followUpAt: nextActionDate));
       case 'Internal Action':
         return InternalActionForm(
-            onSubmit: (action) => _finish(context, 'Action Required',
-                'Internal Task', 'Details: $action'));
+            onSubmit: (action, file) => _finish(context, 'Action Required',
+                'Internal Task', 'Details: $action',
+                screenshot: file));
       default:
         return const SizedBox();
     }
@@ -2962,39 +3048,6 @@ class _Customer360ScreenState extends State<Customer360Screen> {
       XFile? screenshot}) async {
     final store = context.read<AppStore>();
     final navigator = Navigator.of(context);
-    // Consumed here so it only ever applies to the one outcome submitted
-    // right after _openEditRecordedOutcome set it — never to some later,
-    // unrelated Record Outcome call.
-    final replacingNoAnswer = _replacingNoAnswerRecord;
-    _replacingNoAnswerRecord = false;
-    final requestingNoAnswerApproval = _requestingNoAnswerApproval;
-    _requestingNoAnswerApproval = false;
-
-    if (requestingNoAnswerApproval) {
-      // Past the same-day self-service window — nothing applies until an
-      // RE approves (see AppStore.requestNoAnswerReplacement), so there's
-      // no new customer state to react to here: just confirm it was sent.
-      try {
-        await store.requestNoAnswerReplacement(widget.customer.id, nextAction, reason, details,
-            followUpAt: followUpAt,
-            ptpAmountValue: ptpAmountValue,
-            ptpDate: ptpDate,
-            ptpMode: ptpMode,
-            screenshot: screenshot);
-        navigator.pop();
-        // Info, not success — nothing has actually changed on the customer
-        // yet, it's just been handed to the RE. A green checkmark here
-        // would read as "this is done" when it's really "this is pending".
-        showAppMessageAfter(navigator,
-            message: 'Edit request sent to the Recovery Executive for approval.',
-            type: AppMessageType.info,
-            title: 'Sent for Approval');
-      } catch (e) {
-        showAppMessageAfter(navigator,
-            message: 'Could not send edit request: $e', type: AppMessageType.error);
-      }
-      return;
-    }
 
     try {
       await store.recordOutcome(widget.customer.id, nextAction, reason, details,
@@ -3002,8 +3055,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
           ptpAmountValue: ptpAmountValue,
           ptpDate: ptpDate,
           ptpMode: ptpMode,
-          screenshot: screenshot,
-          replacingNoAnswer: replacingNoAnswer);
+          screenshot: screenshot);
 
       if (widget.recoveryQueue) {
         final visited = <String>{

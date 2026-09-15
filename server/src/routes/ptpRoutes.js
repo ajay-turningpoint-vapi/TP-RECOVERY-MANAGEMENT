@@ -10,6 +10,7 @@ router.use(authenticate);
 const correctionRequestSchema = z.object({
   amount: z.coerce.number().positive(),
   date: z.coerce.date(),
+  paymentMode: z.string().optional(),
   reason: z.string().min(1),
 });
 

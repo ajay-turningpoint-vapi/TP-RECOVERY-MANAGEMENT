@@ -4,6 +4,7 @@ const auditRepository = require('../repositories/auditRepository');
 const escalationService = require('./escalationService');
 const taskService = require('./taskService');
 const { notifyDecision, salesmanForCustomer } = require('./decisionNotify');
+const { driveRecoveryTask, rupees } = require('./recoveryTaskService');
 const { withTransaction } = require('../config/db');
 const { NotFoundError, ValidationError } = require('../errors/AppError');
 
@@ -37,11 +38,24 @@ async function getOrThrow(id) {
   return ptp;
 }
 
-async function requestCorrection(ptpId, user, { amount, date, reason }) {
+async function requestCorrection(ptpId, user, { amount, date, paymentMode, reason }) {
   const ptp = await getOrThrow(ptpId);
+  // Same guarantee as outcome-edit requests: one pending request at a time,
+  // so a second submission can't silently overwrite the first before the RE
+  // has seen it.
+  if (ptp.correctionStatus === 'Pending') {
+    throw new ValidationError('A correction request for this PTP is already awaiting RE review.');
+  }
+  if (!(Number(amount) > 0)) {
+    throw new ValidationError('A positive corrected amount is required.');
+  }
+  if (date == null || Number.isNaN(new Date(date).getTime())) {
+    throw new ValidationError('A valid corrected date is required.');
+  }
   await ptpRepository.update(ptpId, {
     correctionRequestedAmount: amount,
     correctionRequestedDate: date,
+    correctionRequestedPaymentMode: paymentMode || null,
     correctionReason: reason,
     correctionStatus: 'Pending',
   });
@@ -58,8 +72,9 @@ async function approveCorrection(ptpId, user) {
   const ptp = await getOrThrow(ptpId);
   const newAmount = ptp.correctionRequestedAmount ?? ptp.amountPromised;
   const newDate = ptp.correctionRequestedDate ?? ptp.promiseDate;
+  const newMode = ptp.correctionRequestedPaymentMode ?? ptp.paymentMode;
 
-  await ptpRepository.update(ptpId, { amountPromised: newAmount, promiseDate: newDate, correctionStatus: 'Approved' });
+  await ptpRepository.update(ptpId, { amountPromised: newAmount, promiseDate: newDate, paymentMode: newMode, correctionStatus: 'Approved' });
   await auditRepository.record(ptp.customerId, {
     type: 'RE_APPROVED_PTP_CORRECTION',
     description: `${user.fullName} approved the salesperson's request to correct this PTP: amount changed from ₹${ptp.amountPromised.toFixed(0)} to ₹${newAmount.toFixed(0)}. Reason given: "${ptp.correctionReason || '-'}". The original commitment record is preserved in history, not overwritten.`,
@@ -71,6 +86,14 @@ async function approveCorrection(ptpId, user) {
     title: 'PTP correction approved',
     body: `${user.fullName} approved your PTP change — now ₹${newAmount.toFixed(0)} due ${new Date(newDate).toLocaleDateString('en-IN')}.`,
     customerId: ptp.customerId,
+  });
+  // The promised amount just moved — re-point the salesperson's single
+  // recovery task at whatever slice of the overdue this PTP no longer
+  // covers (and close it / park if it now covers everything).
+  await driveRecoveryTask(ptp.customerId, {
+    headline: `PTP corrected to ${rupees(newAmount)} — keep working the part it no longer covers.`,
+    priority: 'Normal',
+    deadlineHour: 21,
   });
   return ptpRepository.findById(ptpId);
 }
@@ -89,6 +112,13 @@ async function rejectCorrection(ptpId, user, reason) {
     title: 'PTP correction rejected',
     body: `${user.fullName} rejected your PTP correction request. Reason: "${reason}". The original PTP stands.`,
     customerId: ptp.customerId,
+  });
+  // Original PTP stands — re-point the recovery task anyway so its ₹ figure
+  // reflects the (unchanged) covered/uncovered split with no drift.
+  await driveRecoveryTask(ptp.customerId, {
+    headline: 'PTP correction rejected — the original promise stands. Keep working the uncovered balance.',
+    priority: 'Normal',
+    deadlineHour: 21,
   });
   return ptpRepository.findById(ptpId);
 }
@@ -185,11 +215,13 @@ async function markOutcome(ptpId, user, { outcome, amountReceived, brokenReason 
     await evaluateBrokenPtpEscalation(ptp.customerId);
   }
   // Every outcome — kept, partiallyKept, or broken — can still leave money
-  // owed (a "kept" PTP only covers what was promised, not necessarily the
-  // customer's whole balance). reopenRecoveryAfterPtpOutcome only actually
-  // creates anything when real due remains, via ensureFollowUpIfNeeded's
-  // own totalDue <= 0 guard, so this keeps recovery going until it's zero.
-  await reopenRecoveryAfterPtpOutcome(ptp.customerId, outcome);
+  // owed; reopenRecoveryAfterPtpOutcome drives the single recovery task to
+  // the current balance (or closes it at ₹0), so recovery continues until
+  // it's zero.
+  await reopenRecoveryAfterPtpOutcome(ptp.customerId, outcome, {
+    promised: ptp.amountPromised,
+    received,
+  });
 
   return ptpRepository.findById(ptpId);
 }
@@ -217,64 +249,31 @@ async function evaluateBrokenPtpEscalation(customerId) {
   );
 }
 
-// Reopen reason/urgency per PTP outcome — a broken promise is the most
-// urgent (call today), but "kept"/"partiallyKept" can still leave a real
-// balance (the PTP only ever covered what was promised, not necessarily
-// the customer's whole outstanding) so those still get a real follow-up,
-// just at normal urgency rather than an emergency one.
-const PTP_REOPEN_META = {
-  kept: {
-    reason: 'PTP kept — payment received',
-    auditType: 'PTP_KEPT_REOPENED_RECOVERY',
-    priority: 'Normal',
-  },
-  partiallyKept: {
-    reason: 'PTP partially kept — balance remains',
-    auditType: 'PTP_PARTIALLY_KEPT_REOPENED_RECOVERY',
-    priority: 'Normal',
-  },
-  broken: {
-    reason: 'PTP broken — no qualifying BUSY receipt found',
-    auditType: 'PTP_BROKEN_REOPENED_RECOVERY',
-    priority: 'High',
-  },
-};
-
 /**
- * Recovery must never go silent on any resolved PTP — kept, partially
- * kept, or broken — as long as real money is still due. Reuses
- * taskService.ensureFollowUpIfNeeded's existing guards (skip if a task or
- * another active PTP already covers this customer, or nothing is
- * actually due — this is what makes the chain stop exactly when the
- * customer's total overdue reaches ₹0, never before and never
- * indefinitely after) so this never creates a duplicate. Once this new
- * task itself is later completed, `taskService.completeTask`'s own call
- * to the same guard creates the *next* follow-up if money is still due —
- * so the chase continues call after call until the balance is zero, not
- * just once. Same post-commit, best-effort pattern as
- * evaluateBrokenPtpEscalation, called from the same two sites
- * (markOutcome here, and ptpVerificationService's finalizeDuePtps for the
- * automated daily job).
+ * A PTP just resolved (kept / partiallyKept / broken). Drive the single
+ * `source='Recovery'` call task to the customer's CURRENT overdue, due
+ * 6 PM today, saying exactly what to collect. Always fires while money is
+ * still due; closes the task at ₹0 or under RE control.
+ *
+ * `ctx = { promised, received }` shapes the task wording.
  */
-async function reopenRecoveryAfterPtpOutcome(customerId, outcome) {
-  const meta = PTP_REOPEN_META[outcome];
-  if (!meta) return;
-  await withTransaction(async (conn) => {
-    const created = await taskService.ensureFollowUpIfNeeded(
-      customerId,
-      null,
-      {
-        reason: meta.reason,
-        auditType: meta.auditType,
-        source: 'PTP Verification',
-        priority: meta.priority,
-        deadline: meta.priority === 'High' ? new Date() : undefined,
-      },
-      conn
-    );
-    if (created) {
-      await customerRepository.update(customerId, { currentRecoveryState: 'Action Required', primaryNextAction: 'CALL CUSTOMER' }, conn);
-    }
+async function reopenRecoveryAfterPtpOutcome(customerId, outcome, ctx = {}) {
+  const customer = await customerRepository.findById(customerId);
+  const name = (customer && customer.name) || 'the customer';
+  const promised = ctx.promised != null ? Number(ctx.promised) : null;
+  const received = ctx.received != null ? Number(ctx.received) : null;
+  let headline;
+  if (outcome === 'broken') {
+    headline = `Call ${name} — promise broken, nothing received.`;
+  } else if (outcome === 'partiallyKept') {
+    headline = `Call ${name} — ${received != null ? rupees(received) : 'part'} received${promised != null ? ` of ${rupees(promised)}` : ''}.`;
+  } else {
+    headline = `Call ${name} — ${promised != null ? rupees(promised) : 'the promised amount'} received.`;
+  }
+  await driveRecoveryTask(customerId, {
+    headline,
+    priority: outcome === 'broken' ? 'High' : 'Normal',
+    deadlineHour: 18,
   });
 }
 

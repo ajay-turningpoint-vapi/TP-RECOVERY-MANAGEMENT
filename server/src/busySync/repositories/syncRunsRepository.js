@@ -6,6 +6,7 @@ function mapRun(raw) {
   return {
     id: raw.id,
     jobName: raw.job_name,
+    branch: raw.branch ?? null,
     startedAt: raw.started_at,
     finishedAt: raw.finished_at,
     status: raw.status,
@@ -16,17 +17,17 @@ function mapRun(raw) {
   };
 }
 
-/** True if a run for this job is already marked 'running' — used for status reporting (not the concurrency guard itself — see sync/customerAgeingSync.js's advisory lock). */
-async function isRunInProgress() {
-  const rows = await query(`SELECT id FROM sync_runs WHERE job_name = ? AND status = 'running' LIMIT 1`, [JOB_NAME]);
+/** True if any run for `jobName` (default: the customer-ageing job) is currently 'running' — status reporting only, not the concurrency guard (that's the advisory lock in the sync modules). */
+async function isRunInProgress(jobName = JOB_NAME) {
+  const rows = await query(`SELECT id FROM sync_runs WHERE job_name = ? AND status = 'running' LIMIT 1`, [jobName]);
   return rows.length > 0;
 }
 
-async function startRun(startedAt) {
-  const result = await query(`INSERT INTO sync_runs (job_name, started_at, status) VALUES (?, ?, 'running')`, [
-    JOB_NAME,
-    startedAt,
-  ]);
+async function startRun(startedAt, branch = null, jobName = JOB_NAME) {
+  const result = await query(
+    `INSERT INTO sync_runs (job_name, branch, started_at, status) VALUES (?, ?, ?, 'running')`,
+    [jobName, branch, startedAt]
+  );
   return result.insertId;
 }
 
@@ -47,14 +48,29 @@ async function completeRun(runId, outcome) {
   );
 }
 
-async function getLatestRun() {
-  const rows = await query(`SELECT * FROM sync_runs WHERE job_name = ? ORDER BY id DESC LIMIT 1`, [JOB_NAME]);
+/** Latest run for `jobName`, optionally narrowed to one branch. */
+async function getLatestRun(branch = null, jobName = JOB_NAME) {
+  const rows = branch
+    ? await query(`SELECT * FROM sync_runs WHERE job_name = ? AND branch = ? ORDER BY id DESC LIMIT 1`, [jobName, branch])
+    : await query(`SELECT * FROM sync_runs WHERE job_name = ? ORDER BY id DESC LIMIT 1`, [jobName]);
   return rows.length > 0 ? mapRun(rows[0]) : null;
 }
 
-async function getRecentRuns(limit = 20) {
-  const rows = await query(`SELECT * FROM sync_runs WHERE job_name = ? ORDER BY id DESC LIMIT ?`, [JOB_NAME, limit]);
+/**
+ * The single most recent run across every job_name / branch — used by the
+ * universal /api/sync-status endpoint to tell active clients whether the
+ * last BUSY sync attempt (ageing or invoice, any branch) actually
+ * succeeded, so a failed / unreachable-source run can surface a real
+ * message instead of the app silently showing stale data.
+ */
+async function getLatestRunAny() {
+  const rows = await query(`SELECT * FROM sync_runs ORDER BY id DESC LIMIT 1`);
+  return rows.length > 0 ? mapRun(rows[0]) : null;
+}
+
+async function getRecentRuns(limit = 20, jobName = JOB_NAME) {
+  const rows = await query(`SELECT * FROM sync_runs WHERE job_name = ? ORDER BY id DESC LIMIT ?`, [jobName, limit]);
   return rows.map(mapRun);
 }
 
-module.exports = { isRunInProgress, startRun, completeRun, getLatestRun, getRecentRuns };
+module.exports = { JOB_NAME, isRunInProgress, startRun, completeRun, getLatestRun, getLatestRunAny, getRecentRuns };

@@ -5,6 +5,9 @@ import 'package:salesman_mobile/v2/stores/app_store.dart';
 import 'package:salesman_mobile/v2/models/task.dart';
 import 'package:salesman_mobile/v3/screens/request_detail_scaffold.dart';
 import 'package:salesman_mobile/v3/screens/unified_task_detail_screen.dart';
+import 'package:salesman_mobile/v3/screens/dispute_detail_screen.dart';
+import 'package:salesman_mobile/v3/screens/ptp_correction_review_screen.dart';
+import 'package:salesman_mobile/v3/widgets/branch_filter_chip.dart';
 
 final _rupee =
     NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
@@ -27,6 +30,9 @@ class _TaskItem {
   final String subtitle2;
   final DateTime date;
   final bool isDone;
+  /// Owner of the underlying task (RE's own id for Internal Action tasks
+  /// routed to them). '' for items with no single task owner.
+  final String ownerId;
   final String? amountLabel;
   final double? amountValue;
   final Color amountColor;
@@ -49,6 +55,7 @@ class _TaskItem {
     required this.subtitle2,
     required this.date,
     required this.isDone,
+    this.ownerId = '',
     this.amountLabel,
     this.amountValue,
     this.amountColor = kRed,
@@ -67,6 +74,11 @@ Color _priorityColor(String p) {
       return kGreen;
   }
 }
+
+/// Default RE review deadline for anything a salesman raises (dispute, PTP
+/// correction, outcome edit): 9:00 PM on the day it was raised.
+DateTime _reviewDeadline(DateTime raisedOn) =>
+    DateTime(raisedOn.year, raisedOn.month, raisedOn.day, 21);
 
 enum _Filter { all, dueToday, overdue, upcoming, completed }
 
@@ -131,17 +143,39 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
   List<_TaskItem> _buildItems(AppStore store) {
     final items = <_TaskItem>[];
 
-    // 1) Real AppTasks — excluding items that get their own specialised
-    // entry below (pending extension requests, unreviewed physical visits).
-    for (final t in store.tasks) {
-      final isVisitPendingReview = t.type == TaskType.physicalVisit &&
+    // 1) Real AppTasks — excluding physical visits closed without a
+    // recorded outcome (those get their own "nudge the salesman" entry).
+    final now = DateTime.now();
+    for (final t in store.visibleTasks) {
+      final isVisitNoOutcome = t.type == TaskType.physicalVisit &&
           t.status == TaskStatus.completed &&
-          !t.reviewedByRE;
-      if (t.approvalStatus == 'Pending' || isVisitPendingReview) continue;
+          (t.outcome == null || t.outcome!.trim().isEmpty);
+      if (isVisitNoOutcome) continue;
       final done = t.status == TaskStatus.completed;
+
+      // A salesman's own call-back — their own recorded outcome (Will
+      // Confirm / Follow-up / Customer Refused), or the covered/actionable
+      // "recover ₹X" task the reconcile drives after a PTP/dispute/claim
+      // event (source: Recovery Reconcile) — is theirs to work. The RE's
+      // queue only needs it once its time has passed and nothing was
+      // recorded (recording an outcome supersedes the task, so a still-open
+      // one here already means "nothing done"). So: hide it until overdue.
+      final isSalesmanSelfFollowUp = t.type == TaskType.customerCall &&
+          (t.source == 'Record Outcome' || t.source == 'Recovery Reconcile' || t.source == 'Recovery' || t.source == 'No Answer') &&
+          t.ownerId != store.currentSalesmanId;
+      if (!done && isSalesmanSelfFollowUp && !t.deadline.isBefore(now)) {
+        continue;
+      }
       final priority = t.priority == 'Critical' || t.priority == 'High'
           ? 'HIGH'
           : (t.priority == 'Normal' ? 'MEDIUM' : 'LOW');
+      final customer = store.customers.firstWhere((c) => c.id == t.customerId,
+          orElse: () => store.customers.first);
+      // The customer's field salesperson — NOT t.ownerId, which for an
+      // Internal Action task routed to the RE would show the RE's name.
+      final salesmanId = customer.assignedSalesmanId.isNotEmpty
+          ? customer.assignedSalesmanId
+          : t.ownerId;
       items.add(_TaskItem(
         id: 'task_${t.id}',
         kind: TaskKind.realTask,
@@ -150,23 +184,27 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
         color: _priorityColor(priority),
         priority: priority,
         title: taskTypeLabel(t.type),
-        subtitle1: 'Owner: ${store.salesmanDisplayName(t.ownerId)}',
+        subtitle1: 'Salesman: ${store.salesmanDisplayName(salesmanId)}',
         subtitle2: t.customerName,
         date: t.deadline,
         isDone: done,
+        ownerId: t.ownerId,
         amountLabel: 'Outstanding',
-        amountValue: store.customers
-            .firstWhere((c) => c.id == t.customerId,
-                orElse: () => store.customers.first)
-            .totalDue,
+        amountValue: customer.totalDue,
       ));
     }
 
-    // 2) Physical visits pending RE review
+    // 2) Physical visits closed with no recorded outcome — the RE nudges
+    // the salesman (call / create a follow-up), there is nothing to "review".
     for (final t in store.physicalVisitsPendingReview) {
       final dispute = store.disputes.cast<Map<String, dynamic>?>().firstWhere(
           (d) => d != null && d['customer'] == t.customerName,
           orElse: () => null);
+      final customer = store.customers.firstWhere((c) => c.id == t.customerId,
+          orElse: () => store.customers.first);
+      final salesmanId = customer.assignedSalesmanId.isNotEmpty
+          ? customer.assignedSalesmanId
+          : t.ownerId;
       items.add(_TaskItem(
         id: 'visit_${t.id}',
         kind: TaskKind.visitReview,
@@ -174,42 +212,16 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
         icon: Icons.location_on_outlined,
         color: kPurple,
         priority: 'MEDIUM',
-        title: 'Physical Visit Review',
-        subtitle1: 'Salesman: ${store.salesmanDisplayName(t.ownerId)}',
+        title: 'Physical Visit — No Outcome Recorded',
+        subtitle1: 'Salesman: ${store.salesmanDisplayName(salesmanId)}',
         subtitle2: t.customerName,
         date: t.completedAt ?? t.deadline,
         isDone: false,
         amountLabel: dispute != null ? 'Amount in Dispute' : 'Outstanding',
         amountValue: dispute != null
             ? (dispute['amount'] as num).toDouble()
-            : store.customers
-                .firstWhere((c) => c.id == t.customerId,
-                    orElse: () => store.customers.first)
-                .totalDue,
+            : customer.totalDue,
         amountColor: kPurple,
-      ));
-    }
-
-    // 3) Task extension requests
-    for (final t in store.tasks.where((t) => t.approvalStatus == 'Pending')) {
-      items.add(_TaskItem(
-        id: 'ext_${t.id}',
-        kind: TaskKind.taskExtension,
-        refId: t.id,
-        icon: Icons.schedule,
-        color: kAmber,
-        priority: 'MEDIUM',
-        title: 'Task Extension Request',
-        subtitle1: 'Salesman: ${store.salesmanDisplayName(t.ownerId)}',
-        subtitle2: t.customerName,
-        date: t.pendingDeadline ?? t.deadline,
-        isDone: false,
-        amountLabel: 'Outstanding',
-        amountValue: store.customers
-            .firstWhere((c) => c.id == t.customerId,
-                orElse: () => store.customers.first)
-            .totalDue,
-        amountColor: kAmber,
       ));
     }
 
@@ -220,8 +232,9 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
     // straight at that salesman's single largest overdue account — RE
     // opens that customer, sees the real numbers, and can create a task /
     // contact the salesman about that specific account.
-    for (final s in store.salesmen
-        .where((s) => (s['collectionAchievedPercent'] as int) < 60)) {
+    for (final s in store.visibleSalesmen.where((s) =>
+        (s['collectionAchievedPercent'] as int) < 60 &&
+        s['underperformanceDismissedToday'] != true)) {
       final owned = store.customers
           .where((c) => c.assignedSalesmanId == s['name'] && c.totalDue > 0)
           .toList();
@@ -253,7 +266,7 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
     // store.disputesAwaitingReviewCount, which totalOpenTaskItemsCount's
     // dispute term is built from).
     for (final d
-        in store.disputes.where((d) => d['status'] == 'Pending Approval')) {
+        in store.visibleDisputes.where((d) => d['status'] == 'Pending Approval')) {
       items.add(_TaskItem(
         id: 'dispute_${d['id']}',
         kind: TaskKind.dispute,
@@ -265,7 +278,7 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
         subtitle1:
             'Raised: ${DateFormat('dd MMM yyyy').format(d['raisedDate'])}',
         subtitle2: '${d['customer']}  ·  ${d['invoice']}',
-        date: (d['lastUpdated'] as DateTime?) ?? DateTime.now(),
+        date: _reviewDeadline((d['raisedDate'] as DateTime?) ?? DateTime.now()),
         isDone: false,
         amountLabel: 'Dispute Amount',
         amountValue: (d['amount'] as num).toDouble(),
@@ -286,12 +299,36 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
         priority: 'MEDIUM',
         title: 'PTP Correction Request',
         subtitle1: 'Customer: ${c.name}',
-        subtitle2: 'Owner: ${store.salesmanDisplayName(c.assignedSalesmanId)}',
-        date: p.correctionRequestedDate ?? p.promiseDate,
+        subtitle2: 'Salesman: ${store.salesmanDisplayName(c.assignedSalesmanId)}',
+        date: _reviewDeadline(p.correctionRequestedDate ?? p.promiseDate),
         isDone: false,
         amountLabel: 'Requested Amount',
         amountValue: p.correctionRequestedAmount ?? p.amountPromised,
         amountColor: kTeal,
+      ));
+    }
+
+    // 7b) Payment Already Made claims awaiting the RE's manual verification
+    // (check BUSY / ask the operator, then confirm or reject).
+    for (final p in store.pendingPaymentClaims) {
+      final c = store.customers.firstWhere(
+          (c) => c.id == (p['customerCode'] ?? ''),
+          orElse: () => store.customers.first);
+      items.add(_TaskItem(
+        id: 'pc_${p['id']}',
+        kind: TaskKind.paymentClaim,
+        refId: p['id'] as String,
+        icon: Icons.receipt_long_outlined,
+        color: kGreen,
+        priority: 'HIGH',
+        title: 'Payment Already Made — Verify',
+        subtitle1: 'Customer: ${c.name}',
+        subtitle2: 'Salesman: ${store.salesmanDisplayName(c.assignedSalesmanId)}',
+        date: _reviewDeadline((p['claimDateRaw'] as DateTime?) ?? DateTime.now()),
+        isDone: false,
+        amountLabel: 'Claimed Amount',
+        amountValue: (p['amount'] as num).toDouble(),
+        amountColor: kGreen,
       ));
     }
 
@@ -307,17 +344,25 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
         title: 'Outcome Edit Request',
         subtitle1: 'Customer: ${r.customerName}',
         subtitle2: 'by ${store.salesmanDisplayName(r.salesmanId)}',
-        date: r.requestedAt,
+        date: _reviewDeadline(r.requestedAt),
         isDone: false,
         amountLabel: null,
       ));
     }
 
-    // 9) Broken PTPs without an open escalation case (raw "PTP Missed" signal)
+    // 9) Broken PTPs the system did NOT already handle — no open escalation
+    // AND no open task on the account. A broken PTP normally auto-creates a
+    // call-customer follow-up; this row only surfaces the ones that fell
+    // through, so the RE can create that task manually.
     final escalatedCustomerIds =
         store.openEscalationCases.map((e) => e.customerId).toSet();
+    final openTaskCustomerIds = store.visibleTasks
+        .where((t) => t.status != TaskStatus.completed && t.status != TaskStatus.closed)
+        .map((t) => t.customerId)
+        .toSet();
     for (final p in store.brokenPtps) {
       if (escalatedCustomerIds.contains(p.customerId)) continue;
+      if (openTaskCustomerIds.contains(p.customerId)) continue;
       final c = store.customers.firstWhere((c) => c.id == p.customerId,
           orElse: () => store.customers.first);
       items.add(_TaskItem(
@@ -375,7 +420,11 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
             !_isToday(i.date) &&
             i.date.difference(now).inDays <= 7)
         .length;
-    final completed = items.where((i) => i.isDone).length;
+    // "Completed by RE" — terminal actions the RE personally took. For an
+    // Internal Action the salesman raised, the task is owned by this RE,
+    // so once actioned it drops out of the pending list and lands here.
+    final reId = store.currentSalesmanId;
+    final completed = items.where((i) => i.isDone && i.ownerId == reId).length;
 
     List<_TaskItem> filtered;
     switch (_filter) {
@@ -395,7 +444,7 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
             .toList();
         break;
       case _Filter.completed:
-        filtered = items.where((i) => i.isDone).toList();
+        filtered = items.where((i) => i.isDone && i.ownerId == reId).toList();
         break;
       case _Filter.all:
         filtered = items.where((i) => !i.isDone).toList();
@@ -463,6 +512,7 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
   }
 
   Widget _header(BuildContext context) {
+    final store = context.watch<AppStore>();
     return Padding(
       padding: const EdgeInsets.fromLTRB(14, 14, 14, 8),
       child: Row(
@@ -481,6 +531,7 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
               ],
             ),
           ),
+          BranchFilterChip(store: store),
           IconButton(
               icon: const Icon(Icons.tune, color: _navy),
               onPressed: () => _showFilterSheet(context)),
@@ -592,7 +643,7 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
         kGreen,
         '$completed',
         'Completed',
-        'All Time'
+        'By RE'
       ),
     ];
     return Padding(
@@ -719,11 +770,25 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
       dueColor = _blue;
     }
 
-    void openDetail() => Navigator.push(
-        context,
-        MaterialPageRoute(
-            builder: (_) =>
-                UnifiedTaskDetailScreen(kind: item.kind, refId: item.refId)));
+    void openDetail() {
+      // Disputes and PTP corrections open their dedicated review screens
+      // (full old→new diff / resolution flow) instead of the generic one.
+      final Widget screen;
+      if (item.kind == TaskKind.dispute) {
+        screen = DisputeDetailScreen(disputeId: item.refId);
+      } else if (item.kind == TaskKind.ptpCorrection) {
+        screen = PtpCorrectionReviewScreen(ptpId: item.refId);
+      } else {
+        screen = UnifiedTaskDetailScreen(kind: item.kind, refId: item.refId);
+      }
+      // Always re-pull on return so an item the RE just approved / rejected /
+      // resolved in the detail screen drops out of this queue immediately,
+      // even if that screen popped before its own refresh settled.
+      Navigator.push(context, MaterialPageRoute(builder: (_) => screen))
+          .then((_) {
+        if (context.mounted) context.read<AppStore>().refreshLiveData();
+      });
+    }
 
     return Material(
       color: Colors.white,

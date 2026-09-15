@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:salesman_mobile/v2/stores/app_store.dart';
 import 'package:salesman_mobile/v2/screens/dashboard_screen.dart';
 import 'package:salesman_mobile/v2/screens/tasks_screen.dart';
 import 'package:salesman_mobile/v2/screens/customers_screen.dart';
 import 'package:salesman_mobile/v2/screens/profile_screen.dart';
+import 'package:salesman_mobile/widgets/data_loading.dart' show InitialDataLoader;
 
 class MainScaffold extends StatefulWidget {
   const MainScaffold({super.key});
@@ -23,8 +26,9 @@ class _MainScaffoldState extends State<MainScaffold> {
 
   @override
   Widget build(BuildContext context) {
+    final openTasks = context.watch<AppStore>().myOpenTaskCount;
     return Scaffold(
-      body: _pages[_currentIndex],
+      body: InitialDataLoader(child: _pages[_currentIndex]),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
         type: BottomNavigationBarType.fixed,
@@ -34,21 +38,27 @@ class _MainScaffoldState extends State<MainScaffold> {
           setState(() {
             _currentIndex = index;
           });
+          context.read<AppStore>().refreshLiveData();
         },
-        items: const [
-          BottomNavigationBarItem(
+        items: [
+          const BottomNavigationBarItem(
             icon: Icon(Icons.dashboard),
             label: 'Home',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.assignment),
+            icon: Badge(
+              isLabelVisible: openTasks > 0,
+              label: Text(openTasks > 99 ? '99+' : '$openTasks'),
+              backgroundColor: const Color(0xFFE53935),
+              child: const Icon(Icons.assignment),
+            ),
             label: 'Tasks',
           ),
-          BottomNavigationBarItem(
+          const BottomNavigationBarItem(
             icon: Icon(Icons.people),
             label: 'Customers',
           ),
-          BottomNavigationBarItem(
+          const BottomNavigationBarItem(
             icon: Icon(Icons.person),
             label: 'Profile',
           ),

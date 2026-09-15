@@ -54,10 +54,10 @@ test('RE approving an Internal Action closes the RE task and creates a call-cust
   assert.ok(updated.outcome && updated.outcome.startsWith('Approved:'));
 
   const tasks = await fetch(`${app.baseUrl}/api/tasks`, { headers: authHeaders(reToken) }).then((r) => r.json());
-  const followUp = tasks.find((t) => t.customerId === 'C1' && t.ownerId === 'rahul' && t.type === 'customerCall' && t.reason === 'Internal action approved');
-  assert.ok(followUp, 'approving must create a call-customer follow-up for the salesperson');
+  const followUp = tasks.find((t) => t.customerId === 'C1' && t.type === 'customerCall' && t.source === 'Recovery' && t.status !== 'completed');
+  assert.ok(followUp, 'approving must create the salesperson recovery task');
   assert.equal(followUp.priority, 'Normal');
-  assert.ok(followUp.note && followUp.note.includes('approved'));
+  assert.match(followUp.reason, /Internal action approved/);
 
   const customer = await fetch(`${app.baseUrl}/api/customers/C1`, { headers: authHeaders(reToken) }).then((r) => r.json());
   assert.equal(customer.currentRecoveryState, 'Action Required');
@@ -80,9 +80,9 @@ test('RE rejecting an Internal Action closes the RE task and creates a call-cust
   assert.ok(updated.outcome && updated.outcome.startsWith('Rejected:'));
 
   const tasks = await fetch(`${app.baseUrl}/api/tasks`, { headers: authHeaders(reToken) }).then((r) => r.json());
-  const followUp = tasks.find((t) => t.customerId === 'C4' && t.ownerId === 'mahesh' && t.type === 'customerCall' && t.reason === 'Internal action rejected');
-  assert.ok(followUp, 'rejecting must create a call-customer follow-up for the salesperson');
-  assert.ok(followUp.note && followUp.note.includes('rejected'));
+  const followUp = tasks.find((t) => t.customerId === 'C4' && t.type === 'customerCall' && t.source === 'Recovery' && t.status !== 'completed');
+  assert.ok(followUp, 'rejecting must create the salesperson recovery task');
+  assert.match(followUp.reason, /Internal action reviewed/);
 });
 
 test('an Internal Action cannot be decided twice', async () => {

@@ -7,7 +7,6 @@ import 'package:salesman_mobile/v3/screens/report_detail_screens.dart';
 import 'package:salesman_mobile/v3/screens/more_menu_screen.dart';
 
 const _navy = Color(0xFF1B2B48);
-const _blue = Color(0xFF2563EB);
 
 final _rupeeCompact = NumberFormat.compactCurrency(locale: 'en_IN', symbol: '₹', decimalDigits: 1);
 
@@ -19,19 +18,17 @@ class ReportsScreen extends StatefulWidget {
 }
 
 class _ReportsScreenState extends State<ReportsScreen> {
-  String _dateRange = 'This Month';
-  String _branch = 'All Branches';
-  String _salesman = 'All Salesmen';
-  ReportFilters _applied = const ReportFilters();
+  // Branch is the global scope (AppStore.branchFilter). Date range and
+  // salesperson are no longer picked here — each report page that actually
+  // uses them (see report_detail_screens.dart) has its own inline filter
+  // bar, since most reports don't use a date range at all and applying one
+  // globally here was misleading for those pages.
+  String get _branch => context.read<AppStore>().branchFilter;
+  ReportFilters get _applied => ReportFilters(branch: _branch);
 
   @override
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
-    final branches = ['All Branches', ...{for (final s in store.salesmen) ((s['branch'] as String?) ?? 'Turning Point')}];
-    // Values stay the internal salesman id (downstream reports match on it);
-    // the dropdown only renders the real name.
-    final salesmenNames = ['All Salesmen', ...store.salesmen.map((s) => s['name'] as String)];
-    String salesmanLabel(String v) => v == 'All Salesmen' ? v : store.salesmanDisplayName(v);
 
     final reports = [
       (Icons.assignment_outlined, kBlue, 'Daily Recovery Summary', 'Collections, targets and daily closure', (BuildContext c) => DailyRecoverySummaryReport(filters: _applied)),
@@ -57,25 +54,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                 const Expanded(child: Text('Reports', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20, color: _navy))),
               ],
             ),
-            const SizedBox(height: 6),
-            InfoCard(children: [
-              _filterRow(Icons.calendar_today_outlined, kPurple, 'Date Range', _dateRange, ['Today', 'This Week', 'This Month', 'This Quarter', 'All Time'], (v) => setState(() => _dateRange = v)),
-              const Padding(padding: EdgeInsets.symmetric(vertical: 10), child: Divider(height: 1, color: kBorder)),
-              _filterRow(Icons.apartment_outlined, kBlue, 'Branch', _branch, branches, (v) => setState(() => _branch = v)),
-              const Padding(padding: EdgeInsets.symmetric(vertical: 10), child: Divider(height: 1, color: kBorder)),
-              _filterRow(Icons.person_outline, kBlue, 'Salesperson', _salesman, salesmenNames, (v) => setState(() => _salesman = v), labelFor: salesmanLabel),
-              const SizedBox(height: 14),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(backgroundColor: _blue, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-                  onPressed: () => setState(() => _applied = ReportFilters(dateRange: _dateRange, branch: _branch, salesman: _salesman)),
-                  icon: const Icon(Icons.filter_alt, size: 16),
-                  label: const Text('Apply Filters', style: TextStyle(fontWeight: FontWeight.bold)),
-                ),
-              ),
-            ]),
-            const SizedBox(height: 20),
+            const SizedBox(height: 14),
             const Text('Quick Insights', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: _navy)),
             const SizedBox(height: 10),
             _quickInsights(store),
@@ -128,38 +107,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
     );
   }
 
-  Widget _filterRow(IconData icon, Color color, String label, String value, List<String> options, ValueChanged<String> onChanged, {String Function(String)? labelFor}) {
-    String text(String o) => labelFor != null ? labelFor(o) : o;
-    return Row(
-      children: [
-        Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: color.withOpacity(0.1), shape: BoxShape.circle), child: Icon(icon, size: 15, color: color)),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(label, style: const TextStyle(fontSize: 10.5, color: kMuted)),
-              DropdownButtonHideUnderline(
-                child: DropdownButton<String>(
-                  value: value,
-                  isDense: true,
-                  isExpanded: true,
-                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: kDark),
-                  items: options.map((o) => DropdownMenuItem(value: o, child: Text(text(o), overflow: TextOverflow.ellipsis))).toList(),
-                  onChanged: (v) { if (v != null) onChanged(v); },
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
   Widget _quickInsights(AppStore store) {
     final keptPct = store.ptpKeptMtdPercent;
     final cards = <(IconData, Color, String, String, String)>[
-      (Icons.account_balance_wallet_outlined, kBlue, _rupeeCompact.format(store.teamTotalOutstanding), 'Total Outstanding', '${store.customers.length} customers'),
+      (Icons.account_balance_wallet_outlined, kBlue, _rupeeCompact.format(store.teamTotalOutstanding), 'Total Outstanding', '${store.visibleCustomers.length} customers'),
       (Icons.shield_outlined, kRed, _rupeeCompact.format(store.moneyAtRisk), 'Money at Risk', '${store.atRiskAccounts.length} accounts'),
       (Icons.event_available_outlined, keptPct >= 75 ? kGreen : kOrange, '$keptPct%', 'PTP Kept (MTD)', 'Target 75%'),
       (Icons.priority_high, kPurple, '${store.openEscalationCases.length}', 'Open Escalations', 'L2 – L4'),

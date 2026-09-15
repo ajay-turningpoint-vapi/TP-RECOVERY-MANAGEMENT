@@ -68,7 +68,7 @@ class _DisputesListViewState extends State<DisputesListView> {
   @override
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
-    List<Map<String, dynamic>> disputes = store.disputes;
+    List<Map<String, dynamic>> disputes = store.visibleDisputes;
     if (_query.isNotEmpty) {
       final q = _query.toLowerCase();
       disputes = disputes.where((d) =>
@@ -78,11 +78,11 @@ class _DisputesListViewState extends State<DisputesListView> {
     }
 
     final buckets = {
-      'ALL': store.disputes.length,
-      'OPEN': store.disputes.where((d) => _bucketOf(d['status']) == 'OPEN').length,
-      'IN PROGRESS': store.disputes.where((d) => _bucketOf(d['status']) == 'IN PROGRESS').length,
-      'RESOLVED': store.disputes.where((d) => _bucketOf(d['status']) == 'RESOLVED').length,
-      'REJECTED': store.disputes.where((d) => _bucketOf(d['status']) == 'REJECTED').length,
+      'ALL': store.visibleDisputes.length,
+      'OPEN': store.visibleDisputes.where((d) => _bucketOf(d['status']) == 'OPEN').length,
+      'IN PROGRESS': store.visibleDisputes.where((d) => _bucketOf(d['status']) == 'IN PROGRESS').length,
+      'RESOLVED': store.visibleDisputes.where((d) => _bucketOf(d['status']) == 'RESOLVED').length,
+      'REJECTED': store.visibleDisputes.where((d) => _bucketOf(d['status']) == 'REJECTED').length,
     };
 
     if (_bucket != 'ALL') {

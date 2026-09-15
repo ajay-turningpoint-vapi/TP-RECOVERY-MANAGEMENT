@@ -23,6 +23,7 @@ const COLUMNS = [
   'salesman_code',
   'credit_days',
   'credit_limit',
+  'branch',
   'last_synced_at',
 ];
 
@@ -30,7 +31,7 @@ const UPDATABLE_COLUMNS = COLUMNS.filter((c) => c !== 'customer_id');
 
 const CHUNK_SIZE = 200;
 
-function toRowValues(row, syncStartedAt) {
+function toRowValues(row, syncStartedAt, branchLabel) {
   return [
     row.customerId,
     row.customerName,
@@ -53,6 +54,7 @@ function toRowValues(row, syncStartedAt) {
     row.salesmanCode,
     row.creditDays,
     row.creditLimit,
+    branchLabel,
     syncStartedAt,
   ];
 }
@@ -65,7 +67,7 @@ function chunk(items, size) {
   return out;
 }
 
-async function upsertChunk(connection, rows, syncStartedAt) {
+async function upsertChunk(connection, rows, syncStartedAt, branchLabel) {
   const placeholders = rows.map(() => `(${COLUMNS.map(() => '?').join(', ')})`).join(', ');
   const updateClause = UPDATABLE_COLUMNS.map((c) => `${c} = VALUES(${c})`).join(', ');
   const sql = `
@@ -73,7 +75,7 @@ async function upsertChunk(connection, rows, syncStartedAt) {
     VALUES ${placeholders}
     ON DUPLICATE KEY UPDATE ${updateClause}
   `;
-  const values = rows.flatMap((row) => toRowValues(row, syncStartedAt));
+  const values = rows.flatMap((row) => toRowValues(row, syncStartedAt, branchLabel));
   await connection.query(sql, values);
 }
 
@@ -84,20 +86,24 @@ async function upsertChunk(connection, rows, syncStartedAt) {
  * query's result set (e.g. a customer that's now CR/settled) must be
  * removed here too. Runs as one transaction: a failure rolls back the
  * whole run, leaving yesterday's data intact rather than half-updated.
+ *
+ * The stale sweep is scoped to `branchLabel`: each branch's run carries
+ * its own timestamp, so a global "last_synced_at < ?" would delete the
+ * other branch's rows the moment the second branch syncs.
  */
-async function syncSnapshot(rows, syncStartedAt) {
+async function syncSnapshot(rows, syncStartedAt, branchLabel = 'Turning Point') {
   return withTransaction(async (connection) => {
     for (const batch of chunk(rows, CHUNK_SIZE)) {
-      await upsertChunk(connection, batch, syncStartedAt);
+      await upsertChunk(connection, batch, syncStartedAt, branchLabel);
     }
 
     const [deleteResult] = await connection.query(
-      'DELETE FROM customer_ageing_snapshot WHERE last_synced_at < ?',
-      [syncStartedAt]
+      'DELETE FROM customer_ageing_snapshot WHERE branch = ? AND last_synced_at < ?',
+      [branchLabel, syncStartedAt]
     );
 
     logger.info(
-      `[busy-sync] customer_ageing_snapshot: upserted ${rows.length} row(s), swept ${deleteResult.affectedRows} stale row(s).`
+      `[busy-sync] customer_ageing_snapshot (${branchLabel}): upserted ${rows.length} row(s), swept ${deleteResult.affectedRows} stale row(s).`
     );
 
     return { upserted: rows.length, deleted: deleteResult.affectedRows };

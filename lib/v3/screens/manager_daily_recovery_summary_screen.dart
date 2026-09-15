@@ -23,18 +23,17 @@ class ManagerDailyRecoverySummaryScreen extends StatefulWidget {
 }
 
 class _ManagerDailyRecoverySummaryScreenState extends State<ManagerDailyRecoverySummaryScreen> {
-  late String _branch;
+  String get _branch => context.read<AppStore>().branchFilter;
 
   @override
   void initState() {
     super.initState();
-    _branch = widget.initialBranch;
   }
 
   @override
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
-    final branches = ['All Branches', ...{for (final s in store.salesmen) ((s['branch'] as String?) ?? 'Turning Point')}];
+    final branches = store.branchOptions;
     final now = DateTime.now();
 
     final salesmen = store.salesmen.where((s) => _branch == 'All Branches' || ((s['branch'] as String?) ?? 'Turning Point') == _branch).toList();
@@ -205,7 +204,7 @@ class _ManagerDailyRecoverySummaryScreenState extends State<ManagerDailyRecovery
                       icon: const Icon(Icons.keyboard_arrow_down, size: 15, color: kMuted),
                       style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: kDark),
                       items: branches.map((b) => DropdownMenuItem(value: b, child: Text(b, overflow: TextOverflow.ellipsis))).toList(),
-                      onChanged: (v) { if (v != null) setState(() => _branch = v); },
+                      onChanged: (v) { if (v != null) { context.read<AppStore>().setBranchFilter(v); setState(() {}); } },
                     ),
                   ),
                 ),

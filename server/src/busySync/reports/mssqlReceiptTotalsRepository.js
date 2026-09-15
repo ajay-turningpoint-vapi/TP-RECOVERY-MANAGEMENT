@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
-const { sql, mssqlDb } = require('../config/mssqlClient');
+const { sql, mssqlDb, poolForDatabase } = require('../config/mssqlClient');
+const { parentGroupClause } = require('./parentGroupFilter');
 
 const QUERY_PATH = path.resolve(__dirname, 'receiptTotalsReport.mssql.sql');
 
@@ -26,15 +27,23 @@ function mapRow(raw) {
  * compared against the BUSY transaction date). Used by
  * services/ptpVerificationService.js to check whether a promised payment
  * actually landed in BUSY within a PTP's eligible window.
+ *
+ * `database` / `parentGroups` scope the query to one branch's BUSY company
+ * database + PARENTGRP list (config/branches.js). Omitting them keeps the
+ * historical Turning Point-only behaviour.
+ *
+ * @param {{ startDate: string, endDate: string, database?: string, parentGroups?: string[] }} opts
  */
-async function getReceiptTotals({ startDate, endDate }) {
-  if (!mssqlDb.isConnected) {
-    await mssqlDb.connect();
+async function getReceiptTotals({ startDate, endDate, database, parentGroups }) {
+  const conn = database ? await poolForDatabase(database) : mssqlDb;
+  if (!conn.isConnected) {
+    await conn.connect();
   }
 
-  const queryText = fs.readFileSync(QUERY_PATH, 'utf8');
+  let queryText = fs.readFileSync(QUERY_PATH, 'utf8');
+  queryText = queryText.replace('/*{{PARENTGRP_FILTER}}*/', parentGroupClause(parentGroups));
 
-  const request = mssqlDb.getPool().request();
+  const request = conn.getPool().request();
   request.input('startDate', sql.Date, startDate);
   request.input('endDate', sql.Date, endDate);
 

@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import helmet from 'helmet';
 import mssqlDb, { requireErpConnection } from './config/mssql';
 import adminRoutes from './routes/adminRoutes';
+import reportRoutes from './routes/reportRoutes';
 import logger from './utils/logger';
 
 dotenv.config();
@@ -25,6 +26,7 @@ app.get('/health', requireErpConnection, (req, res) => {
 });
 
 app.use('/api/admin', adminRoutes);
+app.use('/api/reports', reportRoutes);
 
 // The sync status dashboard — served from the same origin as the API,
 // so no CORS setup is needed.

@@ -22,6 +22,7 @@ class PromiseToPay {
   // PTP correction request (spec §20)
   final double? correctionRequestedAmount;
   final DateTime? correctionRequestedDate;
+  final String? correctionRequestedPaymentMode;
   final String? correctionReason;
   final String correctionStatus; // 'none' | 'Pending' | 'Approved' | 'Rejected'
 
@@ -39,6 +40,7 @@ class PromiseToPay {
     this.amountReceived,
     this.correctionRequestedAmount,
     this.correctionRequestedDate,
+    this.correctionRequestedPaymentMode,
     this.correctionReason,
     this.correctionStatus = 'none',
     this.brokenReason,
@@ -56,6 +58,7 @@ class PromiseToPay {
       status: PtpStatus.values.byName(json['status'] as String),
       correctionRequestedAmount: (json['correctionRequestedAmount'] as num?)?.toDouble(),
       correctionRequestedDate: json['correctionRequestedDate'] != null ? DateTime.parse(json['correctionRequestedDate'] as String).toLocal() : null,
+      correctionRequestedPaymentMode: json['correctionRequestedPaymentMode'] as String?,
       correctionReason: json['correctionReason'] as String?,
       correctionStatus: json['correctionStatus'] as String? ?? 'none',
       amountReceived: (json['amountReceived'] as num?)?.toDouble(),
@@ -73,6 +76,7 @@ class PromiseToPay {
     double? amountReceived,
     double? correctionRequestedAmount,
     DateTime? correctionRequestedDate,
+    String? correctionRequestedPaymentMode,
     String? correctionReason,
     String? correctionStatus,
     String? brokenReason,
@@ -87,6 +91,7 @@ class PromiseToPay {
       amountReceived: amountReceived ?? this.amountReceived,
       correctionRequestedAmount: correctionRequestedAmount ?? this.correctionRequestedAmount,
       correctionRequestedDate: correctionRequestedDate ?? this.correctionRequestedDate,
+      correctionRequestedPaymentMode: correctionRequestedPaymentMode ?? this.correctionRequestedPaymentMode,
       correctionReason: correctionReason ?? this.correctionReason,
       correctionStatus: correctionStatus ?? this.correctionStatus,
       brokenReason: brokenReason ?? this.brokenReason,

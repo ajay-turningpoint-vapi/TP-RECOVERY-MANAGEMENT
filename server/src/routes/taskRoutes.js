@@ -25,10 +25,12 @@ const rescheduleSchema = z.object({
 
 const internalActionApproveSchema = z.object({
   note: z.string().optional(),
+  attachmentPath: z.string().optional(),
 });
 
 const internalActionRejectSchema = z.object({
   reason: z.string().optional(),
+  attachmentPath: z.string().optional(),
 });
 
 router.get('/', controller.list);

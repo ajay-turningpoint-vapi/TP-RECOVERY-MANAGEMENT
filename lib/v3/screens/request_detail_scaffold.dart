@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:intl/intl.dart';
 import 'package:salesman_mobile/v2/models/task.dart';
 import 'package:salesman_mobile/v2/stores/app_store.dart';
+import 'package:salesman_mobile/services/attachment_opener.dart';
 import 'package:salesman_mobile/widgets/app_message.dart';
 
 const _imageExtensions = {'jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'bmp'};
@@ -272,14 +273,26 @@ class RequestDetailScaffold extends StatelessWidget {
                   border: const Border(top: BorderSide(color: kBorder)),
                   boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 12, offset: const Offset(0, -4))],
                 ),
-                child: Row(
-                  children: [
-                    for (int i = 0; i < actions.length; i++) ...[
-                      if (i > 0) const SizedBox(width: 10),
-                      Expanded(child: SizedBox(height: 48, child: actions[i])),
-                    ],
-                  ],
-                ),
+                // Up to two actions sit side by side; three or more stack
+                // full-width so labels never get clipped.
+                child: actions.length <= 2
+                    ? Row(
+                        children: [
+                          for (int i = 0; i < actions.length; i++) ...[
+                            if (i > 0) const SizedBox(width: 10),
+                            Expanded(child: SizedBox(height: 48, child: actions[i])),
+                          ],
+                        ],
+                      )
+                    : Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          for (int i = 0; i < actions.length; i++) ...[
+                            if (i > 0) const SizedBox(height: 8),
+                            SizedBox(width: double.infinity, height: 46, child: actions[i]),
+                          ],
+                        ],
+                      ),
               ),
             ),
         ],
@@ -425,7 +438,10 @@ class ActivityTimeline extends StatelessWidget {
 /// a real capture flow, not decorative file rows.
 class AttachmentsSection extends StatefulWidget {
   final String refId;
-  const AttachmentsSection({super.key, required this.refId});
+  /// When true, only lists existing evidence — no add buttons, no delete.
+  /// Capture then happens exclusively inside the Approve/Reject form.
+  final bool readOnly;
+  const AttachmentsSection({super.key, required this.refId, this.readOnly = false});
 
   @override
   State<AttachmentsSection> createState() => _AttachmentsSectionState();
@@ -483,7 +499,14 @@ class _AttachmentsSectionState extends State<AttachmentsSection> {
           ],
         ),
         InfoCard(children: [
-          if (files.isEmpty) const Padding(padding: EdgeInsets.symmetric(vertical: 4), child: Text('No evidence attached yet.', style: TextStyle(fontSize: 11.5, color: kMuted))),
+          if (files.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Text(
+                widget.readOnly ? 'No evidence attached.' : 'No evidence attached yet.',
+                style: const TextStyle(fontSize: 11.5, color: kMuted),
+              ),
+            ),
           ...files.map((f) {
             final fileName = f['fileName'] as String;
             final isImage = _isImageFile(fileName);
@@ -515,45 +538,47 @@ class _AttachmentsSectionState extends State<AttachmentsSection> {
                         ],
                       ),
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.close, size: 16, color: kMuted),
-                      onPressed: () => store.removeAttachment(widget.refId, fileName, f['timestamp']),
-                    ),
+                    if (!widget.readOnly)
+                      IconButton(
+                        icon: const Icon(Icons.close, size: 16, color: kMuted),
+                        onPressed: () => store.removeAttachment(widget.refId, fileName, f['timestamp']),
+                      ),
                   ],
                 ),
               ),
             );
           }),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(side: const BorderSide(color: kBlue), foregroundColor: kBlue, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-                  onPressed: _busy ? null : () => _pick(store, ImageSource.camera),
-                  icon: const Icon(Icons.photo_camera_outlined, size: 16),
-                  label: const Text('Camera', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+          if (!widget.readOnly)
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(side: const BorderSide(color: kBlue), foregroundColor: kBlue, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+                    onPressed: _busy ? null : () => _pick(store, ImageSource.camera),
+                    icon: const Icon(Icons.photo_camera_outlined, size: 16),
+                    label: const Text('Camera', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                  ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(side: const BorderSide(color: kBlue), foregroundColor: kBlue, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-                  onPressed: _busy ? null : () => _pick(store, ImageSource.gallery),
-                  icon: const Icon(Icons.photo_library_outlined, size: 16),
-                  label: const Text('Gallery', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(side: const BorderSide(color: kBlue), foregroundColor: kBlue, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+                    onPressed: _busy ? null : () => _pick(store, ImageSource.gallery),
+                    icon: const Icon(Icons.photo_library_outlined, size: 16),
+                    label: const Text('Gallery', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                  ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(side: const BorderSide(color: kRed), foregroundColor: kRed, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-                  onPressed: _busy ? null : () => _pickDocument(store),
-                  icon: const Icon(Icons.picture_as_pdf_outlined, size: 16),
-                  label: const Text('PDF', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(side: const BorderSide(color: kRed), foregroundColor: kRed, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+                    onPressed: _busy ? null : () => _pickDocument(store),
+                    icon: const Icon(Icons.picture_as_pdf_outlined, size: 16),
+                    label: const Text('PDF', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                  ),
                 ),
-              ),
-            ],
-          ),
+              ],
+            ),
         ]),
       ],
     );
@@ -566,7 +591,10 @@ class _AttachmentsSectionState extends State<AttachmentsSection> {
 /// but never displayed back) plus a field to add a new one.
 class NotesSection extends StatefulWidget {
   final String refId;
-  const NotesSection({super.key, required this.refId});
+  /// When true, only lists existing notes — the add field lives in the
+  /// Approve/Reject form instead.
+  final bool readOnly;
+  const NotesSection({super.key, required this.refId, this.readOnly = false});
 
   @override
   State<NotesSection> createState() => _NotesSectionState();
@@ -608,30 +636,421 @@ class _NotesSectionState extends State<NotesSection> {
                     ],
                   ),
                 )),
-            const Divider(height: 20),
+            if (!widget.readOnly) const Divider(height: 20),
           ],
-          TextField(
-            controller: _controller,
-            maxLines: 3,
-            style: const TextStyle(fontSize: 12.5),
-            decoration: const InputDecoration(border: OutlineInputBorder(), isDense: true, contentPadding: EdgeInsets.all(10), hintText: 'Write your notes here…'),
-          ),
-          const SizedBox(height: 10),
-          Align(
-            alignment: Alignment.centerRight,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: kNavy, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-              onPressed: () {
-                if (_controller.text.trim().isEmpty) return;
-                store.addItemNote(widget.refId, _controller.text.trim());
-                _controller.clear();
-                showAppMessage(context, message: 'Note added.');
-              },
-              child: const Text('Save Note', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+          if (widget.readOnly && notes.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 4),
+              child: Text('No notes yet.', style: TextStyle(fontSize: 11.5, color: kMuted)),
             ),
-          ),
+          if (!widget.readOnly) ...[
+            TextField(
+              controller: _controller,
+              maxLines: 3,
+              style: const TextStyle(fontSize: 12.5),
+              decoration: const InputDecoration(border: OutlineInputBorder(), isDense: true, contentPadding: EdgeInsets.all(10), hintText: 'Write your notes here…'),
+            ),
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerRight,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: kNavy, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+                onPressed: () {
+                  if (_controller.text.trim().isEmpty) return;
+                  store.addItemNote(widget.refId, _controller.text.trim());
+                  _controller.clear();
+                  showAppMessage(context, message: 'Note added.');
+                },
+                child: const Text('Save Note', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+              ),
+            ),
+          ],
         ]),
       ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Approve / Reject evidence form
+// ---------------------------------------------------------------------------
+
+/// Outcome of the Approve/Reject evidence form. `note` is '' when left
+/// blank; `attachmentCount` is how many files were attached this time;
+/// `attachmentPath` is the server path of the first uploaded file (null
+/// if none) — passed to the decision so the server can carry it onto the
+/// follow-up task it creates for the salesman.
+typedef ApproveRejectResult = ({String note, int attachmentCount, String? attachmentPath});
+
+/// Opens a bottom sheet that captures optional attachments + a note for an
+/// Approve or Reject decision. Nothing is shown until the caller invokes
+/// this (i.e. only when the button is tapped). On submit the picked files
+/// and note are written to the store against [refId] — the same evidence
+/// store the read-only ATTACHMENTS / NOTES sections display — and the
+/// captured values are returned. Cancelling (or dismissing) returns null.
+Future<ApproveRejectResult?> showApproveRejectForm(
+  BuildContext context, {
+  required String refId,
+  required String title,
+  required Color accent,
+  String submitLabel = 'Submit',
+}) {
+  return showModalBottomSheet<ApproveRejectResult>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.white,
+    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+    builder: (_) => _ApproveRejectForm(refId: refId, title: title, accent: accent, submitLabel: submitLabel),
+  );
+}
+
+class _ApproveRejectForm extends StatefulWidget {
+  final String refId;
+  final String title;
+  final Color accent;
+  final String submitLabel;
+  const _ApproveRejectForm({
+    required this.refId,
+    required this.title,
+    required this.accent,
+    required this.submitLabel,
+  });
+
+  @override
+  State<_ApproveRejectForm> createState() => _ApproveRejectFormState();
+}
+
+class _ApproveRejectFormState extends State<_ApproveRejectForm> {
+  final _note = TextEditingController();
+  final List<_PendingFile> _files = [];
+  bool _busy = false;
+
+  @override
+  void dispose() {
+    _note.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickImage(ImageSource source) async {
+    setState(() => _busy = true);
+    try {
+      final picked = await ImagePicker().pickImage(source: source, imageQuality: 70);
+      if (picked != null) {
+        final bytes = await picked.readAsBytes();
+        setState(() => _files.add(_PendingFile(picked.name, bytes)));
+      }
+    } catch (_) {
+      if (mounted) showAppMessage(context, message: 'Could not access camera/gallery on this device.');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _pickPdf() async {
+    setState(() => _busy = true);
+    try {
+      final result = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['pdf'], withData: true);
+      final picked = result?.files.single;
+      if (picked != null && picked.bytes != null) {
+        setState(() => _files.add(_PendingFile(picked.name, picked.bytes!)));
+      }
+    } catch (_) {
+      if (mounted) showAppMessage(context, message: 'Could not access files on this device.');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _submit() async {
+    final store = context.read<AppStore>();
+    final navigator = Navigator.of(context);
+    final note = _note.text.trim();
+
+    // Keep the RE's own copy (drives the read-only sections on this screen).
+    for (final f in _files) {
+      store.addAttachment(widget.refId, f.name, f.bytes);
+    }
+    if (note.isNotEmpty) {
+      store.addItemNote(widget.refId, note);
+    }
+
+    // Upload to the server so the decision endpoint can attach it to the
+    // follow-up task created for the salesman. First file only — the
+    // task model carries a single attachmentPath.
+    String? attachmentPath;
+    if (_files.isNotEmpty) {
+      setState(() => _busy = true);
+      try {
+        final f = _files.first;
+        attachmentPath = await store.apiClient.uploadAttachment(
+          f.bytes,
+          filename: f.name,
+          contentType: _mimeTypeFor(f.name),
+        );
+      } catch (_) {
+        if (mounted) {
+          showAppMessage(context, message: 'Could not upload the attachment — continuing without it.');
+        }
+      } finally {
+        if (mounted) setState(() => _busy = false);
+      }
+    }
+
+    navigator.pop<ApproveRejectResult>(
+      (note: note, attachmentCount: _files.length, attachmentPath: attachmentPath),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = widget.accent;
+    final isReject = accent == kRed;
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 18,
+        right: 18,
+        top: 8,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 18,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Grab handle
+          Center(
+            child: Container(
+              width: 40, height: 4, margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(color: kBorder, borderRadius: BorderRadius.circular(4)),
+            ),
+          ),
+          Row(
+            children: [
+              Container(
+                width: 38, height: 38,
+                decoration: BoxDecoration(color: accent.withOpacity(0.12), shape: BoxShape.circle),
+                child: Icon(isReject ? Icons.cancel_outlined : Icons.check_circle_outline, color: accent, size: 21),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(widget.title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15.5, color: kDark)),
+                    const SizedBox(height: 2),
+                    const Text('Add evidence and a note — both optional.', style: TextStyle(fontSize: 11, color: kMuted)),
+                  ],
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close, size: 20, color: kMuted),
+                onPressed: () => Navigator.pop(context),
+                visualDensity: VisualDensity.compact,
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+
+          const Text('EVIDENCE', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.6, color: kMuted)),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: kBg,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: kBorder),
+            ),
+            child: Column(
+              children: [
+                if (_files.isNotEmpty) ...[
+                  ..._files.asMap().entries.map((e) {
+                    final f = e.value;
+                    final isImage = _isImageFile(f.name);
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Row(
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: isImage
+                                ? Image.memory(f.bytes, width: 38, height: 38, fit: BoxFit.cover)
+                                : Container(width: 38, height: 38, color: kRed.withOpacity(0.1), child: const Icon(Icons.picture_as_pdf, color: kRed, size: 18)),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(child: Text(f.name, style: const TextStyle(fontSize: 11.5, color: kDark), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                          IconButton(
+                            icon: const Icon(Icons.close, size: 16, color: kMuted),
+                            onPressed: () => setState(() => _files.removeAt(e.key)),
+                            visualDensity: VisualDensity.compact,
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                  const SizedBox(height: 4),
+                ],
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(side: const BorderSide(color: kBlue), foregroundColor: kBlue, padding: const EdgeInsets.symmetric(vertical: 9), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9))),
+                        onPressed: _busy ? null : () => _pickImage(ImageSource.camera),
+                        icon: const Icon(Icons.photo_camera_outlined, size: 15),
+                        label: const Text('Camera', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(side: const BorderSide(color: kBlue), foregroundColor: kBlue, padding: const EdgeInsets.symmetric(vertical: 9), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9))),
+                        onPressed: _busy ? null : () => _pickImage(ImageSource.gallery),
+                        icon: const Icon(Icons.photo_library_outlined, size: 15),
+                        label: const Text('Gallery', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(side: const BorderSide(color: kRed), foregroundColor: kRed, padding: const EdgeInsets.symmetric(vertical: 9), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9))),
+                        onPressed: _busy ? null : _pickPdf,
+                        icon: const Icon(Icons.picture_as_pdf_outlined, size: 15),
+                        label: const Text('PDF', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          const Text('NOTE', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.6, color: kMuted)),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _note,
+            maxLines: 3,
+            style: const TextStyle(fontSize: 12.5),
+            decoration: InputDecoration(
+              filled: true,
+              fillColor: kBg,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: kBorder)),
+              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: kBorder)),
+              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: accent)),
+              isDense: true,
+              contentPadding: const EdgeInsets.all(12),
+              hintText: isReject ? 'Reason for rejecting…' : 'Add context for the salesperson…',
+              hintStyle: const TextStyle(fontSize: 12, color: kMuted),
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: 46,
+                  child: OutlinedButton(
+                    style: OutlinedButton.styleFrom(foregroundColor: kMuted, side: const BorderSide(color: kBorder), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Cancel', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                flex: 2,
+                child: SizedBox(
+                  height: 46,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(backgroundColor: accent, foregroundColor: Colors.white, elevation: 0, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+                    onPressed: _busy ? null : _submit,
+                    child: _busy
+                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                        : Text(widget.submitLabel, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PendingFile {
+  final String name;
+  final Uint8List bytes;
+  _PendingFile(this.name, this.bytes);
+}
+
+/// Tap-to-enlarge thumbnail for a task's server-side `attachmentPath`
+/// (e.g. evidence an RE attached when approving/rejecting, which the
+/// server copies onto the follow-up task it creates for the salesman).
+/// The attachments endpoint needs auth headers Image.network won't add
+/// on its own.
+class TaskAttachmentThumbnail extends StatelessWidget {
+  final String path;
+  const TaskAttachmentThumbnail({super.key, required this.path});
+
+  @override
+  Widget build(BuildContext context) {
+    final apiClient = context.read<AppStore>().apiClient;
+    final url = apiClient.attachmentUrl(path);
+    final headers = apiClient.attachmentAuthHeaders;
+
+    // A PDF can't be shown by Image.network — download it with the auth
+    // token and hand the file to the OS PDF viewer (see
+    // downloadAndOpenAttachment; a bare launchUrl can't send the header).
+    if (path.toLowerCase().endsWith('.pdf')) {
+      return InkWell(
+        onTap: () => downloadAndOpenAttachment(context, apiClient, path),
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          height: 90,
+          width: 90,
+          decoration: BoxDecoration(
+            color: const Color(0xFFDC2626).withOpacity(0.08),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: const Color(0xFFDC2626).withOpacity(0.25)),
+          ),
+          child: const Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.picture_as_pdf_outlined, color: Color(0xFFDC2626), size: 28),
+              SizedBox(height: 4),
+              Text('PDF', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFFDC2626))),
+              Text('Download', style: TextStyle(fontSize: 8.5, color: kMuted)),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return GestureDetector(
+      onTap: () => showDialog(
+        context: context,
+        builder: (_) => Dialog(
+          backgroundColor: Colors.black,
+          insetPadding: const EdgeInsets.all(12),
+          child: Stack(
+            alignment: Alignment.topRight,
+            children: [
+              InteractiveViewer(minScale: 0.5, maxScale: 4, child: Image.network(url, headers: headers, fit: BoxFit.contain)),
+              IconButton(icon: const Icon(Icons.close, color: Colors.white), onPressed: () => Navigator.pop(context)),
+            ],
+          ),
+        ),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Image.network(url, headers: headers, height: 90, width: 90, fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => Container(
+                  height: 90,
+                  width: 90,
+                  color: kMuted.withOpacity(0.1),
+                  child: const Icon(Icons.broken_image_outlined, color: kMuted),
+                )),
+      ),
     );
   }
 }

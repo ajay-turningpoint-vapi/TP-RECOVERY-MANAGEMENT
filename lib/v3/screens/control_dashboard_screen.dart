@@ -36,20 +36,20 @@ class ControlDashboardScreen extends StatefulWidget {
 }
 
 class _ControlDashboardScreenState extends State<ControlDashboardScreen> {
-  String _branchFilter = 'All Branches';
+  // The branch scope is global now (AppStore.branchFilter) so every other
+  // RE screen, card and count moves with this one dropdown.
+  String get _branchFilter => context.read<AppStore>().branchFilter;
   int _visibleSalesmen = 5;
 
   @override
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
 
-    List<Map<String, dynamic>> salesmen = store.salesmen;
-    if (_branchFilter != 'All Branches') {
-      // Same null-safe fallback as the filter's own option list below —
-      // otherwise selecting 'Turning Point' would compare it against a raw
-      // null and match nobody.
-      salesmen = salesmen.where((s) => ((s['branch'] as String?) ?? 'Turning Point') == _branchFilter).toList();
-    }
+    // Only salesmen who actually carry overdue exposure — a ₹0 Total
+    // Overdue row is noise on this "who needs chasing" list.
+    final salesmen = store.visibleSalesmen
+        .where((s) => ((s['totalOverdue'] as num?) ?? 0) > 0)
+        .toList();
     final visible = salesmen.take(_visibleSalesmen).toList();
 
     return Scaffold(
@@ -125,7 +125,7 @@ class _ControlDashboardScreenState extends State<ControlDashboardScreen> {
     // unguarded `as String` here crashed this whole screen for every RE on
     // load. 'Turning Point' groups them under one real, honest filter option
     // rather than a crash.
-    final branches = ['All Branches', ...{for (final s in store.salesmen) (s['branch'] as String?) ?? 'Turning Point'}];
+    final branches = store.branchOptions;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(
@@ -148,10 +148,11 @@ class _ControlDashboardScreenState extends State<ControlDashboardScreen> {
                 icon: const Icon(Icons.keyboard_arrow_down, size: 15, color: _muted),
                 style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _muted),
                 items: branches.map((b) => DropdownMenuItem(value: b, child: Text(b))).toList(),
-                onChanged: (v) => setState(() {
-                  _branchFilter = v!;
-                  _visibleSalesmen = 5;
-                }),
+                onChanged: (v) {
+                  if (v == null) return;
+                  store.setBranchFilter(v);
+                  setState(() => _visibleSalesmen = 5);
+                },
               ),
             ),
           ),
@@ -166,7 +167,7 @@ class _ControlDashboardScreenState extends State<ControlDashboardScreen> {
   Widget _buildStatCards(BuildContext context, AppStore store) {
     final now = DateTime.now();
     final startOfToday = DateTime(now.year, now.month, now.day);
-    final scheduledPtps = store.ptps.where((p) => p.status == PtpStatus.scheduled).toList();
+    final scheduledPtps = store.visiblePtps.where((p) => p.status == PtpStatus.scheduled).toList();
     final scheduledAmount = scheduledPtps.fold<double>(0, (s, p) => s + p.amountPromised);
     final overduePtps = scheduledPtps.where((p) => p.promiseDate.isBefore(startOfToday)).toList();
     final overduePtpAmount = overduePtps.fold<double>(0, (s, p) => s + p.amountPromised);
@@ -174,14 +175,14 @@ class _ControlDashboardScreenState extends State<ControlDashboardScreen> {
     // Same population as reportService.getDashboard's dueTodayPtpAmount/
     // dueTodayPtpCount (server) — kept in sync here so the "Expected
     // Collection Today" card's list matches its own number exactly.
-    final dueTodayPtps = store.ptps
+    final dueTodayPtps = store.visiblePtps
         .where((p) => (p.status == PtpStatus.scheduled || p.status == PtpStatus.pendingVerification) && !p.promiseDate.isBefore(startOfToday) && p.promiseDate.isBefore(startOfToday.add(const Duration(days: 1))))
         .toList();
 
     void go(Widget screen) => Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
 
     final cards = [
-      _StatCardData(Icons.account_balance_wallet_outlined, const Color(0xFF2563EB), 'Total Outstanding', _rupee.format(store.teamTotalOutstanding), '${store.customers.length} Customers', _muted,
+      _StatCardData(Icons.account_balance_wallet_outlined, const Color(0xFF2563EB), 'Total Outstanding', _rupee.format(store.teamTotalOutstanding), '${store.visibleCustomers.length} Customers', _muted,
           onTap: () => go(const CompanyRecoveryQueueScreen(showOutstanding: true))),
       _StatCardData(Icons.currency_rupee, const Color(0xFFDC2626), 'Total Overdue', _rupee.format(store.totalOverdueAmount), '${store.totalOverdueCustomerCount} Customers', _muted,
           onTap: () => go(const CompanyRecoveryQueueScreen())),
@@ -262,34 +263,17 @@ class _ControlDashboardScreenState extends State<ControlDashboardScreen> {
   // Needs Your Attention
   // -------------------------------------------------------------------
   Widget _buildAttentionSection(BuildContext context, AppStore store) {
-    void openTab(int tab) => Navigator.push(context, MaterialPageRoute(builder: (_) => NeedsAttentionScreen(initialTab: tab)));
-    final overdueTaskSalesmen = store.tasks.where((t) => t.isOverdue).map((t) => t.ownerId).toSet().length;
-
-    // Ordered by urgency: act-now first (queue not being worked, a promise
-    // already broken, an active RE-owned escalation), then act-soon
-    // (behind target, recovery stalled), then the approvals queue.
+    // Overdue tasks, broken PTPs, underperforming salesmen, "no next
+    // action" and the pending-approvals queue are all handled in RE Tasks
+    // now — what's left on the dashboard's attention row is the RE-owned
+    // escalation ladder, its critical-approvals shortcut, and ownerless
+    // accounts (no salesman assigned, so the RE works these directly).
+    final ownerless = store.ownerMappingRequiredCustomers;
     final tiles = [
-      _AttentionTileData(Icons.assignment_late_outlined, const Color(0xFFDC2626), '$overdueTaskSalesmen', 'Overdue\nTasks', 'Not working queue',
-          onTap: () => openTab(8)),
-      _AttentionTileData(Icons.link_off, const Color(0xFFDC2626), '${store.brokenPtps.length}', 'Broken\nPTPs', 'Review / escalate',
-          onTap: () => openTab(11)),
-      // L3 and L4 used to be two separate tiles, but both opened the same
-      // EscalationsScreen (just a different starting tab) — one real
-      // "Escalations" tile covering both is simpler and avoids sending an
-      // RE to the same screen twice for what reads as two different things.
       _AttentionTileData(Icons.priority_high, const Color(0xFF9333EA), '${store.openEscalationCases.length}', 'Escalations', 'L2 / L3 / L4',
           onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const EscalationsScreen()))),
-      _AttentionTileData(Icons.trending_down, const Color(0xFFEA580C), '${store.salesmenOverdueTargetsCount}', 'Salesman Needing\nAttention', 'Behind target',
-          onTap: () => openTab(2)),
-      _AttentionTileData(Icons.help_outline, const Color(0xFFB45309), '${store.noValidNextActionCustomers.length}', 'No Next\nAction', 'Recovery stalled',
-          onTap: () => openTab(9)),
-      // Pending Approvals replaces the old, narrower "Outcome Edit
-      // Requests" tile — it's every pending "salesperson asked for a
-      // decision" item (disputes, PTP corrections, task extensions,
-      // outcome edits/corrections) in one real count, see
-      // AppStore.pendingApprovalsCount / ApprovalsListScreen.
-      _AttentionTileData(Icons.fact_check_outlined, const Color(0xFFDB2777), '${store.pendingApprovalsCount}', 'Pending\nApprovals', 'Approve / Reject',
-          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ApprovalsListScreen()))),
+      _AttentionTileData(Icons.person_off_outlined, const Color(0xFFDB2777), '${ownerless.length}', 'Ownerless\nAccounts', _rupee.format(store.ownerlessExposure),
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NeedsAttentionScreen(initialTab: 13)))),
       _AttentionTileData(Icons.warning_amber_rounded, const Color(0xFFDC2626), '${store.criticalApprovalsCount}', 'Critical\nApprovals', 'High priority',
           onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ApprovalsListScreen(onlyCritical: true)))),
     ];
@@ -303,10 +287,17 @@ class _ControlDashboardScreenState extends State<ControlDashboardScreen> {
             const Text('Needs Your Attention', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14.5, color: _dark)),
             const SizedBox(width: 6),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: const BoxDecoration(color: Color(0xFFEF4444), shape: BoxShape.circle),
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+              // Pill, not a fixed circle — a 3-digit count clipped inside a
+              // circle (which can only size to a square).
+              decoration: BoxDecoration(color: const Color(0xFFEF4444), borderRadius: BorderRadius.circular(999)),
               constraints: const BoxConstraints(minWidth: 20),
-              child: Text('$visibleAttentionCount', textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+              alignment: Alignment.center,
+              child: Text(
+                visibleAttentionCount > 999 ? '999+' : '$visibleAttentionCount',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold, height: 1.1),
+              ),
             ),
             const Spacer(),
             GestureDetector(

@@ -73,12 +73,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final myBrokenPtpCount = store.myCustomers
         .where((c) => c.reasonForAction.toLowerCase().contains('broken ptp'))
         .length;
-    final myPhysicalVisitDueCount = store.myTasks
+    // Every open physical-visit task the salesman owns — including the one
+    // auto-created on the 3rd No Answer (deadline next day 10 AM), which
+    // must show here from the moment it's raised, not only once overdue.
+    final myPhysicalVisitTasks = store.myTasks
         .where((t) =>
             t.type == TaskType.physicalVisit &&
-            t.status != TaskStatus.completed &&
-            t.deadline.isBefore(DateTime.now()))
-        .length;
+            t.status != TaskStatus.completed)
+        .toList();
+    final myPhysicalVisitDueCount = myPhysicalVisitTasks.length;
+    final myPhysicalVisitCustomerIds =
+        myPhysicalVisitTasks.map((t) => t.customerId).toSet();
     // store.recoveryTarget / expectedCollection are also company-wide totals
     // (correctly used by the Manager reports screen) — scope them to this
     // salesperson's own portfolio and to PTPs actually due today.
@@ -220,7 +225,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     return _buildStatCard(
                       context,
                       "Today's Recovery Tasks",
-                      '$total/$doneToday',
+                      '$doneToday/$total',
                       Icons.savings_outlined,
                       const Color(0xFF2E7D32),
                       const Color(0xFFE8F5E9),
@@ -441,6 +446,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     onTap: () {
                       final filtered = store.myCustomers
                           .where((c) =>
+                              myPhysicalVisitCustomerIds.contains(c.id) ||
                               c.primaryNextAction.contains('Physical Visit'))
                           .toList();
                       Navigator.push(

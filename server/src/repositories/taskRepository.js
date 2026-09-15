@@ -24,6 +24,7 @@ function mapTask(row) {
     updatedAt: row.updated_at,
     note: row.note,
     attachmentPath: row.attachment_path,
+    disputeId: row.dispute_id || null,
   };
 }
 
@@ -53,8 +54,8 @@ async function insert(task, connection) {
   const id = task.id || uuid();
   const run = connection ? (sql, params) => connection.query(sql, params) : query;
   await run(
-    `INSERT INTO tasks (id, type, customer_id, owner_id, deadline, priority, reason, status, source, note, attachment_path)
-     VALUES (:id, :type, :customerId, :ownerId, :deadline, :priority, :reason, :status, :source, :note, :attachmentPath)`,
+    `INSERT INTO tasks (id, type, customer_id, owner_id, deadline, priority, reason, status, source, note, attachment_path, dispute_id)
+     VALUES (:id, :type, :customerId, :ownerId, :deadline, :priority, :reason, :status, :source, :note, :attachmentPath, :disputeId)`,
     {
       id,
       type: task.type,
@@ -67,6 +68,7 @@ async function insert(task, connection) {
       source: task.source || 'System',
       note: task.note || null,
       attachmentPath: task.attachmentPath || null,
+      disputeId: task.disputeId || null,
     }
   );
   return id;
@@ -105,10 +107,18 @@ async function update(id, fields, connection) {
  */
 async function supersedeOpenTasks(customerId, outcomeNote, connection) {
   const run = connection ? (sql, params) => connection.query(sql, params) : query;
+  // Close the salesperson's own open call/visit tasks when a fresh outcome
+  // is recorded — but NEVER the RE-owned work items (payment-claim / dispute
+  // / internal-action reviews, escalation nudges, SLA breaches). Those close
+  // on the RE's decision, not on the salesman recording anything.
   await run(
     `UPDATE tasks
      SET status = 'completed', outcome = :outcomeNote, completed_at = NOW()
-     WHERE customer_id = :customerId AND status NOT IN ('completed', 'closed')`,
+     WHERE customer_id = :customerId
+       AND status NOT IN ('completed', 'closed')
+       AND type NOT IN ('financialTeamFollowUp', 'disputeResolution', 'managementInstruction')
+       AND dispute_id IS NULL
+       AND (source IS NULL OR source NOT IN ('Dispute Review', 'Missed Deadline', 'RE Instruction', 'Escalation', 'RE SLA', 'Missed Follow-up'))`,
     { customerId, outcomeNote }
   );
 }

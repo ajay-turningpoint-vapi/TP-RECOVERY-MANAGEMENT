@@ -4,6 +4,7 @@ const customerRepository = require('../repositories/customerRepository');
 const auditRepository = require('../repositories/auditRepository');
 const { enqueueNotification } = require('../queues/notificationQueue');
 const { notifyDecision, salesmanForCustomer } = require('./decisionNotify');
+const { driveRecoveryTask } = require('./recoveryTaskService');
 const { NotFoundError } = require('../errors/AppError');
 
 const LEVEL_SEVERITY = { none: 0, L1: 1, L2: 2, L3: 3, L4: 4 };
@@ -106,7 +107,20 @@ async function resolve(escalationId, user, note) {
       },
       conn
     );
+
   });
+
+  // Hand the account back to the salesman: drive the one `source='Recovery'`
+  // call task to the current outstanding, due 9 PM. This also re-enables
+  // Record Outcome for the customer in the app.
+  {
+    const customer = await customerRepository.findById(escalation.customerId);
+    await driveRecoveryTask(escalation.customerId, {
+      headline: `${escalation.level} escalation resolved — re-engage ${(customer && customer.name) || 'the customer'}.`,
+      priority: 'Normal',
+      deadlineHour: 21,
+    });
+  }
 
   await notifyDecision(await salesmanForCustomer(escalation.customerId), {
     approved: true,

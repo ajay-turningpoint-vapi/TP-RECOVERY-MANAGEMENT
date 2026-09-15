@@ -566,7 +566,7 @@ FROM
             WHERE S.CODE = TRY_CONVERT(INT, A.OF2)
         ) AS SALESMAN,
 
-        TRY_CONVERT(INT, A.OF2) AS slesmancode,
+        TRY_CONVERT(INT, A.OF2) AS salesmancode,
 
         ISNULL(TRY_CONVERT(INT, M.I2),0) AS CREDIT_DAYS,
 
@@ -585,7 +585,7 @@ FROM
 
         M.MASTERTYPE = 2
 
-        AND M.PARENTGRP IN ('574140', '574141', '258335', '577533')
+        AND M.PARENTGRP IN (/*{{PARENTGRP_CODES}}*/)
 
 ) X
 

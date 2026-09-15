@@ -68,6 +68,14 @@ export class MariaDbCustomerReportRepository implements CustomerReportRepository
     let sql = fs.readFileSync(QUERY_PATH, 'utf8');
     const params: any[] = [];
 
+    // Scope to one branch unless the caller asked for 'all' / omitted it.
+    if (options?.branchId && options.branchId !== 'all') {
+      sql = sql.replace('/*{{BRANCH_FILTER}}*/', 'AND branch_id = ?');
+      params.push(options.branchId);
+    } else {
+      sql = sql.replace('/*{{BRANCH_FILTER}}*/', '');
+    }
+
     if (options?.salesmanCode != null) {
       sql = sql.replace('/*{{SALESMAN_FILTER}}*/', 'AND salesman_code = ?');
       params.push(options.salesmanCode);

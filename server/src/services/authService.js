@@ -39,6 +39,12 @@ async function login(username, password) {
     throw new UnauthorizedError('Invalid username or password');
   }
 
+  // Single-device login: a fresh password sign-in is the newest session,
+  // so every previously-issued refresh token for this user is revoked here.
+  // Any other device stays usable only until its short-lived (1h) access
+  // token expires — its next silent refresh then fails and it's logged out.
+  await refreshTokenRepository.revokeAllForUser(user.id);
+
   const publicUser = toPublicUser(user);
   const { accessToken, refreshToken } = await issueTokenPair(publicUser);
   return { accessToken, refreshToken, user: publicUser };

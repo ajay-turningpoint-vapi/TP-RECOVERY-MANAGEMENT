@@ -35,5 +35,6 @@ SELECT
     credit_limit                   AS creditLimit
 FROM customer_ageing_snapshot
 WHERE 1=1
+    /*{{BRANCH_FILTER}}*/
     /*{{SALESMAN_FILTER}}*/
 ORDER BY customer_name

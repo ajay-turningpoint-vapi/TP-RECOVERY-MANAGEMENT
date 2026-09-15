@@ -2,8 +2,8 @@ const { withTransaction } = require('../config/db');
 const taskRepository = require('../repositories/taskRepository');
 const customerRepository = require('../repositories/customerRepository');
 const auditRepository = require('../repositories/auditRepository');
-const taskService = require('./taskService');
 const { notifyDecision, salesmanForCustomer } = require('./decisionNotify');
+const { driveRecoveryTask } = require('./recoveryTaskService');
 const { NotFoundError, ValidationError } = require('../errors/AppError');
 
 /**
@@ -26,8 +26,11 @@ async function getOpenInternalActionTask(taskId) {
   return task;
 }
 
-async function approve(taskId, user, { note }) {
+async function approve(taskId, user, { note, attachmentPath }) {
   const task = await getOpenInternalActionTask(taskId);
+  // Evidence the RE attached in the approve form takes precedence; fall
+  // back to whatever the original internal-action task carried.
+  const evidencePath = attachmentPath || task.attachmentPath;
 
   await withTransaction(async (conn) => {
     await taskRepository.update(taskId, { status: 'completed', outcome: `Approved: ${note || ''}`.trim(), completedAt: new Date() }, conn);
@@ -40,28 +43,10 @@ async function approve(taskId, user, { note }) {
         previousState: task.status,
         newState: 'completed',
         source: 'Internal Action Review',
-        attachmentPath: task.attachmentPath,
+        attachmentPath: evidencePath,
       },
       conn
     );
-
-    const created = await taskService.ensureFollowUpIfNeeded(
-      task.customerId,
-      null,
-      {
-        reason: 'Internal action approved',
-        auditType: 'INTERNAL_ACTION_APPROVED_FOLLOWUP',
-        source: 'Internal Action Review',
-        priority: 'Normal',
-        note: `${user.fullName} approved the internal action on this account.${note ? ` ${note}` : ''}`,
-        attachmentPath: task.attachmentPath,
-        requireDueBalance: false,
-      },
-      conn
-    );
-    if (created) {
-      await customerRepository.update(task.customerId, { currentRecoveryState: 'Action Required', primaryNextAction: 'CALL CUSTOMER' }, conn);
-    }
   });
 
   await notifyDecision(await salesmanForCustomer(task.customerId), {
@@ -70,11 +55,19 @@ async function approve(taskId, user, { note }) {
     body: `${user.fullName} approved the internal action on this account.`,
     customerId: task.customerId,
   });
+  // Drive the one `source='Recovery'` call task (also re-enables Record
+  // Outcome in the app), due 9 PM — the RE-decision default.
+  await driveRecoveryTask(task.customerId, {
+    headline: 'Internal action approved — continue recovery.',
+    priority: 'Normal',
+    deadlineHour: 21,
+  });
   return taskRepository.findById(taskId);
 }
 
-async function reject(taskId, user, { reason }) {
+async function reject(taskId, user, { reason, attachmentPath }) {
   const task = await getOpenInternalActionTask(taskId);
+  const evidencePath = attachmentPath || task.attachmentPath;
 
   await withTransaction(async (conn) => {
     await taskRepository.update(taskId, { status: 'completed', outcome: `Rejected: ${reason || ''}`.trim(), completedAt: new Date() }, conn);
@@ -87,28 +80,10 @@ async function reject(taskId, user, { reason }) {
         previousState: task.status,
         newState: 'completed',
         source: 'Internal Action Review',
-        attachmentPath: task.attachmentPath,
+        attachmentPath: evidencePath,
       },
       conn
     );
-
-    const created = await taskService.ensureFollowUpIfNeeded(
-      task.customerId,
-      null,
-      {
-        reason: 'Internal action rejected',
-        auditType: 'INTERNAL_ACTION_REJECTED_FOLLOWUP',
-        source: 'Internal Action Review',
-        priority: 'Normal',
-        note: `${user.fullName} rejected the internal action on this account.${reason ? ` Reason: "${reason}".` : ''}`,
-        attachmentPath: task.attachmentPath,
-        requireDueBalance: false,
-      },
-      conn
-    );
-    if (created) {
-      await customerRepository.update(task.customerId, { currentRecoveryState: 'Action Required', primaryNextAction: 'CALL CUSTOMER' }, conn);
-    }
   });
 
   await notifyDecision(await salesmanForCustomer(task.customerId), {
@@ -116,6 +91,11 @@ async function reject(taskId, user, { reason }) {
     title: 'Internal action rejected',
     body: `${user.fullName} rejected the internal action on this account.${reason ? ` Reason: "${reason}".` : ''}`,
     customerId: task.customerId,
+  });
+  await driveRecoveryTask(task.customerId, {
+    headline: 'Internal action reviewed — continue recovery.',
+    priority: 'Normal',
+    deadlineHour: 21,
   });
   return taskRepository.findById(taskId);
 }

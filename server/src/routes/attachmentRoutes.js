@@ -30,7 +30,17 @@ function uploadSingle(req, res, next) {
 // trust model as the rest of this app's authenticated-but-not-further-
 // scoped GETs (see attachmentController.js's own path-traversal guard for
 // what IS strictly enforced: which file, not who can ask for one).
+// A GET may be opened by the OS (a PDF viewer / browser via url_launcher),
+// which can't attach an Authorization header — accept the access token as
+// a ?token= query param there, then fall through to the normal header auth.
+function allowQueryToken(req, _res, next) {
+  if (!req.headers.authorization && typeof req.query.token === 'string' && req.query.token) {
+    req.headers.authorization = `Bearer ${req.query.token}`;
+  }
+  next();
+}
+
 router.post('/', authenticate, uploadSingle, controller.upload);
-router.get('/:filename', authenticate, controller.get);
+router.get('/:filename', allowQueryToken, authenticate, controller.get);
 
 module.exports = router;

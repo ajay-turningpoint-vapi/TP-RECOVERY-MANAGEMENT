@@ -7,5 +7,6 @@ router.use(authenticate);
 
 router.get('/dashboard', controller.dashboard);
 router.get('/trends', controller.trends);
+router.get('/re-performance', controller.rePerformance);
 
 module.exports = router;

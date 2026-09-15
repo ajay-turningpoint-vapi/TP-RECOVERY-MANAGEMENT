@@ -11,8 +11,8 @@ const { v4: uuid } = require('uuid');
 const UPLOADS_DIR = path.resolve(__dirname, '..', '..', 'uploads');
 fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
-const ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
-const MAX_FILE_SIZE_BYTES = 8 * 1024 * 1024; // 8MB — generous for a phone screenshot/photo, not for arbitrary uploads.
+const ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'application/pdf']);
+const MAX_FILE_SIZE_BYTES = 8 * 1024 * 1024; // 8MB — a phone screenshot/photo or a short PDF, not arbitrary uploads.
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOADS_DIR),
@@ -20,7 +20,8 @@ const storage = multer.diskStorage({
   // name — a fresh uuid sidesteps path traversal and collisions entirely;
   // the original name is discarded (not needed for evidence photos).
   filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
+    let ext = path.extname(file.originalname).toLowerCase();
+    if (!ext) ext = file.mimetype === 'application/pdf' ? '.pdf' : '.jpg';
     cb(null, `${uuid()}${ext}`);
   },
 });

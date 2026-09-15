@@ -89,13 +89,17 @@ test('rejecting a dispute records the reason and leaves the full amount in recov
   assert.equal(rejected.status, 'Rejected');
   assert.equal(rejected.rejectionReason, 'No evidence of wrong shipment');
 
-  // The disputed amount is confirmed still owed — a High-priority
-  // call-customer follow-up must be created for the salesperson.
+  // The disputed amount is confirmed still owed — the single
+  // `source='Recovery'` call task is (re)created for the full outstanding,
+  // High priority, due 9 PM.
   const tasks = await fetch(`${app.baseUrl}/api/tasks`, { headers: authHeaders(token) }).then((r) => r.json());
-  const followUp = tasks.find((t) => t.customerId === 'C5' && t.ownerId === 'mahesh' && t.type === 'customerCall' && t.reason.startsWith('Dispute rejected'));
-  assert.ok(followUp, 'rejecting a dispute must also create a call-customer follow-up for the salesperson');
+  const followUp = tasks.find((t) =>
+    t.customerId === 'C5' && t.type === 'customerCall' && t.source === 'Recovery' && t.status !== 'completed');
+  assert.ok(followUp, 'rejecting a dispute must (re)create the salesperson recovery task');
   assert.equal(followUp.priority, 'High');
-  assert.ok(followUp.note && followUp.note.includes('rejected'));
+  assert.match(followUp.reason, /rejected/, 'task reason names the rejection');
+  assert.match(followUp.reason, /Collect ₹/, 'task says exactly what to collect');
+  assert.equal(new Date(followUp.deadline).getHours(), 21, 'due 9 PM (RE-decision default)');
 });
 
 test('a salesperson cannot approve a dispute', async () => {

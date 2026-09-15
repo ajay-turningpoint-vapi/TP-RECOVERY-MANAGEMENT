@@ -102,9 +102,9 @@ class _ReTeamTabState extends State<ReTeamTab> {
 
     return ListView.builder(
       padding: const EdgeInsets.all(16),
-      itemCount: store.salesmen.length,
+      itemCount: store.visibleSalesmen.length,
       itemBuilder: (ctx, i) {
-        final sm = store.salesmen[i];
+        final sm = store.visibleSalesmen[i];
         final smName = (sm['fullName'] as String?) ?? sm['name'] as String;
         final isHighWorkload = (sm['customers'] as int) > 50;
 
@@ -275,7 +275,7 @@ class _ReTeamTabState extends State<ReTeamTab> {
     // Real per-salesman operational metrics, derived from the same shared
     // customers/tasks/ptps data every other screen reads — no hardcoded
     // roster or numbers.
-    final perfData = store.salesmen.map((sm) {
+    final perfData = store.visibleSalesmen.map((sm) {
       final name = sm['name'] as String;
       final ownedIds = store.customers.where((c) => c.assignedSalesmanId == name).map((c) => c.id).toSet();
       final ownedPtps = store.ptps.where((p) => ownedIds.contains(p.customerId)).toList();

@@ -73,12 +73,11 @@ class ManagerDisputeStatusReportScreen extends StatefulWidget {
 enum _SortBy { dateDesc, amountDesc }
 
 class _ManagerDisputeStatusReportScreenState extends State<ManagerDisputeStatusReportScreen> {
-  late String _branch;
+  String get _branch => context.read<AppStore>().branchFilter;
 
   @override
   void initState() {
     super.initState();
-    _branch = widget.initialBranch;
   }
   String _salesman = 'All Salesmen';
   String _query = '';
@@ -89,7 +88,7 @@ class _ManagerDisputeStatusReportScreenState extends State<ManagerDisputeStatusR
   @override
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
-    final branches = ['All Branches', ...{for (final s in store.salesmen) ((s['branch'] as String?) ?? 'Turning Point')}];
+    final branches = store.branchOptions;
     final salesmenNames = ['All Salesmen', ...store.salesmen.map((s) => s['name'] as String)];
     final now = DateTime.now();
 
@@ -216,7 +215,7 @@ class _ManagerDisputeStatusReportScreenState extends State<ManagerDisputeStatusR
   Widget _filterRow(List<String> branches, List<String> salesmenNames) {
     return Row(
       children: [
-        Expanded(child: _dropdownPill(Icons.apartment_outlined, kBlue, _branch, branches, (v) => setState(() => _branch = v))),
+        Expanded(child: _dropdownPill(Icons.apartment_outlined, kBlue, _branch, branches, (v) { context.read<AppStore>().setBranchFilter(v); setState(() {}); })),
         const SizedBox(width: 10),
         Expanded(child: _dropdownPill(Icons.person_outline, kGreen, _salesman, salesmenNames, (v) => setState(() => _salesman = v))),
       ],

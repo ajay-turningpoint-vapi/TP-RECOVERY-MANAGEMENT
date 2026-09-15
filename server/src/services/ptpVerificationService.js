@@ -3,10 +3,22 @@ const logger = require('../config/logger');
 const { withTransaction } = require('../config/db');
 const ptpRepository = require('../repositories/ptpRepository');
 const customerRepository = require('../repositories/customerRepository');
+const auditRepository = require('../repositories/auditRepository');
 const notificationRepository = require('../repositories/notificationRepository');
 const { applyPtpOutcomeTx, evaluateBrokenPtpEscalation, reopenRecoveryAfterPtpOutcome } = require('./ptpService');
 const receiptTotalsRepository = require('../busySync/reports/mssqlReceiptTotalsRepository');
 const { withRetry } = require('../busySync/utils/retry');
+const { BRANCHES } = require('../busySync/config/branches');
+const { publish, emitChange } = require('../realtime/eventBus');
+
+const BRANCH_BY_LABEL = new Map(BRANCHES.map((b) => [b.label, b]));
+const TP_BRANCH = BRANCHES.find((b) => b.key === 'tp') || BRANCHES[0];
+
+/** A PTP's BUSY branch = its customer's branch; anything unrecognised
+ * (legacy/seed data) falls back to Turning Point. */
+function branchForCustomer(customer) {
+  return (customer && BRANCH_BY_LABEL.get(customer.branch)) || TP_BRANCH;
+}
 
 // BUSY ERP lags real-world payments by ~1.5 days (store takes a paper entry
 // at time of payment → back-office keys the receipt into BUSY later). This
@@ -75,11 +87,21 @@ function autoDescription(outcome, ptp, paid, received) {
  * earlier in the lifecycle. Idempotent — only ever touches status='scheduled' rows.
  */
 async function promoteDuePtps() {
-  const todayIst = istDateStr(new Date());
-  const cutoff = `${addDaysStr(todayIst, 1)} 00:00:00`; // tomorrow's IST midnight: promise_date < cutoff ⇔ due today or earlier
-  const candidates = await ptpRepository.findScheduledPastDue(cutoff);
+  // Promote the instant the promise datetime is reached (the `ptp-promote`
+  // pass runs every 15 min), not just at the daily calendar cutoff.
+  const candidates = await ptpRepository.findScheduledDueByTime();
   for (const ptp of candidates) {
     await ptpRepository.update(ptp.id, { status: 'pendingVerification' });
+    try {
+      await auditRepository.record(ptp.customerId, {
+        type: 'PTP_PENDING_VERIFICATION',
+        description: `Promise time passed (₹${Math.round(ptp.amountPromised)} due ${new Date(ptp.promiseDate).toLocaleString('en-IN')}) → PTP now Pending Verification.`,
+        actor: 'System',
+        source: 'PTP Verification',
+      });
+    } catch (err) {
+      logger.warn('[ptp-verification] promote audit failed', { ptpId: ptp.id, message: err.message });
+    }
     logger.info('[ptp-verification] PTP promoted to pendingVerification', {
       ptpId: ptp.id,
       customerId: ptp.customerId,
@@ -111,6 +133,9 @@ async function finalizeDuePtps(getReceiptTotals = receiptTotalsRepository.getRec
 
   const result = { kept: 0, partiallyKept: 0, broken: 0, skippedNoData: 0, errors: 0 };
   const brokenCustomerIds = [];
+  // Two PTPs with the same due date in the same branch would otherwise
+  // fire the identical BUSY query twice — memoise per (database, window).
+  const receiptTotalsCache = new Map();
   // Every resolved PTP — kept, partiallyKept, or broken — can still leave
   // a real balance, so recovery needs re-checking after all three, not
   // just broken. Kept separate from brokenCustomerIds since escalation is
@@ -123,11 +148,30 @@ async function finalizeDuePtps(getReceiptTotals = receiptTotalsRepository.getRec
     const verificationDate = addDaysStr(dueDate, 1);
 
     try {
+      // Resolve the PTP's branch first — the receipt totals must be
+      // queried against THAT branch's BUSY company database + PARENTGRP
+      // list, or a Claart customer's real payment is invisible and the
+      // PTP is wrongly auto-broken.
+      const customerForBranch = await customerRepository.findById(ptp.customerId);
+      if (!customerForBranch) {
+        result.skippedNoData += 1;
+        logger.warn('[ptp-verification] PTP verification skipped — customer not found', { ptpId: ptp.id, customerId: ptp.customerId });
+        continue;
+      }
+      const branch = branchForCustomer(customerForBranch);
+
       // Eligible window per the business rule: payment must be dated on/
       // after the promise date, and on/before the promise date + 1 day.
       const startDate = dueDate;
       const endDate = verificationDate;
-      const rows = await withRetry('BUSY receipt totals fetch', () => getReceiptTotals({ startDate, endDate }));
+      const cacheKey = `${branch.database}|${startDate}|${endDate}`;
+      let rows = receiptTotalsCache.get(cacheKey);
+      if (!rows) {
+        rows = await withRetry('BUSY receipt totals fetch', () =>
+          getReceiptTotals({ startDate, endDate, database: branch.database, parentGroups: branch.parentGroups })
+        );
+        receiptTotalsCache.set(cacheKey, rows);
+      }
       const match = rows.find((r) => r.customerId === ptp.customerId); // match by CUSTOMER_ID, never CUSTOMER_NAME
       const paid = match ? match.totalAmount : 0; // no row for the customer ⇒ ₹0, only at this final-verification point
 
@@ -174,7 +218,24 @@ async function finalizeDuePtps(getReceiptTotals = receiptTotalsRepository.getRec
 
       result[decided.outcome] += 1;
       if (decided.outcome === 'broken') brokenCustomerIds.push(ptp.customerId);
-      decidedCustomerOutcomes.push({ customerId: ptp.customerId, outcome: decided.outcome });
+      const receivedAmt = decided.outcome === 'broken' ? 0 : decided.outcome === 'kept' ? Math.min(paid, promised) : paid;
+      decidedCustomerOutcomes.push({
+        customerId: ptp.customerId,
+        outcome: decided.outcome,
+        promised,
+        received: receivedAmt,
+      });
+      try {
+        const label = decided.outcome === 'kept' ? 'KEPT' : decided.outcome === 'partiallyKept' ? 'PARTIAL' : 'BROKEN';
+        await auditRepository.record(ptp.customerId, {
+          type: 'PTP_VERIFIED',
+          description: `BUSY check: ₹${Math.round(receivedAmt)} of ₹${Math.round(promised)} → ${label}.`,
+          actor: 'System',
+          source: 'PTP Verification',
+        });
+      } catch (auditErr) {
+        logger.warn('[ptp-verification] verify audit failed', { ptpId: ptp.id, message: auditErr.message });
+      }
 
       logger.info('[ptp-verification] PTP verified', {
         ptpId: ptp.id,
@@ -206,9 +267,9 @@ async function finalizeDuePtps(getReceiptTotals = receiptTotalsRepository.getRec
   // so a customer whose balance is fully cleared never gets a needless
   // task, and one who still owes money keeps getting chased regardless of
   // which way their PTP resolved.
-  for (const { customerId, outcome } of decidedCustomerOutcomes) {
+  for (const { customerId, outcome, promised, received } of decidedCustomerOutcomes) {
     try {
-      await reopenRecoveryAfterPtpOutcome(customerId, outcome);
+      await reopenRecoveryAfterPtpOutcome(customerId, outcome, { promised, received });
     } catch (err) {
       logger.error('[ptp-verification] reopen recovery after PTP outcome failed', { customerId, outcome, message: err.message });
     }
@@ -222,6 +283,10 @@ async function finalizeDuePtps(getReceiptTotals = receiptTotalsRepository.getRec
         `Verified ${candidates.length} PTP(s) against BUSY receipts/journal entries: ${result.kept} kept, ${result.partiallyKept} ` +
         `partially kept, ${result.broken} broken, ${result.skippedNoData} skipped (no customer), ${result.errors} error(s).`,
     });
+    publish({ type: 'notification', scope: { broadcast: true } });
+    // PTP statuses, customer balances/states, follow-up tasks and
+    // escalations all moved during this pass.
+    emitChange(['ptps', 'customers', 'tasks', 'escalations'], { reason: 'ptp.verification' });
   }
 
   logger.info('[ptp-verification] PTP verification complete', result);

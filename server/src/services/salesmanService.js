@@ -3,6 +3,7 @@ const customerRepository = require('../repositories/customerRepository');
 const ptpRepository = require('../repositories/ptpRepository');
 const taskRepository = require('../repositories/taskRepository');
 const auditRepository = require('../repositories/auditRepository');
+const underperformanceDismissalRepository = require('../repositories/underperformanceDismissalRepository');
 const scoringService = require('./scoringService');
 
 const MATURED_STATUSES = ['kept', 'partiallyKept', 'broken'];
@@ -28,13 +29,15 @@ async function listRoster() {
   // this roster now — no longer excluded (that guard only made sense
   // under the earlier "read-only overlay" design, where they had zero RMS
   // footprint and every rate would've fallen back to a fabricated 100%).
-  const [salespersons, allCustomers, allPtps, allTasks, allAudit] = await Promise.all([
+  const [salespersons, allCustomers, allPtps, allTasks, allAudit, dismissedTodayIds] = await Promise.all([
     salesmanRepository.findAllSalespersons(),
     customerRepository.findAll(),
     ptpRepository.findAll(),
     taskRepository.findAll(),
     auditRepository.listAll(),
+    underperformanceDismissalRepository.dismissedTodayIds(),
   ]);
+  const dismissedSet = new Set(dismissedTodayIds);
 
   const ptpsByCustomer = scoringService.groupBy(allPtps, (p) => p.customerId);
   const tasksByCustomer = scoringService.groupBy(allTasks, (t) => t.customerId);
@@ -51,7 +54,9 @@ async function listRoster() {
     const overdueTasks = ownedTasks.filter(scoringService.isTaskOverdue).length;
 
     const totalOverdue = owned.reduce((s, c) => s + c.totalDue, 0);
-    const collectionTarget = totalOverdue * 0.12;
+    // Tier 1 of the real recovery-target tiers (25/35/50/70% of overdue —
+    // see report_detail_screens.dart's RecoveryTargetVsActualReport).
+    const collectionTarget = totalOverdue * 0.25;
     const collectionAchieved = maturedPtps
       .filter((p) => p.status === 'kept' || p.status === 'partiallyKept')
       .reduce((s, p) => s + (p.amountReceived || 0), 0);
@@ -125,8 +130,17 @@ async function listRoster() {
       validNextActionRate,
       escalatedCustomers,
       highRiskCustomers,
+      // RE marked this salesman's underperformance nudge "complete" for
+      // today — the RE Tasks screen hides it until tomorrow (or until the
+      // collection % recovers).
+      underperformanceDismissedToday: dismissedSet.has(sp.id),
     };
   });
 }
 
-module.exports = { listRoster };
+async function dismissUnderperformance(salesmanId, user) {
+  await underperformanceDismissalRepository.dismiss(salesmanId, user.id);
+  return { ok: true };
+}
+
+module.exports = { listRoster, dismissUnderperformance };

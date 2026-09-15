@@ -52,7 +52,13 @@ class Customer {
   final String contactNumber;
   final String alternateContactNumber;
   final List<AuditEvent> auditHistory;
-  
+  // Only ever set on GET /api/reports/dashboard's noFollowUpAccounts rows —
+  // the real day-count the server already computed (with full audit
+  // history it never otherwise sends). Null everywhere else; see
+  // AppStore.daysSinceLastFollowUp, which falls back to a
+  // tasks-only estimate when this is absent.
+  final int? serverDaysSinceLastFollowUp;
+
   // New Financial Fields
   final double? lastPaymentAmount;
   final DateTime? lastPaymentDate;
@@ -83,6 +89,11 @@ class Customer {
   final int? creditHealthScore; // null => Insufficient History
   final Map<String, num>? creditHealthComponents; // server-computed breakdown, RMS-06
   final double disputedAmount;
+  // Server-derived (customer detail only): the slice of `totalDue` currently
+  // under a PTP / dispute / payment claim, and what's left for the salesman
+  // to chase now. 0 on list rows (only /customers/:id computes them).
+  final double coveredAmount;
+  final double actionableAmount;
   final String branch;
   final String customerCategory; // e.g. Carpenter, Contractor, End Customer, Builder, Distributor
   final int noAnswerAttempts; // real server-tracked count (customerService.recordOutcome's No Answer threshold)
@@ -100,9 +111,10 @@ class Customer {
   /// True when the last thing recorded for this customer was "No Answer"
   /// and nothing since has replaced it — the one recovery state Record
   /// Outcome locks on the customer screen (see Customer360Screen's
-  /// `isLocked`): the salesman must go through Today's Recovery Tasks'
-  /// "Edit Recorded Outcome" to erase it and record what really happened
-  /// (see customerService.recordOutcome's `replacingNoAnswer` branch).
+  /// `isLocked`): the salesman goes through Today's Recovery Tasks'
+  /// "Add New Outcome" to erase it and record what really happened — always
+  /// self-service, no RE approval, no matter which day the No Answer was
+  /// logged (see customerService.applyOutcome's `replacingNoAnswer` branch).
   bool get isPendingNoAnswerEdit =>
       currentRecoveryState == 'Action Required' &&
       primaryNextAction == 'Call Customer' &&
@@ -122,6 +134,8 @@ class Customer {
     required this.name,
     required this.totalOutstanding,
     required this.totalDue,
+    this.coveredAmount = 0,
+    this.actionableAmount = 0,
     required this.oldestOverdueDays,
     this.activePtpDetails,
     required this.currentRecoveryState,
@@ -131,6 +145,7 @@ class Customer {
     this.contactNumber = '9876543210',
     this.alternateContactNumber = '9876543211',
     this.auditHistory = const [],
+    this.serverDaysSinceLastFollowUp,
     this.lastPaymentAmount,
     this.lastPaymentDate,
     this.creditLimit = 0.0,
@@ -172,6 +187,8 @@ class Customer {
       id: json['id'] as String,
       name: json['name'] as String,
       totalOutstanding: (json['totalOutstanding'] as num?)?.toDouble() ?? 0.0,
+      coveredAmount: (json['coveredAmount'] as num?)?.toDouble() ?? 0.0,
+      actionableAmount: (json['actionableAmount'] as num?)?.toDouble() ?? 0.0,
       // BUSY's detail response calls this `overdueAmount` (more accurate
       // name for what it is) rather than RMS's `totalDue` — same "Overdue
       // Amount" UI slot, so both keys map onto the same field here rather
@@ -189,6 +206,7 @@ class Customer {
       auditHistory: (json['auditHistory'] as List<dynamic>? ?? [])
           .map((e) => AuditEvent.fromJson(e as Map<String, dynamic>))
           .toList(),
+      serverDaysSinceLastFollowUp: json['daysSinceLastFollowUp'] as int?,
       invoices: (json['invoices'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>(),
       lastPaymentAmount: (json['lastPaymentAmount'] as num?)?.toDouble(),
       lastPaymentDate: json['lastPaymentDate'] != null ? DateTime.tryParse(json['lastPaymentDate'] as String)?.toLocal() : null,
@@ -237,6 +255,7 @@ class Customer {
     String? reasonForAction,
     String? assignedSalesmanId,
     List<AuditEvent>? auditHistory,
+    int? serverDaysSinceLastFollowUp,
     double? lastPaymentAmount,
     DateTime? lastPaymentDate,
     double? creditLimit,
@@ -265,6 +284,8 @@ class Customer {
     String? contactNumber,
     String? alternateContactNumber,
     int? noAnswerAttempts,
+    double? coveredAmount,
+    double? actionableAmount,
     DateTime? updatedAt,
   }) {
     return Customer(
@@ -281,6 +302,7 @@ class Customer {
       contactNumber: contactNumber ?? this.contactNumber,
       alternateContactNumber: alternateContactNumber ?? this.alternateContactNumber,
       auditHistory: auditHistory ?? this.auditHistory,
+      serverDaysSinceLastFollowUp: serverDaysSinceLastFollowUp ?? this.serverDaysSinceLastFollowUp,
       lastPaymentAmount: lastPaymentAmount ?? this.lastPaymentAmount,
       lastPaymentDate: lastPaymentDate ?? this.lastPaymentDate,
       creditLimit: creditLimit ?? this.creditLimit,
@@ -306,6 +328,8 @@ class Customer {
       branch: branch ?? this.branch,
       customerCategory: customerCategory ?? this.customerCategory,
       noAnswerAttempts: noAnswerAttempts ?? this.noAnswerAttempts,
+      coveredAmount: coveredAmount ?? this.coveredAmount,
+      actionableAmount: actionableAmount ?? this.actionableAmount,
       updatedAt: updatedAt ?? this.updatedAt,
     );
   }

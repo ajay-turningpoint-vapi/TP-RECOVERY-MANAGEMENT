@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 
 /// Which situation a message is reporting — drives icon, color, and the
 /// default title. `error`/`success` existed before as a plain `isError`
@@ -84,6 +85,56 @@ Future<void> showAppMessageAfter(
   String? title,
 }) {
   return _showAppMessageDialog(navigator.context, message: message, type: type ?? (isError ? AppMessageType.error : AppMessageType.success), title: title);
+}
+
+/// App-wide navigator key — wired into [MaterialApp.navigatorKey] in
+/// main_v3.dart so [showGlobalError] can surface a dialog from *outside*
+/// any widget's build context (uncaught zone errors, framework errors,
+/// background failures).
+final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
+
+bool _globalErrorVisible = false;
+
+/// Shows the standard error [AppMessageType.error] dialog from anywhere —
+/// no `BuildContext` needed. Used by the global error handlers in `main()`
+/// so an unexpected failure surfaces as a proper popup instead of a red
+/// error screen (or nothing at all). If an error dialog is already on
+/// screen the new one is dropped, so a cascade of failures can't stack a
+/// pile of modals.
+void showGlobalError(String message, {String? title}) {
+  if (_globalErrorVisible) return;
+  // Claim the slot now so a burst of errors in the same frame doesn't queue
+  // a pile of post-frame callbacks.
+  _globalErrorVisible = true;
+
+  void present() {
+    final navigator = appNavigatorKey.currentState;
+    if (navigator == null || !navigator.mounted) {
+      _globalErrorVisible = false;
+      return;
+    }
+    showDialog<void>(
+      context: navigator.context,
+      barrierColor: Colors.black.withOpacity(0.45),
+      builder: (_) => _AppMessageDialog(
+        message: message,
+        type: AppMessageType.error,
+        title: title ?? _styles[AppMessageType.error]!.defaultTitle,
+      ),
+    ).whenComplete(() => _globalErrorVisible = false);
+  }
+
+  // FlutterError.onError fires *synchronously* during a build/layout/paint
+  // pass. Calling showDialog() then throws ("setState/markNeedsBuild during
+  // build" on the Navigator's Overlay, and a locked Navigator). Only show
+  // straight away when the framework is idle; otherwise wait for the frame
+  // to finish.
+  if (SchedulerBinding.instance.schedulerPhase == SchedulerPhase.idle) {
+    present();
+  } else {
+    SchedulerBinding.instance.addPostFrameCallback((_) => present());
+    SchedulerBinding.instance.scheduleFrame();
+  }
 }
 
 Future<void> _showAppMessageDialog(

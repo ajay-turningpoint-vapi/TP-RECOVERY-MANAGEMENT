@@ -151,8 +151,10 @@ async function update(id, fields, connection) {
  *
  * @param {Array} rows CustomerReport-shaped rows (customerId, customerName, mobile, gstNo, address, salesman, salesmanCode, ledgerClosingBalance, amountAlreadyDue, futureDueAmount, age0_30/31_60/61_90/90Plus, maxDaysOverdue, lastReceiptDate, lastReceiptAmount, creditLimit, creditDays)
  * @param {Date} syncStartedAt
+ * @param {{ label: string }} branch  which BUSY branch these rows came from (config/branches.js)
  */
-async function upsertFromBusy(rows, syncStartedAt) {
+async function upsertFromBusy(rows, syncStartedAt, branch = { label: 'Turning Point' }) {
+  const branchLabel = branch.label;
   return withTransaction(async (connection) => {
     // Batch-resolve salesman_code -> users.id once rather than one SELECT
     // per customer row.
@@ -167,17 +169,18 @@ async function upsertFromBusy(rows, syncStartedAt) {
 
       await connection.query(
         `INSERT INTO customers (
-           id, name, contact_number, assigned_salesman_id,
+           id, name, contact_number, assigned_salesman_id, branch,
            total_outstanding, total_due, oldest_overdue_days,
            future_due_amount, age_0_30, age_31_60, age_61_90, age_90_plus,
            last_receipt_date, last_receipt_amount, credit_limit, credit_days,
            gst_no, address, salesman, busy_salesman_code, busy_last_synced_at, busy_still_active,
            current_recovery_state, primary_next_action, reason_for_action, escalation_level, has_valid_next_action
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'Action Required', 'CALL CUSTOMER', '', 'none', 1)
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'Action Required', 'CALL CUSTOMER', '', 'none', 1)
          ON DUPLICATE KEY UPDATE
            name = VALUES(name),
            contact_number = VALUES(contact_number),
            assigned_salesman_id = VALUES(assigned_salesman_id),
+           branch = VALUES(branch),
            total_outstanding = VALUES(total_outstanding),
            total_due = VALUES(total_due),
            oldest_overdue_days = VALUES(oldest_overdue_days),
@@ -201,6 +204,7 @@ async function upsertFromBusy(rows, syncStartedAt) {
           row.customerName,
           row.mobile || null,
           assignedSalesmanId,
+          branchLabel,
           row.ledgerClosingBalance || 0,
           row.amountAlreadyDue || 0,
           row.maxDaysOverdue || 0,
@@ -222,9 +226,12 @@ async function upsertFromBusy(rows, syncStartedAt) {
       );
     }
 
+    // Scoped to this branch: each branch's run has its own timestamp, so a
+    // global sweep would deactivate the other branch's customers as soon
+    // as the second branch syncs.
     const [deactivateResult] = await connection.query(
-      'UPDATE customers SET busy_still_active = 0 WHERE busy_salesman_code IS NOT NULL AND busy_last_synced_at < ?',
-      [syncStartedAt]
+      'UPDATE customers SET busy_still_active = 0 WHERE branch = ? AND busy_salesman_code IS NOT NULL AND busy_last_synced_at < ?',
+      [branchLabel, syncStartedAt]
     );
 
     return { upserted: rows.length, deactivated: deactivateResult.affectedRows };

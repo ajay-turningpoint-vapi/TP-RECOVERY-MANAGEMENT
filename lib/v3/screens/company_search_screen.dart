@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:salesman_mobile/v2/utils/initials.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:salesman_mobile/v2/stores/app_store.dart';
@@ -21,7 +22,7 @@ class CompanySearchScreen extends StatefulWidget {
 class _CompanySearchScreenState extends State<CompanySearchScreen> {
   final _controller = TextEditingController();
   String _query = '';
-  String _branchFilter = 'All';
+  String get _branchFilter => context.read<AppStore>().branchFilter;
   String _stateFilter = 'All';
 
   @override
@@ -29,10 +30,10 @@ class _CompanySearchScreenState extends State<CompanySearchScreen> {
     final store = context.watch<AppStore>();
     final fmt = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
     List<Customer> results = store.searchCustomers(_query);
-    if (_branchFilter != 'All') results = results.where((c) => c.branch == _branchFilter).toList();
-    if (_stateFilter != 'All') results = results.where((c) => c.currentRecoveryState == _stateFilter).toList();
+    if (!store.isAllBranches) results = results.where((c) => c.branch == store.branchFilter).toList();
+        if (_stateFilter != 'All') results = results.where((c) => c.currentRecoveryState == _stateFilter).toList();
 
-    final branches = ['All', ...{for (final c in store.customers) c.branch}];
+    final branches = store.branchOptions;
     final states = ['All', ...{for (final c in store.customers) c.currentRecoveryState}];
 
     return Scaffold(
@@ -62,7 +63,7 @@ class _CompanySearchScreenState extends State<CompanySearchScreen> {
                   scrollDirection: Axis.horizontal,
                   padding: const EdgeInsets.symmetric(horizontal: 12),
                   children: [
-                    _filterDropdown('Branch', _branchFilter, branches, (v) => setState(() => _branchFilter = v!)),
+                    _filterDropdown('Branch', _branchFilter, branches, (v) { if (v != null) context.read<AppStore>().setBranchFilter(v); setState(() {}); }),
                     const SizedBox(width: 8),
                     _filterDropdown('State', _stateFilter, states, (v) => setState(() => _stateFilter = v!)),
                   ],
@@ -87,7 +88,7 @@ class _CompanySearchScreenState extends State<CompanySearchScreen> {
                                   decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: _border)),
                                   child: Row(
                                     children: [
-                                      CircleAvatar(radius: 18, backgroundColor: const Color(0xFFE3F2FD), child: Text(c.name.substring(0, 2).toUpperCase(), style: const TextStyle(color: _blue, fontWeight: FontWeight.bold, fontSize: 12))),
+                                      CircleAvatar(radius: 18, backgroundColor: const Color(0xFFE3F2FD), child: Text(avatarInitials(c.name), style: const TextStyle(color: _blue, fontWeight: FontWeight.bold, fontSize: 12))),
                                       const SizedBox(width: 12),
                                       Expanded(
                                         child: Column(

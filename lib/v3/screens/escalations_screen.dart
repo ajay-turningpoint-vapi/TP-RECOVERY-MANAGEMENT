@@ -44,7 +44,7 @@ class _EscalationsScreenState extends State<EscalationsScreen> with SingleTicker
     final l2 = open.where((e) => e.level == 'L2').toList();
     final l3 = open.where((e) => e.level == 'L3').toList();
     final l4 = open.where((e) => e.level == 'L4').toList();
-    final resolved = store.escalationCases.where((e) => !e.isOpen).toList();
+    final resolved = store.visibleEscalationCases.where((e) => !e.isOpen).toList();
 
     return Scaffold(
       backgroundColor: _bg,

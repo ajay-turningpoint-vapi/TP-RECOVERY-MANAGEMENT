@@ -100,6 +100,120 @@ Widget _emptyCard(String message) => Container(
       child: Center(child: Text(message, style: const TextStyle(fontSize: 12, color: kMuted))),
     );
 
+/// Reusable inline filter bar for one report page — Branch/Salesperson are
+/// shown on every report (every report scopes its data by `matchesCustomer`),
+/// Date Range only on the reports that actually apply `matchesDate`
+/// (PTP Report, Broken PTP Report, Dispute Status Report, Expected vs Actual
+/// Collection). Previously one shared Date Range/Branch/Salesperson panel
+/// lived on the Reports list screen and applied identically to every
+/// report — including ones like Ageing Receivables or Recovery Target that
+/// never used the date range at all, which was misleading. Each report page
+/// now owns exactly the filters it uses.
+class _ReportFilterBar extends StatelessWidget {
+  final bool showDateRange;
+  final String dateRange;
+  final ValueChanged<String>? onDateRangeChanged;
+  final String branch;
+  final ValueChanged<String> onBranchChanged;
+  final String salesman;
+  final ValueChanged<String> onSalesmanChanged;
+  const _ReportFilterBar({
+    this.showDateRange = false,
+    this.dateRange = 'This Month',
+    this.onDateRangeChanged,
+    required this.branch,
+    required this.onBranchChanged,
+    required this.salesman,
+    required this.onSalesmanChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final store = context.watch<AppStore>();
+    final branches = store.branchOptions;
+    final salesmenNames = ['All Salesmen', ...store.salesmen.map((s) => s['name'] as String)];
+    String salesmanLabel(String v) => v == 'All Salesmen' ? v : store.salesmanDisplayName(v);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: InfoCard(children: [
+        if (showDateRange) ...[
+          _filterDropdown(Icons.calendar_today_outlined, kPurple, 'Date Range', dateRange, const ['Today', 'This Week', 'This Month', 'This Quarter', 'All Time'], onDateRangeChanged!),
+          const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Divider(height: 1, color: kBorder)),
+        ],
+        _filterDropdown(Icons.apartment_outlined, kBlue, 'Branch', branch, branches, onBranchChanged),
+        const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Divider(height: 1, color: kBorder)),
+        _filterDropdown(Icons.person_outline, kBlue, 'Salesperson', salesman, salesmenNames, onSalesmanChanged, labelFor: salesmanLabel),
+      ]),
+    );
+  }
+
+  Widget _filterDropdown(IconData icon, Color color, String label, String value, List<String> options, ValueChanged<String> onChanged, {String Function(String)? labelFor}) {
+    String text(String o) => labelFor != null ? labelFor(o) : o;
+    // Guards against a value (e.g. a salesman removed from the roster since
+    // this filter was set) that no longer appears in `options` — Dropdown
+    // asserts if `value` isn't one of its `items`.
+    final safeValue = options.contains(value) ? value : options.first;
+    return Row(
+      children: [
+        Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: color.withOpacity(0.1), shape: BoxShape.circle), child: Icon(icon, size: 15, color: color)),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label, style: const TextStyle(fontSize: 10.5, color: kMuted)),
+              DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  value: safeValue,
+                  isDense: true,
+                  isExpanded: true,
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: kDark),
+                  items: options.map((o) => DropdownMenuItem(value: o, child: Text(text(o), overflow: TextOverflow.ellipsis))).toList(),
+                  onChanged: (v) { if (v != null) onChanged(v); },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Reusable inline search box for a report's salesman/customer list section.
+/// Purely a text field — the caller owns the query state and does the
+/// actual filtering, so this stays a stateless building block usable from
+/// any report regardless of whether that report is itself stateful.
+class _ReportSearchField extends StatelessWidget {
+  final String hint;
+  final ValueChanged<String> onChanged;
+  const _ReportSearchField({required this.hint, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: TextField(
+        onChanged: onChanged,
+        style: const TextStyle(fontSize: 13),
+        decoration: InputDecoration(
+          hintText: hint,
+          hintStyle: const TextStyle(fontSize: 12.5, color: kMuted),
+          prefixIcon: const Icon(Icons.search, size: 18, color: kMuted),
+          isDense: true,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          filled: true,
+          fillColor: Colors.white,
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: kBorder)),
+          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: kBorder)),
+          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: kBlue)),
+        ),
+      ),
+    );
+  }
+}
+
 Widget _drillRow(BuildContext context, String label, String sub, String value, Color valueColor, VoidCallback onTap) {
   return GestureDetector(
     onTap: onTap,
@@ -140,11 +254,14 @@ class DailyRecoverySummaryReport extends StatefulWidget {
 
 class _DailyRecoverySummaryReportState extends State<DailyRecoverySummaryReport> {
   bool _showPercentage = false;
+  String _salesmanQuery = '';
+  late String _branch = widget.filters.branch;
+  late String _salesman = widget.filters.salesman;
 
   @override
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
-    final filters = widget.filters;
+    final filters = ReportFilters(branch: _branch, salesman: _salesman);
     final now = DateTime.now();
 
     final salesmenAll = store.salesmen
@@ -152,13 +269,34 @@ class _DailyRecoverySummaryReportState extends State<DailyRecoverySummaryReport>
         .toList()
       ..sort((a, b) => ((b['collectionAchieved'] as num).toDouble()).compareTo((a['collectionAchieved'] as num).toDouble()));
 
+    // Top Salesmen Performance only lists salesmen who currently carry
+    // overdue exposure — a salesman with zero total overdue has nothing to
+    // recover and clutters the leaderboard.
+    final salesmenWithOverdue = salesmenAll.where((s) => ((s['totalOverdue'] as num?) ?? 0) > 0).toList();
+    final salesmenSearched = salesmenWithOverdue
+        .where((s) => ((s['fullName'] as String?) ?? s['name'] as String).toLowerCase().contains(_salesmanQuery.toLowerCase()))
+        .toList();
+
     final totalTarget = salesmenAll.fold(0.0, (s, m) => s + ((m['collectionTarget'] as num).toDouble()));
-    final totalCollected = salesmenAll.fold(0.0, (s, m) => s + ((m['collectionAchieved'] as num).toDouble()));
-    final pendingAmount = (totalTarget - totalCollected) < 0 ? 0.0 : (totalTarget - totalCollected);
-    final collectionPercent = totalTarget <= 0 ? 0.0 : (totalCollected / totalTarget * 100).clamp(0, 999);
 
     final salesmenNames = salesmenAll.map((s) => s['name'] as String).toSet();
     final todaysVisits = store.tasks.where((t) => t.type == TaskType.physicalVisit && salesmenNames.contains(t.ownerId) && _isSameDay(t.deadline, now)).length;
+
+    // "Collected" for a report titled Daily Recovery Summary must mean
+    // TODAY's collection, not each salesman's all-time kept-PTP total (that
+    // lifetime figure is `collectionAchieved`, used elsewhere for the
+    // ongoing recovery score). A PTP matures on its promise date, so a PTP
+    // kept/partiallyKept whose promiseDate is today is what actually closed
+    // today.
+    final ownedCustomerIds = store.customers.where((c) => salesmenNames.contains(c.assignedSalesmanId)).map((c) => c.id).toSet();
+    final totalCollected = store.ptps
+        .where((p) =>
+            ownedCustomerIds.contains(p.customerId) &&
+            (p.status == PtpStatus.kept || p.status == PtpStatus.partiallyKept) &&
+            _isSameDay(p.promiseDate, now))
+        .fold(0.0, (s, p) => s + (p.amountReceived ?? 0));
+    final pendingAmount = (totalTarget - totalCollected) < 0 ? 0.0 : (totalTarget - totalCollected);
+    final collectionPercent = totalTarget <= 0 ? 0.0 : (totalCollected / totalTarget * 100).clamp(0, 999);
 
     final trend = store.dailyCollectionTrend;
     final maxTrendAmount = trend.fold<double>(0, (m, e) => ((e['amount'] as num).toDouble()) > m ? ((e['amount'] as num).toDouble()) : m);
@@ -167,8 +305,12 @@ class _DailyRecoverySummaryReportState extends State<DailyRecoverySummaryReport>
       title: 'Daily Recovery Summary',
       subtitle: 'Collections, targets and daily closure',
       children: [
-        Text('${filters.dateRange} · ${filters.branch} · ${filters.salesman}', style: const TextStyle(fontSize: 11, color: kMuted)),
-        const SizedBox(height: 14),
+        _ReportFilterBar(
+          branch: _branch,
+          onBranchChanged: (v) => setState(() => _branch = v),
+          salesman: _salesman,
+          onSalesmanChanged: (v) => setState(() => _salesman = v),
+        ),
         Wrap(
           spacing: 8,
           runSpacing: 8,
@@ -228,13 +370,14 @@ class _DailyRecoverySummaryReportState extends State<DailyRecoverySummaryReport>
           ),
         ]),
         const SizedBox(height: 20),
-        Text('Top Salesmen Performance · ${salesmenAll.length} Salesmen', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: kNavy)),
+        Text('Top Salesmen Performance · ${salesmenWithOverdue.length} Salesmen', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: kNavy)),
         const SizedBox(height: 10),
+        _ReportSearchField(hint: 'Search salesman by name...', onChanged: (v) => setState(() => _salesmanQuery = v)),
         _scrollableBlock([
           InfoCard(
-            children: salesmenAll.isEmpty
+            children: salesmenSearched.isEmpty
                 ? [_emptyText('No salesmen match this filter.')]
-                : salesmenAll.map((s) {
+                : salesmenSearched.map((s) {
               final name = (s['fullName'] as String?) ?? s['name'] as String;
               final target = (s['collectionTarget'] as num).toDouble();
               final achieved = (s['collectionAchieved'] as num).toDouble();
@@ -375,27 +518,41 @@ double _followUpDisciplineFor(Map<String, dynamic> s) {
   return (components?['followUpDiscipline'] ?? 0).toDouble();
 }
 
-class SalesmanPerformanceReport extends StatelessWidget {
+class SalesmanPerformanceReport extends StatefulWidget {
   final ReportFilters filters;
   const SalesmanPerformanceReport({super.key, required this.filters});
 
   @override
+  State<SalesmanPerformanceReport> createState() => _SalesmanPerformanceReportState();
+}
+
+class _SalesmanPerformanceReportState extends State<SalesmanPerformanceReport> {
+  String _query = '';
+  late String _branch = widget.filters.branch;
+  late String _salesman = widget.filters.salesman;
+
+  @override
   Widget build(BuildContext context) {
+    final filters = ReportFilters(branch: _branch, salesman: _salesman);
     final store = context.watch<AppStore>();
     final salesmen = store.salesmen.where((s) =>
         (filters.branch == 'All Branches' || ((s['branch'] as String?) ?? 'Turning Point') == filters.branch) &&
         (filters.salesman == 'All Salesmen' || s['name'] == filters.salesman)).toList();
-    final branchCount = {for (final s in salesmen) s['branch']}.length;
+    final branchCount = {for (final s in salesmen) ((s['branch'] as String?) ?? 'Turning Point')}.length;
 
     final avgScore = salesmen.isEmpty ? 0.0 : salesmen.fold(0.0, (a, s) => a + (s['recoveryScore'] as int)) / salesmen.length;
     final sortedByScore = [...salesmen]..sort((a, b) => (b['recoveryScore'] as int).compareTo(a['recoveryScore'] as int));
+    final sortedByScoreSearched = sortedByScore
+        .where((s) => ((s['fullName'] as String?) ?? s['name'] as String).toLowerCase().contains(_query.toLowerCase()))
+        .toList();
     final topPerformer = sortedByScore.isEmpty ? null : sortedByScore.first;
     final totalCollected = salesmen.fold(0.0, (s, sm) => s + _collectedFor(store, sm['name']));
 
     final ids = salesmen.map((s) => s['name']).toSet();
+    final customerById = {for (final c in store.customers) c.id: c};
     final companyMatured = store.ptps.where((p) {
-      final c = store.customers.firstWhere((c) => c.id == p.customerId, orElse: () => store.customers.first);
-      return ids.contains(c.assignedSalesmanId) && p.status != PtpStatus.scheduled && p.status != PtpStatus.pendingVerification && p.status != PtpStatus.financialSyncPending;
+      final c = customerById[p.customerId];
+      return c != null && ids.contains(c.assignedSalesmanId) && p.status != PtpStatus.scheduled && p.status != PtpStatus.pendingVerification && p.status != PtpStatus.financialSyncPending;
     }).toList();
     final companyBroken = companyMatured.where((p) => p.status == PtpStatus.broken).length;
     final brokenRate = companyMatured.isEmpty ? 0.0 : companyBroken / companyMatured.length * 100;
@@ -413,12 +570,16 @@ class SalesmanPerformanceReport extends StatelessWidget {
       title: 'Salesman Performance Report',
       subtitle: 'Track recovery discipline, collection performance and follow-up quality',
       children: [
-        Text('${filters.dateRange} · ${filters.branch} · ${filters.salesman}', style: const TextStyle(fontSize: 11, color: kMuted)),
-        const SizedBox(height: 14),
+        _ReportFilterBar(
+          branch: _branch,
+          onBranchChanged: (v) => setState(() => _branch = v),
+          salesman: _salesman,
+          onSalesmanChanged: (v) => setState(() => _salesman = v),
+        ),
         _statGrid([
           (Icons.groups_outlined, kPurple, '${salesmen.length}', 'Total Salesmen Evaluated', 'Across $branchCount Branches'),
           (Icons.star_outline, kGreen, '${avgScore.toStringAsFixed(2)}%', 'Average Recovery Score', 'Weighted Performance Index'),
-          (Icons.emoji_events_outlined, const Color(0xFFCA8A04), topPerformer != null ? '${(topPerformer['recoveryScore'] as int).toStringAsFixed(0)}%' : '-', 'Top Performer Score', topPerformer != null ? '${topPerformer['name']} · ${topPerformer['branch']}' : '-'),
+          (Icons.emoji_events_outlined, const Color(0xFFCA8A04), topPerformer != null ? '${(topPerformer['recoveryScore'] as int).toStringAsFixed(0)}%' : '-', 'Top Performer Score', topPerformer != null ? '${topPerformer['name']} · ${(topPerformer['branch'] as String?) ?? 'Turning Point'}' : '-'),
           (Icons.currency_rupee, kBlue, _rupee.format(totalCollected), 'Total Collection Achieved', '${companyMatured.length} matured PTPs'),
           (Icons.shield_outlined, kRed, '${brokenRate.toStringAsFixed(2)}%', 'Broken PTP Rate', '$companyBroken of ${companyMatured.length} matured'),
           (Icons.notifications_active_outlined, kOrange, _rupee.format(noFollowUpAmount), 'No Follow-Up Accounts', '${noFollowUpCustomers.length} customers'),
@@ -508,7 +669,8 @@ class SalesmanPerformanceReport extends StatelessWidget {
         const SizedBox(height: 20),
         const Text('Salesman Performance Summary', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: kNavy)),
         const SizedBox(height: 10),
-        _scrollableBlock(sortedByScore.map((s) {
+        _ReportSearchField(hint: 'Search salesman by name...', onChanged: (v) => setState(() => _query = v)),
+        _scrollableBlock(sortedByScoreSearched.isEmpty ? [_emptyText('No salesmen match this search.')] : sortedByScoreSearched.map((s) {
           final name = s['name'] as String;
           final displayName = (s['fullName'] as String?) ?? name;
           final score = s['recoveryScore'] as int;
@@ -532,7 +694,7 @@ class SalesmanPerformanceReport extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(displayName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5, color: kDark)),
-                        Text(s['branch'], style: const TextStyle(fontSize: 10, color: kMuted)),
+                        Text((s['branch'] as String?) ?? 'Turning Point', style: const TextStyle(fontSize: 10, color: kMuted)),
                       ],
                     ),
                   ),
@@ -690,13 +852,22 @@ class SalesmanPerformanceReport extends StatelessWidget {
   }
 }
 
-class SalesmanScoreDetailScreen extends StatelessWidget {
+class SalesmanScoreDetailScreen extends StatefulWidget {
   final Map<String, dynamic> salesman;
   final AppStore store;
   const SalesmanScoreDetailScreen({super.key, required this.salesman, required this.store});
 
   @override
+  State<SalesmanScoreDetailScreen> createState() => _SalesmanScoreDetailScreenState();
+}
+
+class _SalesmanScoreDetailScreenState extends State<SalesmanScoreDetailScreen> {
+  String _query = '';
+
+  @override
   Widget build(BuildContext context) {
+    final salesman = widget.salesman;
+    final store = widget.store;
     final id = salesman['name'] as String;
     final displayName = (salesman['fullName'] as String?) ?? id;
     final owned = store.customers.where((c) => c.assignedSalesmanId == id).toList()..sort((a, b) => b.totalDue.compareTo(a.totalDue));
@@ -741,9 +912,9 @@ class SalesmanScoreDetailScreen extends StatelessWidget {
 
     return _ReportScaffold(
       title: displayName,
-      subtitle: '${salesman['branch']} · Recovery Score $score%',
+      subtitle: '${(salesman['branch'] as String?) ?? 'Turning Point'} · Recovery Score $score%',
       children: [
-        _hero(displayName, '${salesman['branch']}', salesman['phone'] as String?, score, band, bandColor),
+        _hero(displayName, (salesman['branch'] as String?) ?? 'Turning Point', salesman['phone'] as String?, score, band, bandColor),
         const SizedBox(height: 18),
 
         _sectionTitle('Money at a glance'),
@@ -818,9 +989,15 @@ class SalesmanScoreDetailScreen extends StatelessWidget {
         const SizedBox(height: 10),
         if (owned.isEmpty)
           const InfoCard(children: [Text('No customers currently mapped to this salesman.', style: TextStyle(fontSize: 11.5, color: kMuted))])
-        else
-          ...owned.map((c) => _drillRow(context, c.name, '${c.oldestOverdueDays} days overdue · ${c.primaryNextAction}', _rupee.format(c.totalDue), kRed,
-              () => Navigator.push(context, MaterialPageRoute(builder: (_) => Customer360Screen(customer: c))))),
+        else ...[
+          _ReportSearchField(hint: 'Search customer name...', onChanged: (v) => setState(() => _query = v)),
+          Builder(builder: (context) {
+            final searched = owned.where((c) => c.name.toLowerCase().contains(_query.toLowerCase())).toList();
+            if (searched.isEmpty) return _emptyCard('No customers match this search.');
+            return Column(children: searched.map((c) => _drillRow(context, c.name, '${c.oldestOverdueDays} days overdue · ${c.primaryNextAction}', _rupee.format(c.totalDue), kRed,
+                () => Navigator.push(context, MaterialPageRoute(builder: (_) => Customer360Screen(customer: c))))).toList());
+          }),
+        ],
       ],
     );
   }
@@ -1040,17 +1217,29 @@ Color _ptpBandColor(String band) {
   }
 }
 
-class PtpReport extends StatelessWidget {
+class PtpReport extends StatefulWidget {
   final ReportFilters filters;
   const PtpReport({super.key, required this.filters});
 
   @override
+  State<PtpReport> createState() => _PtpReportState();
+}
+
+class _PtpReportState extends State<PtpReport> {
+  String _query = '';
+  late String _dateRange = widget.filters.dateRange;
+  late String _branch = widget.filters.branch;
+  late String _salesman = widget.filters.salesman;
+
+  @override
   Widget build(BuildContext context) {
+    final filters = ReportFilters(dateRange: _dateRange, branch: _branch, salesman: _salesman);
     final store = context.watch<AppStore>();
     final now = DateTime.now();
+    final customerById = {for (final c in store.customers) c.id: c};
     final ptps = store.ptps.where((p) {
-      final c = store.customers.firstWhere((c) => c.id == p.customerId, orElse: () => store.customers.first);
-      return filters.matchesCustomer(c) && filters.matchesDate(p.promiseDate);
+      final c = customerById[p.customerId];
+      return c != null && filters.matchesCustomer(c) && filters.matchesDate(p.promiseDate);
     }).toList();
 
     final buckets = <String, List<PromiseToPay>>{
@@ -1058,7 +1247,11 @@ class PtpReport extends StatelessWidget {
       'Partially Kept': ptps.where((p) => p.status == PtpStatus.partiallyKept).toList(),
       // A PTP due today flips scheduled -> pendingVerification at the very
       // midnight sync that starts that day, so both count as "Due Today".
-      'Due Today': ptps.where((p) => (p.status == PtpStatus.scheduled || p.status == PtpStatus.pendingVerification) && _isSameDay(p.promiseDate, now)).toList(),
+      // pendingVerification normally clears within its 1-day grace window,
+      // but if the verification job stalls (e.g. BUSY source unreachable)
+      // it can sit past its promise date — still shown here rather than
+      // vanishing from every bucket while it waits.
+      'Due Today': ptps.where((p) => p.status == PtpStatus.pendingVerification || (p.status == PtpStatus.scheduled && _isSameDay(p.promiseDate, now))).toList(),
       'Upcoming': ptps.where((p) => p.status == PtpStatus.scheduled && p.promiseDate.isAfter(now) && !_isSameDay(p.promiseDate, now)).toList(),
       'Broken': ptps.where((p) => p.status == PtpStatus.broken).toList(),
       'Financial Sync Pending': ptps.where((p) => p.status == PtpStatus.financialSyncPending).toList(),
@@ -1087,7 +1280,7 @@ class PtpReport extends StatelessWidget {
       final ids = store.customers.where((c) => c.assignedSalesmanId == name).map((c) => c.id).toSet();
       final mine = ptps.where((p) => ids.contains(p.customerId)).toList();
       final active = mine.where((p) => p.status == PtpStatus.scheduled || p.status == PtpStatus.pendingVerification).fold(0.0, (a, p) => a + p.amountPromised);
-      final dueToday = mine.where((p) => (p.status == PtpStatus.scheduled || p.status == PtpStatus.pendingVerification) && _isSameDay(p.promiseDate, now)).fold(0.0, (a, p) => a + p.amountPromised);
+      final dueToday = mine.where((p) => p.status == PtpStatus.pendingVerification || (p.status == PtpStatus.scheduled && _isSameDay(p.promiseDate, now))).fold(0.0, (a, p) => a + p.amountPromised);
       final mineMatured = mine.where((p) => p.status != PtpStatus.scheduled && p.status != PtpStatus.pendingVerification && p.status != PtpStatus.financialSyncPending).toList();
       final mineKept = mineMatured.where((p) => p.status == PtpStatus.kept).length;
       final mineBroken = mineMatured.where((p) => p.status == PtpStatus.broken).length;
@@ -1096,13 +1289,21 @@ class PtpReport extends StatelessWidget {
       return {'name': displayName, 'branch': s['branch'], 'active': active, 'dueToday': dueToday, 'keptPct': keptPct, 'brokenPct': brokenPct};
     }).toList()
       ..sort((a, b) => ((b['keptPct'] as num).toDouble()).compareTo((a['keptPct'] as num).toDouble()));
+    final rowsSearched = rows.where((r) => (r['name'] as String).toLowerCase().contains(_query.toLowerCase())).toList();
 
     return _ReportScaffold(
       title: 'PTP Report',
       subtitle: 'Track promise-to-pay commitments, due follow-ups and reliability',
       children: [
-        Text('${filters.dateRange} · ${filters.branch} · ${filters.salesman}', style: const TextStyle(fontSize: 11, color: kMuted)),
-        const SizedBox(height: 14),
+        _ReportFilterBar(
+          showDateRange: true,
+          dateRange: _dateRange,
+          onDateRangeChanged: (v) => setState(() => _dateRange = v),
+          branch: _branch,
+          onBranchChanged: (v) => setState(() => _branch = v),
+          salesman: _salesman,
+          onSalesmanChanged: (v) => setState(() => _salesman = v),
+        ),
         Wrap(
           spacing: 8,
           runSpacing: 8,
@@ -1211,7 +1412,8 @@ class PtpReport extends StatelessWidget {
         const SizedBox(height: 20),
         const Text('Salesman PTP Summary', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: kNavy)),
         const SizedBox(height: 10),
-        _scrollableBlock(rows.map((r) {
+        _ReportSearchField(hint: 'Search salesman by name...', onChanged: (v) => setState(() => _query = v)),
+        _scrollableBlock(rowsSearched.isEmpty ? [_emptyText('No salesmen match this search.')] : rowsSearched.map((r) {
           final name = r['name'] as String;
           final keptPct = (r['keptPct'] as num).toDouble();
           final band = _ptpBand(keptPct);
@@ -1334,21 +1536,35 @@ String _shortRupee(double v) {
   return '₹${v.toStringAsFixed(0)}';
 }
 
-class _PtpBucketListScreen extends StatelessWidget {
+class _PtpBucketListScreen extends StatefulWidget {
   final String title;
   final List<PromiseToPay> ptps;
   final AppStore store;
   const _PtpBucketListScreen({required this.title, required this.ptps, required this.store});
 
   @override
+  State<_PtpBucketListScreen> createState() => _PtpBucketListScreenState();
+}
+
+class _PtpBucketListScreenState extends State<_PtpBucketListScreen> {
+  String _query = '';
+
+  @override
   Widget build(BuildContext context) {
+    final customerById = {for (final c in widget.store.customers) c.id: c};
+    final rows = widget.ptps.where((p) => customerById.containsKey(p.customerId)).toList();
+    final searched = rows.where((p) => customerById[p.customerId]!.name.toLowerCase().contains(_query.toLowerCase())).toList();
     return _ReportScaffold(
-      title: title,
-      subtitle: '${ptps.length} PTPs',
-      children: ptps.map((p) {
-        final c = store.customers.firstWhere((c) => c.id == p.customerId, orElse: () => store.customers.first);
-        return _drillRow(context, c.name, DateFormat('dd MMM yyyy').format(p.promiseDate), _rupee.format(p.amountPromised), kDark, () => Navigator.push(context, MaterialPageRoute(builder: (_) => Customer360Screen(customer: c))));
-      }).toList(),
+      title: widget.title,
+      subtitle: '${widget.ptps.length} PTPs',
+      children: [
+        _ReportSearchField(hint: 'Search customer name...', onChanged: (v) => setState(() => _query = v)),
+        if (searched.isEmpty) _emptyCard('No PTPs match this search.'),
+        ...searched.map((p) {
+          final c = customerById[p.customerId]!;
+          return _drillRow(context, c.name, DateFormat('dd MMM yyyy').format(p.promiseDate), _rupee.format(p.amountPromised), kDark, () => Navigator.push(context, MaterialPageRoute(builder: (_) => Customer360Screen(customer: c))));
+        }),
+      ],
     );
   }
 }
@@ -1386,17 +1602,29 @@ String _brokenCustomerBucket(Customer c) {
   return 'First Broken';
 }
 
-class BrokenPtpReport extends StatelessWidget {
+class BrokenPtpReport extends StatefulWidget {
   final ReportFilters filters;
   const BrokenPtpReport({super.key, required this.filters});
 
   @override
+  State<BrokenPtpReport> createState() => _BrokenPtpReportState();
+}
+
+class _BrokenPtpReportState extends State<BrokenPtpReport> {
+  String _query = '';
+  late String _dateRange = widget.filters.dateRange;
+  late String _branch = widget.filters.branch;
+  late String _salesman = widget.filters.salesman;
+
+  @override
   Widget build(BuildContext context) {
+    final filters = ReportFilters(dateRange: _dateRange, branch: _branch, salesman: _salesman);
     final store = context.watch<AppStore>();
     final now = DateTime.now();
+    final customerById = {for (final c in store.customers) c.id: c};
     final items = store.brokenPtps.where((p) {
-      final c = store.customers.firstWhere((c) => c.id == p.customerId, orElse: () => store.customers.first);
-      return filters.matchesCustomer(c) && filters.matchesDate(p.promiseDate);
+      final c = customerById[p.customerId];
+      return c != null && filters.matchesCustomer(c) && filters.matchesDate(p.promiseDate);
     }).toList();
 
     final totalAmount = items.fold(0.0, (s, p) => s + p.amountPromised);
@@ -1409,7 +1637,7 @@ class BrokenPtpReport extends StatelessWidget {
     }
     final repeatBrokenAccounts = byCustomer.values.where((l) => l.length >= 2).length;
 
-    final brokenCustomers = byCustomer.keys.map((id) => store.customers.firstWhere((c) => c.id == id, orElse: () => store.customers.first)).toList();
+    final brokenCustomers = byCustomer.keys.map((id) => customerById[id]).whereType<Customer>().toList();
     final reControlCount = brokenCustomers.where((c) => c.currentRecoveryState == 'RE Control' && c.escalationLevel != 'L4').length;
     final managementAttentionCount = brokenCustomers.where((c) => c.escalationLevel == 'L4').length;
 
@@ -1436,19 +1664,37 @@ class BrokenPtpReport extends StatelessWidget {
       final displayName = (s['fullName'] as String?) ?? name;
       final ids = store.customers.where((c) => c.assignedSalesmanId == name).map((c) => c.id).toSet();
       final mineBroken = items.where((p) => ids.contains(p.customerId)).toList();
-      final mineMatured = store.ptps.where((p) => ids.contains(p.customerId) && p.status != PtpStatus.scheduled && p.status != PtpStatus.pendingVerification && p.status != PtpStatus.financialSyncPending).toList();
+      // Matured denominator scoped to the same date filter as `items`
+      // (mineBroken) — otherwise a date-filtered numerator over a lifetime
+      // denominator produces a percentage that doesn't match the selected range.
+      final mineMatured = store.ptps
+          .where((p) =>
+              ids.contains(p.customerId) &&
+              p.status != PtpStatus.scheduled &&
+              p.status != PtpStatus.pendingVerification &&
+              p.status != PtpStatus.financialSyncPending &&
+              filters.matchesDate(p.promiseDate))
+          .toList();
       final brokenAmount = mineBroken.fold(0.0, (a, p) => a + p.amountPromised);
       final brokenPct = mineMatured.isEmpty ? 0.0 : mineBroken.length / mineMatured.length * 100;
       return {'name': displayName, 'branch': s['branch'], 'brokenAmount': brokenAmount, 'brokenPct': brokenPct};
     }).toList()
       ..sort((a, b) => ((b['brokenAmount'] as num).toDouble()).compareTo((a['brokenAmount'] as num).toDouble()));
+    final rowsSearched = rows.where((r) => (r['name'] as String).toLowerCase().contains(_query.toLowerCase())).toList();
 
     return _ReportScaffold(
       title: 'Broken PTP Report',
       subtitle: 'Track broken commitments, high-risk follow-ups and escalation exposure',
       children: [
-        Text('${filters.dateRange} · ${filters.branch} · ${filters.salesman}', style: const TextStyle(fontSize: 11, color: kMuted)),
-        const SizedBox(height: 14),
+        _ReportFilterBar(
+          showDateRange: true,
+          dateRange: _dateRange,
+          onDateRangeChanged: (v) => setState(() => _dateRange = v),
+          branch: _branch,
+          onBranchChanged: (v) => setState(() => _branch = v),
+          salesman: _salesman,
+          onSalesmanChanged: (v) => setState(() => _salesman = v),
+        ),
         Wrap(
           spacing: 8,
           runSpacing: 8,
@@ -1556,7 +1802,8 @@ class BrokenPtpReport extends StatelessWidget {
         const SizedBox(height: 20),
         const Text('Salesman Broken PTP Summary', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: kNavy)),
         const SizedBox(height: 10),
-        _scrollableBlock(rows.map((r) {
+        _ReportSearchField(hint: 'Search salesman by name...', onChanged: (v) => setState(() => _query = v)),
+        _scrollableBlock(rowsSearched.isEmpty ? [_emptyText('No salesmen match this search.')] : rowsSearched.map((r) {
           final name = r['name'] as String;
           final brokenPct = (r['brokenPct'] as num).toDouble();
           final band = _brokenBand(brokenPct);
@@ -1670,17 +1917,29 @@ class BrokenPtpReport extends StatelessWidget {
   }
 }
 
-class _BrokenCustomerBucketScreen extends StatelessWidget {
+class _BrokenCustomerBucketScreen extends StatefulWidget {
   final String title;
   final List<Customer> customers;
   const _BrokenCustomerBucketScreen({required this.title, required this.customers});
 
   @override
+  State<_BrokenCustomerBucketScreen> createState() => _BrokenCustomerBucketScreenState();
+}
+
+class _BrokenCustomerBucketScreenState extends State<_BrokenCustomerBucketScreen> {
+  String _query = '';
+
+  @override
   Widget build(BuildContext context) {
+    final searched = widget.customers.where((c) => c.name.toLowerCase().contains(_query.toLowerCase())).toList();
     return _ReportScaffold(
-      title: title,
-      subtitle: '${customers.length} customers',
-      children: customers.map((c) => _drillRow(context, c.name, '${context.read<AppStore>().salesmanDisplayName(c.assignedSalesmanId)} · ${c.branch}', _rupee.format(c.totalDue), kRed, () => Navigator.push(context, MaterialPageRoute(builder: (_) => Customer360Screen(customer: c))))).toList(),
+      title: widget.title,
+      subtitle: '${widget.customers.length} customers',
+      children: [
+        _ReportSearchField(hint: 'Search customer name...', onChanged: (v) => setState(() => _query = v)),
+        if (searched.isEmpty) _emptyCard('No customers match this search.'),
+        ...searched.map((c) => _drillRow(context, c.name, '${context.read<AppStore>().salesmanDisplayName(c.assignedSalesmanId)} · ${c.branch}', _rupee.format(c.totalDue), kRed, () => Navigator.push(context, MaterialPageRoute(builder: (_) => Customer360Screen(customer: c))))),
+      ],
     );
   }
 }
@@ -1749,17 +2008,34 @@ String _disputeReasonCategory(String reason) {
   return 'Others';
 }
 
-class DisputeStatusReport extends StatelessWidget {
+class DisputeStatusReport extends StatefulWidget {
   final ReportFilters filters;
   const DisputeStatusReport({super.key, required this.filters});
 
   @override
+  State<DisputeStatusReport> createState() => _DisputeStatusReportState();
+}
+
+class _DisputeStatusReportState extends State<DisputeStatusReport> {
+  String _query = '';
+  late String _dateRange = widget.filters.dateRange;
+  late String _branch = widget.filters.branch;
+  late String _salesman = widget.filters.salesman;
+
+  @override
   Widget build(BuildContext context) {
+    final filters = ReportFilters(dateRange: _dateRange, branch: _branch, salesman: _salesman);
     final store = context.watch<AppStore>();
     final now = DateTime.now();
+    // Match by customerCode (the real customerId — see
+    // AppStore._refreshDisputesFromApi) rather than display name: names
+    // aren't guaranteed unique, and a dispute whose customer lookup failed
+    // during loading has `customer` set to the raw id, which would never
+    // match any customer's name anyway.
+    final customerById = {for (final c in store.customers) c.id: c};
     final disputes = store.disputes.where((d) {
-      final c = store.customers.firstWhere((c) => c.name == d['customer'], orElse: () => store.customers.first);
-      return filters.matchesCustomer(c) && filters.matchesDate(d['raisedDate']);
+      final c = customerById[d['customerCode']];
+      return c != null && filters.matchesCustomer(c) && filters.matchesDate(d['raisedDate']);
     }).toList()
       ..sort((a, b) => (b['raisedDate'] as DateTime).compareTo(a['raisedDate'] as DateTime));
 
@@ -1800,8 +2076,15 @@ class DisputeStatusReport extends StatelessWidget {
       title: 'Dispute Status Report',
       subtitle: 'Overview of dispute status and resolution',
       children: [
-        Text('${filters.dateRange} · ${filters.branch} · ${filters.salesman}', style: const TextStyle(fontSize: 11, color: kMuted)),
-        const SizedBox(height: 14),
+        _ReportFilterBar(
+          showDateRange: true,
+          dateRange: _dateRange,
+          onDateRangeChanged: (v) => setState(() => _dateRange = v),
+          branch: _branch,
+          onBranchChanged: (v) => setState(() => _branch = v),
+          salesman: _salesman,
+          onSalesmanChanged: (v) => setState(() => _salesman = v),
+        ),
         Wrap(
           spacing: 8,
           runSpacing: 8,
@@ -1929,11 +2212,14 @@ class DisputeStatusReport extends StatelessWidget {
         const SizedBox(height: 20),
         const Text('Dispute Status Details', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: kNavy)),
         const SizedBox(height: 10),
-        if (disputes.isEmpty) _emptyCard('No disputes match this filter.'),
-        ...disputes.map((d) {
+        _ReportSearchField(hint: 'Search customer name...', onChanged: (v) => setState(() => _query = v)),
+        Builder(builder: (context) {
+          final searched = disputes.where((d) => (d['customer'] as String).toLowerCase().contains(_query.toLowerCase())).toList();
+          if (searched.isEmpty) return _emptyCard('No disputes match this filter.');
+          return Column(children: searched.map((d) {
           final bucket = _disputeBucket(d['status']);
           final color = _disputeBucketColor(bucket);
-          final c = store.customers.firstWhere((c) => c.name == d['customer'], orElse: () => store.customers.first);
+          final c = customerById[d['customerCode']]!;
           return GestureDetector(
             onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => Customer360Screen(customer: c))),
             child: Container(
@@ -1974,6 +2260,7 @@ class DisputeStatusReport extends StatelessWidget {
               ),
             ),
           );
+        }).toList());
         }),
         const SizedBox(height: 10),
         Row(children: [
@@ -2008,21 +2295,35 @@ class DisputeStatusReport extends StatelessWidget {
   }
 }
 
-class _DisputeBucketListScreen extends StatelessWidget {
+class _DisputeBucketListScreen extends StatefulWidget {
   final String title;
   final List<Map<String, dynamic>> disputes;
   final AppStore store;
   const _DisputeBucketListScreen({required this.title, required this.disputes, required this.store});
 
   @override
+  State<_DisputeBucketListScreen> createState() => _DisputeBucketListScreenState();
+}
+
+class _DisputeBucketListScreenState extends State<_DisputeBucketListScreen> {
+  String _query = '';
+
+  @override
   Widget build(BuildContext context) {
+    final customerById = {for (final c in widget.store.customers) c.id: c};
+    final rows = widget.disputes.where((d) => customerById.containsKey(d['customerCode'])).toList();
+    final searched = rows.where((d) => (d['customer'] as String).toLowerCase().contains(_query.toLowerCase())).toList();
     return _ReportScaffold(
-      title: '$title Disputes',
-      subtitle: '${disputes.length} disputes',
-      children: disputes.map((d) {
-        final c = store.customers.firstWhere((c) => c.name == d['customer'], orElse: () => store.customers.first);
-        return _drillRow(context, d['customer'], d['reason'], _rupee.format(d['amount']), kIndigo, () => Navigator.push(context, MaterialPageRoute(builder: (_) => Customer360Screen(customer: c))));
-      }).toList(),
+      title: '${widget.title} Disputes',
+      subtitle: '${widget.disputes.length} disputes',
+      children: [
+        _ReportSearchField(hint: 'Search customer name...', onChanged: (v) => setState(() => _query = v)),
+        if (searched.isEmpty) _emptyCard('No disputes match this search.'),
+        ...searched.map((d) {
+          final c = customerById[d['customerCode']]!;
+          return _drillRow(context, d['customer'], d['reason'], _rupee.format(d['amount']), kIndigo, () => Navigator.push(context, MaterialPageRoute(builder: (_) => Customer360Screen(customer: c))));
+        }),
+      ],
     );
   }
 }
@@ -2030,115 +2331,88 @@ class _DisputeBucketListScreen extends StatelessWidget {
 // ---------------------------------------------------------------------
 // 6) Ageing Receivables Report
 // ---------------------------------------------------------------------
-/// Real per-customer synthetic invoice row for customers that don't carry a
-/// detailed `invoices` list — built from their actual creditDays/oldestOverdueDays/totalDue,
-/// not an invented number.
+/// One customer's real BUSY-sourced ageing exposure in a single bucket
+/// (futureDue / age0_30 / age31_60 / age61_90 / age90Plus — the same figures
+/// the daily sync writes onto the customer row). NOT reconstructed from
+/// `c.invoices`: the bulk customer list (`GET /api/customers`, what every
+/// report reads via `store.customers`) never populates `invoices` — that
+/// field is only ever filled in by the single-customer detail fetch — so
+/// building rows from it here always fell through to one synthetic
+/// aggregate row per customer dated by `oldestOverdueDays`, which dumped a
+/// customer's entire balance into a single bucket and left every other
+/// bucket blind to money they actually owe there.
 class _AgeingRow {
   final Customer customer;
-  final String invoiceNo;
-  final DateTime invoiceDate;
-  final DateTime dueDate;
+  final String bucket;
   final double amount;
-  final double outstanding;
-  _AgeingRow({required this.customer, required this.invoiceNo, required this.invoiceDate, required this.dueDate, required this.amount, required this.outstanding});
-
-  String bucket(DateTime now) {
-    if (dueDate.isAfter(now)) return 'Not Due';
-    final days = now.difference(dueDate).inDays;
-    if (days <= 30) return '0 - 30 Days';
-    if (days <= 60) return '31 - 60 Days';
-    if (days <= 90) return '61 - 90 Days';
-    return '90+ Days';
-  }
+  _AgeingRow({required this.customer, required this.bucket, required this.amount});
 }
 
-class AgeingReceivablesReport extends StatelessWidget {
+class AgeingReceivablesReport extends StatefulWidget {
   final ReportFilters filters;
   const AgeingReceivablesReport({super.key, required this.filters});
 
-  List<_AgeingRow> _rowsFor(Customer c, DateTime now) {
-    if (c.invoices.isNotEmpty) {
-      DateTime parseDate(dynamic v, DateTime fallback) {
-        if (v is DateTime) return v.toLocal();
-        if (v is String) return DateTime.tryParse(v)?.toLocal() ?? fallback;
-        return fallback;
-      }
+  @override
+  State<AgeingReceivablesReport> createState() => _AgeingReceivablesReportState();
+}
 
-      double asNum(dynamic v) => v is num ? v.toDouble() : (double.tryParse('$v') ?? 0.0);
+class _AgeingReceivablesReportState extends State<AgeingReceivablesReport> {
+  String _query = '';
+  late String _branch = widget.filters.branch;
+  late String _salesman = widget.filters.salesman;
 
-      var sawPending = false;
-      final rows = c.invoices.map((inv) {
-        // Real BUSY-sourced invoice maps use No / Date / DueDate / TotalAmount /
-        // PendingAmount (ISO strings for dates). The old code read lowercase
-        // demo-era keys ('date' / 'amount' / 'number'), so `inv['date'] as
-        // DateTime` threw and the whole report rendered as a blank grey screen.
-        final date = parseDate(
-            inv['Date'] ?? inv['date'] ?? inv['createdAt'],
-            now.subtract(Duration(days: c.creditDays + c.oldestOverdueDays)));
-        final due = parseDate(inv['DueDate'] ?? inv['dueDate'], date.add(Duration(days: c.creditDays)));
-        final amount = asNum(inv['TotalAmount'] ?? inv['amount']);
-        final hasPending = inv['PendingAmount'] != null;
-        if (hasPending) sawPending = true;
-        final outstanding = hasPending ? asNum(inv['PendingAmount']) : amount;
-        final no = (inv['No'] ?? inv['number'] ?? inv['invoiceNumber'] ?? '—').toString();
-        return _AgeingRow(customer: c, invoiceNo: no, invoiceDate: date, dueDate: due, amount: amount, outstanding: outstanding);
-      }).where((r) => r.outstanding > 0).toList();
-
-      // Only when the feed had no real per-invoice pending balances: reconcile
-      // the last row so the customer's rows sum to their real current totalDue
-      // instead of overstating exposure by amounts already paid.
-      if (!sawPending && rows.isNotEmpty) {
-        final invoiceSum = rows.fold(0.0, (s, r) => s + r.amount);
-        if (invoiceSum != c.totalDue) {
-          final last = rows.last;
-          final adjusted = (last.outstanding - (invoiceSum - c.totalDue)).clamp(0.0, double.infinity);
-          rows[rows.length - 1] = _AgeingRow(customer: last.customer, invoiceNo: last.invoiceNo, invoiceDate: last.invoiceDate, dueDate: last.dueDate, amount: last.amount, outstanding: adjusted);
-        }
-      }
-      if (rows.isNotEmpty) return rows;
+  List<_AgeingRow> _rowsFor(Customer c) {
+    final rows = <_AgeingRow>[];
+    void add(String bucket, double amount) {
+      if (amount > 0) rows.add(_AgeingRow(customer: c, bucket: bucket, amount: amount));
     }
-    if (c.totalDue <= 0) return [];
-    // No itemised invoices on file — represent the real aggregate due as one
-    // row, using this customer's own oldestOverdueDays/creditDays (not a
-    // fabricated date).
-    final due = now.subtract(Duration(days: c.oldestOverdueDays));
-    final invoiceDate = due.subtract(Duration(days: c.creditDays));
-    return [_AgeingRow(customer: c, invoiceNo: 'AGG-${c.id}', invoiceDate: invoiceDate, dueDate: due, amount: c.totalDue, outstanding: c.totalDue)];
+
+    add('Not Due', c.futureDue);
+    add('0 - 30 Days', c.age0_30);
+    add('31 - 60 Days', c.age31_60);
+    add('61 - 90 Days', c.age61_90);
+    add('90+ Days', c.age90Plus);
+    return rows;
   }
 
   @override
   Widget build(BuildContext context) {
+    final filters = ReportFilters(branch: _branch, salesman: _salesman);
     final store = context.watch<AppStore>();
     final now = DateTime.now();
     final customers = store.customers.where(filters.matchesCustomer).toList();
 
     final allRows = <_AgeingRow>[];
     for (final c in customers) {
-      allRows.addAll(_rowsFor(c, now));
+      allRows.addAll(_rowsFor(c));
     }
-    allRows.sort((a, b) => a.dueDate.compareTo(b.dueDate));
+    allRows.sort((a, b) => b.amount.compareTo(a.amount));
 
     final buckets = <String, List<_AgeingRow>>{'Not Due': [], '0 - 30 Days': [], '31 - 60 Days': [], '61 - 90 Days': [], '90+ Days': []};
     for (final r in allRows) {
-      buckets[r.bucket(now)]!.add(r);
+      buckets[r.bucket]!.add(r);
     }
     final bucketColors = {'Not Due': kGreen, '0 - 30 Days': kOrange, '31 - 60 Days': kRed, '61 - 90 Days': kPurple, '90+ Days': const Color(0xFF991B1B)};
-    final totalOutstanding = allRows.fold(0.0, (s, r) => s + r.outstanding);
+    final totalOutstanding = allRows.fold(0.0, (s, r) => s + r.amount);
     final customersWithDue = customers.where((c) => c.totalDue > 0).length;
 
     return _ReportScaffold(
       title: 'Ageing Receivables Report',
-      subtitle: 'Outstanding analysis based on invoice due date',
+      subtitle: 'Outstanding analysis by real BUSY ageing bucket',
       children: [
-        Text('${filters.branch} · ${filters.salesman}', style: const TextStyle(fontSize: 11, color: kMuted)),
-        const SizedBox(height: 14),
+        _ReportFilterBar(
+          branch: _branch,
+          onBranchChanged: (v) => setState(() => _branch = v),
+          salesman: _salesman,
+          onSalesmanChanged: (v) => setState(() => _salesman = v),
+        ),
         Wrap(
           spacing: 8,
           runSpacing: 8,
           children: [
             _statTile(Icons.currency_rupee, kBlue, _rupee.format(totalOutstanding), 'Total Outstanding', 'From $customersWithDue Customers'),
             ...buckets.entries.map((e) {
-              final total = e.value.fold(0.0, (s, r) => s + r.outstanding);
+              final total = e.value.fold(0.0, (s, r) => s + r.amount);
               final pct = totalOutstanding == 0 ? 0.0 : total / totalOutstanding * 100;
               return _statTile(
                 e.key == 'Not Due' ? Icons.check_circle_outline : Icons.hourglass_bottom,
@@ -2163,7 +2437,7 @@ class AgeingReceivablesReport extends StatelessWidget {
                   PieChartData(
                     centerSpaceRadius: 34,
                     sectionsSpace: 2,
-                    sections: buckets.entries.where((e) => e.value.isNotEmpty).map((e) => PieChartSectionData(value: e.value.fold<double>(0.0, (s, r) => s + r.outstanding), color: bucketColors[e.key]!, radius: 26, showTitle: false)).toList(),
+                    sections: buckets.entries.where((e) => e.value.isNotEmpty).map((e) => PieChartSectionData(value: e.value.fold<double>(0.0, (s, r) => s + r.amount), color: bucketColors[e.key]!, radius: 26, showTitle: false)).toList(),
                   ),
                 ),
               ),
@@ -2172,7 +2446,7 @@ class AgeingReceivablesReport extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: buckets.entries.map((e) {
-                    final total = e.value.fold(0.0, (s, r) => s + r.outstanding);
+                    final total = e.value.fold(0.0, (s, r) => s + r.amount);
                     final pct = totalOutstanding == 0 ? 0.0 : total / totalOutstanding * 100;
                     return Padding(
                       padding: const EdgeInsets.symmetric(vertical: 3),
@@ -2199,11 +2473,14 @@ class AgeingReceivablesReport extends StatelessWidget {
         const SizedBox(height: 20),
         Text('Ageing Receivables Details · ${allRows.length} Records', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: kNavy)),
         const SizedBox(height: 10),
-        if (allRows.isEmpty) _emptyCard('No ageing receivables match this filter.'),
-        ...allRows.map((r) {
-          final bucket = r.bucket(now);
+        _ReportSearchField(hint: 'Search customer name...', onChanged: (v) => setState(() => _query = v)),
+        Builder(builder: (context) {
+          final searched = allRows.where((r) => r.customer.name.toLowerCase().contains(_query.toLowerCase())).toList();
+          if (searched.isEmpty) return _emptyCard('No ageing receivables match this filter.');
+          return Column(children: searched.map((r) {
+          final bucket = r.bucket;
           final color = bucketColors[bucket]!;
-          final overdueDays = now.difference(r.dueDate).inDays;
+          final isNotDue = bucket == 'Not Due';
           return GestureDetector(
             onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => Customer360Screen(customer: r.customer))),
             child: Container(
@@ -2220,16 +2497,18 @@ class AgeingReceivablesReport extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(r.customer.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: kDark)),
-                        Text('${r.invoiceNo} · ${r.customer.branch} Branch', style: const TextStyle(fontSize: 10, color: kMuted)),
-                        Text('Due ${DateFormat('dd MMM yyyy').format(r.dueDate)}', style: TextStyle(fontSize: 10, color: overdueDays > 0 ? kRed : kGreen)),
-                        Text(overdueDays > 0 ? '$overdueDays Days Overdue' : '${-overdueDays} Days Left', style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: overdueDays > 0 ? kRed : kGreen)),
+                        Text('${r.customer.branch} Branch', style: const TextStyle(fontSize: 10, color: kMuted)),
+                        Text(
+                          isNotDue ? 'Not yet due' : 'Oldest overdue ${r.customer.oldestOverdueDays} days',
+                          style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: isNotDue ? kGreen : kRed),
+                        ),
                       ],
                     ),
                   ),
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      Text(_rupee.format(r.outstanding), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5, color: kDark)),
+                      Text(_rupee.format(r.amount), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5, color: kDark)),
                       const SizedBox(height: 4),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -2242,6 +2521,7 @@ class AgeingReceivablesReport extends StatelessWidget {
               ),
             ),
           );
+        }).toList());
         }),
         const SizedBox(height: 10),
         Row(children: [
@@ -2301,16 +2581,29 @@ Color _efficiencyBandColor(String band) {
   }
 }
 
-class ExpectedVsActualCollectionReport extends StatelessWidget {
+class ExpectedVsActualCollectionReport extends StatefulWidget {
   final ReportFilters filters;
   const ExpectedVsActualCollectionReport({super.key, required this.filters});
 
   @override
+  State<ExpectedVsActualCollectionReport> createState() => _ExpectedVsActualCollectionReportState();
+}
+
+class _ExpectedVsActualCollectionReportState extends State<ExpectedVsActualCollectionReport> {
+  String _salesmanQuery = '';
+  String _customerQuery = '';
+  late String _dateRange = widget.filters.dateRange;
+  late String _branch = widget.filters.branch;
+  late String _salesman = widget.filters.salesman;
+
+  @override
   Widget build(BuildContext context) {
+    final filters = ReportFilters(dateRange: _dateRange, branch: _branch, salesman: _salesman);
     final store = context.watch<AppStore>();
+    final customerById = {for (final c in store.customers) c.id: c};
     final matured = store.ptps.where((p) {
-      final c = store.customers.firstWhere((c) => c.id == p.customerId, orElse: () => store.customers.first);
-      return filters.matchesCustomer(c) && filters.matchesDate(p.promiseDate) && p.status != PtpStatus.scheduled && p.status != PtpStatus.pendingVerification && p.status != PtpStatus.financialSyncPending;
+      final c = customerById[p.customerId];
+      return c != null && filters.matchesCustomer(c) && filters.matchesDate(p.promiseDate) && p.status != PtpStatus.scheduled && p.status != PtpStatus.pendingVerification && p.status != PtpStatus.financialSyncPending;
     }).toList()
       ..sort((a, b) => b.promiseDate.compareTo(a.promiseDate));
     final expected = matured.fold(0.0, (s, p) => s + p.amountPromised);
@@ -2341,13 +2634,21 @@ class ExpectedVsActualCollectionReport extends StatelessWidget {
       return {'name': displayName, 'branch': s['branch'], 'expected': mineExpected, 'actual': mineActual, 'efficiency': eff};
     }).toList()
       ..sort((a, b) => ((b['efficiency'] as num).toDouble()).compareTo((a['efficiency'] as num).toDouble()));
+    final rowsSearched = rows.where((r) => (r['name'] as String).toLowerCase().contains(_salesmanQuery.toLowerCase())).toList();
 
     return _ReportScaffold(
       title: 'Expected vs Actual Collection',
       subtitle: 'Compare committed promises against real receipts',
       children: [
-        Text('${filters.dateRange} · ${filters.branch} · ${filters.salesman}', style: const TextStyle(fontSize: 11, color: kMuted)),
-        const SizedBox(height: 14),
+        _ReportFilterBar(
+          showDateRange: true,
+          dateRange: _dateRange,
+          onDateRangeChanged: (v) => setState(() => _dateRange = v),
+          branch: _branch,
+          onBranchChanged: (v) => setState(() => _branch = v),
+          salesman: _salesman,
+          onSalesmanChanged: (v) => setState(() => _salesman = v),
+        ),
         Wrap(
           spacing: 8,
           runSpacing: 8,
@@ -2459,7 +2760,8 @@ class ExpectedVsActualCollectionReport extends StatelessWidget {
         const SizedBox(height: 20),
         const Text('Salesman Collection Summary', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: kNavy)),
         const SizedBox(height: 10),
-        _scrollableBlock(rows.map((r) {
+        _ReportSearchField(hint: 'Search salesman by name...', onChanged: (v) => setState(() => _salesmanQuery = v)),
+        _scrollableBlock(rowsSearched.isEmpty ? [_emptyText('No salesmen match this search.')] : rowsSearched.map((r) {
           final name = r['name'] as String;
           final eff = (r['efficiency'] as num).toDouble();
           final band = _efficiencyBand(eff);
@@ -2523,9 +2825,12 @@ class ExpectedVsActualCollectionReport extends StatelessWidget {
         const SizedBox(height: 20),
         Text('Collection Details · ${matured.length} PTPs', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: kNavy)),
         const SizedBox(height: 10),
-        if (matured.isEmpty) _emptyCard('No matured PTPs match this filter.'),
-        ...matured.map((p) {
-          final c = store.customers.firstWhere((c) => c.id == p.customerId, orElse: () => store.customers.first);
+        _ReportSearchField(hint: 'Search customer name...', onChanged: (v) => setState(() => _customerQuery = v)),
+        Builder(builder: (context) {
+          final searched = matured.where((p) => (customerById[p.customerId]?.name ?? '').toLowerCase().contains(_customerQuery.toLowerCase())).toList();
+          if (searched.isEmpty) return _emptyCard('No matured PTPs match this filter.');
+          return Column(children: searched.map((p) {
+          final c = customerById[p.customerId]!;
           final received = p.amountReceived ?? 0;
           final variance = received - p.amountPromised;
           final color = p.status == PtpStatus.kept ? kGreen : (p.status == PtpStatus.partiallyKept ? kOrange : kRed);
@@ -2565,6 +2870,7 @@ class ExpectedVsActualCollectionReport extends StatelessWidget {
               ),
             ),
           );
+        }).toList());
         }),
         const SizedBox(height: 10),
         Row(children: [
@@ -2638,12 +2944,23 @@ Color _followUpPriorityColor(String p) {
   }
 }
 
-class NoFollowUpAccountsReport extends StatelessWidget {
+class NoFollowUpAccountsReport extends StatefulWidget {
   final ReportFilters filters;
   const NoFollowUpAccountsReport({super.key, required this.filters});
 
   @override
+  State<NoFollowUpAccountsReport> createState() => _NoFollowUpAccountsReportState();
+}
+
+class _NoFollowUpAccountsReportState extends State<NoFollowUpAccountsReport> {
+  String _customerQuery = '';
+  String _salesmanQuery = '';
+  late String _branch = widget.filters.branch;
+  late String _salesman = widget.filters.salesman;
+
+  @override
   Widget build(BuildContext context) {
+    final filters = ReportFilters(branch: _branch, salesman: _salesman);
     final store = context.watch<AppStore>();
     final items = store.noFollowUpAccounts.where(filters.matchesCustomer).toList()
       ..sort((a, b) => store.daysSinceLastFollowUp(b).compareTo(store.daysSinceLastFollowUp(a)));
@@ -2671,13 +2988,18 @@ class NoFollowUpAccountsReport extends StatelessWidget {
       return {'name': displayName, 'accounts': accounts};
     }).where((r) => (r['accounts'] as List).isNotEmpty).toList()
       ..sort((a, b) => (b['accounts'] as List).length.compareTo((a['accounts'] as List).length));
+    final salesmanRowsSearched = salesmanRows.where((r) => (r['name'] as String).toLowerCase().contains(_salesmanQuery.toLowerCase())).toList();
 
     return _ReportScaffold(
       title: 'No Follow-Up Accounts',
       subtitle: 'Track customers where recovery follow-up is missing or overdue',
       children: [
-        Text('${filters.dateRange} · ${filters.branch} · ${filters.salesman}', style: const TextStyle(fontSize: 11, color: kMuted)),
-        const SizedBox(height: 14),
+        _ReportFilterBar(
+          branch: _branch,
+          onBranchChanged: (v) => setState(() => _branch = v),
+          salesman: _salesman,
+          onSalesmanChanged: (v) => setState(() => _salesman = v),
+        ),
         Wrap(
           spacing: 8,
           runSpacing: 8,
@@ -2754,8 +3076,11 @@ class NoFollowUpAccountsReport extends StatelessWidget {
         const SizedBox(height: 20),
         Text('No Follow-Up Account List · ${items.length} Accounts', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: kNavy)),
         const SizedBox(height: 10),
-        if (items.isEmpty) _emptyCard('No accounts match this filter.'),
-        ...items.map((c) {
+        _ReportSearchField(hint: 'Search customer name...', onChanged: (v) => setState(() => _customerQuery = v)),
+        Builder(builder: (context) {
+          final searched = items.where((c) => c.name.toLowerCase().contains(_customerQuery.toLowerCase())).toList();
+          if (searched.isEmpty) return _emptyCard('No accounts match this filter.');
+          return Column(children: searched.map((c) {
           final days = store.daysSinceLastFollowUp(c);
           final priority = _followUpPriority(days);
           final color = _followUpPriorityColor(priority);
@@ -2796,12 +3121,14 @@ class NoFollowUpAccountsReport extends StatelessWidget {
               ),
             ),
           );
+        }).toList());
         }),
         const SizedBox(height: 20),
         const Text('Salesman No Follow-Up Summary', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: kNavy)),
         const SizedBox(height: 10),
+        _ReportSearchField(hint: 'Search salesman by name...', onChanged: (v) => setState(() => _salesmanQuery = v)),
         _scrollableBlock([
-          InfoCard(children: salesmanRows.isEmpty ? [_emptyText('No salesmen match this filter.')] : salesmanRows.map((r) {
+          InfoCard(children: salesmanRowsSearched.isEmpty ? [_emptyText('No salesmen match this filter.')] : salesmanRowsSearched.map((r) {
             final name = r['name'] as String;
             final accounts = r['accounts'] as List<Customer>;
             return InkWell(
@@ -2863,22 +3190,34 @@ class NoFollowUpAccountsReport extends StatelessWidget {
   }
 }
 
-class _NoFollowUpSalesmanScreen extends StatelessWidget {
+class _NoFollowUpSalesmanScreen extends StatefulWidget {
   final String name;
   final List<Customer> accounts;
   const _NoFollowUpSalesmanScreen({required this.name, required this.accounts});
 
   @override
+  State<_NoFollowUpSalesmanScreen> createState() => _NoFollowUpSalesmanScreenState();
+}
+
+class _NoFollowUpSalesmanScreenState extends State<_NoFollowUpSalesmanScreen> {
+  String _query = '';
+
+  @override
   Widget build(BuildContext context) {
     final store = context.read<AppStore>();
-    final sorted = [...accounts]..sort((a, b) => store.daysSinceLastFollowUp(b).compareTo(store.daysSinceLastFollowUp(a)));
+    final sorted = [...widget.accounts]..sort((a, b) => store.daysSinceLastFollowUp(b).compareTo(store.daysSinceLastFollowUp(a)));
+    final searched = sorted.where((c) => c.name.toLowerCase().contains(_query.toLowerCase())).toList();
     return _ReportScaffold(
-      title: name,
-      subtitle: '${accounts.length} no follow-up accounts',
-      children: sorted.map((c) {
-        final days = store.daysSinceLastFollowUp(c);
-        return _drillRow(context, c.name, '$days Days Since Last Follow-Up', _rupee.format(c.totalDue), _followUpPriorityColor(_followUpPriority(days)), () => Navigator.push(context, MaterialPageRoute(builder: (_) => Customer360Screen(customer: c))));
-      }).toList(),
+      title: widget.name,
+      subtitle: '${widget.accounts.length} no follow-up accounts',
+      children: [
+        _ReportSearchField(hint: 'Search customer name...', onChanged: (v) => setState(() => _query = v)),
+        if (searched.isEmpty) _emptyCard('No accounts match this search.'),
+        ...searched.map((c) {
+          final days = store.daysSinceLastFollowUp(c);
+          return _drillRow(context, c.name, '$days Days Since Last Follow-Up', _rupee.format(c.totalDue), _followUpPriorityColor(_followUpPriority(days)), () => Navigator.push(context, MaterialPageRoute(builder: (_) => Customer360Screen(customer: c))));
+        }),
+      ],
     );
   }
 }
@@ -2895,9 +3234,17 @@ const _kRecoveryTargetTiers = <({String label, double pct})>[
   (label: 'Tier 4', pct: 0.70),
 ];
 
-class RecoveryTargetVsActualReport extends StatelessWidget {
+class RecoveryTargetVsActualReport extends StatefulWidget {
   final ReportFilters filters;
   const RecoveryTargetVsActualReport({super.key, required this.filters});
+
+  @override
+  State<RecoveryTargetVsActualReport> createState() => _RecoveryTargetVsActualReportState();
+}
+
+class _RecoveryTargetVsActualReportState extends State<RecoveryTargetVsActualReport> {
+  late String _branch = widget.filters.branch;
+  late String _salesman = widget.filters.salesman;
 
   Widget _statTile(IconData icon, Color color, String value, String label) {
     return SizedBox(
@@ -2928,6 +3275,7 @@ class RecoveryTargetVsActualReport extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final filters = ReportFilters(branch: _branch, salesman: _salesman);
     final store = context.watch<AppStore>();
 
     // Overdue = totalDue (never total outstanding). Respect the Reports
@@ -2952,7 +3300,12 @@ class RecoveryTargetVsActualReport extends StatelessWidget {
       title: 'Recovery Target',
       subtitle: 'Target vs Actual Recovery',
       children: [
-        Text('${filters.branch} · ${filters.salesman}', style: const TextStyle(fontSize: 11, color: kMuted)),
+        _ReportFilterBar(
+          branch: _branch,
+          onBranchChanged: (v) => setState(() => _branch = v),
+          salesman: _salesman,
+          onSalesmanChanged: (v) => setState(() => _salesman = v),
+        ),
         const SizedBox(height: 14),
         Wrap(
           spacing: 8,

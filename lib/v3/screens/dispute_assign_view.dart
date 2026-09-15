@@ -1,9 +1,19 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:salesman_mobile/v2/stores/app_store.dart';
 import 'package:salesman_mobile/v3/screens/request_detail_scaffold.dart';
 import 'package:salesman_mobile/widgets/app_message.dart';
+
+String _mimeFor(String name) {
+  final ext = name.contains('.') ? name.split('.').last.toLowerCase() : '';
+  if (ext == 'pdf') return 'application/pdf';
+  if (ext == 'png') return 'image/png';
+  return 'image/jpeg';
+}
 
 final _rupee =
     NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
@@ -39,7 +49,10 @@ class DisputeAssignView extends StatefulWidget {
 }
 
 class _DisputeAssignViewState extends State<DisputeAssignView> {
-  late String _owner;
+  // Deliberately starts unset — the RE must consciously pick a resolution
+  // owner; there is no "safe" default here.
+  String? _owner;
+  bool _ownerTouched = false;
   late String _department;
   late String _priority;
   late String _followUpMode;
@@ -49,6 +62,40 @@ class _DisputeAssignViewState extends State<DisputeAssignView> {
       text:
           'Inspect the issue, coordinate with the branch and confirm corrective action before the deadline.');
   bool _initialized = false;
+  Uint8List? _fileBytes;
+  String? _fileName;
+  bool _busy = false;
+  String? _noteError;
+
+  Future<void> _pickImage(ImageSource src) async {
+    setState(() => _busy = true);
+    try {
+      final p = await ImagePicker().pickImage(source: src, imageQuality: 70);
+      if (p != null) {
+        final b = await p.readAsBytes();
+        setState(() { _fileBytes = b; _fileName = p.name; });
+      }
+    } catch (_) {
+      if (mounted) showAppMessage(context, message: 'Could not access camera/gallery.');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _pickPdf() async {
+    setState(() => _busy = true);
+    try {
+      final r = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['pdf'], withData: true);
+      final f = r?.files.single;
+      if (f != null && f.bytes != null) {
+        setState(() { _fileBytes = f.bytes; _fileName = f.name; });
+      }
+    } catch (_) {
+      if (mounted) showAppMessage(context, message: 'Could not access files.');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -62,9 +109,6 @@ class _DisputeAssignViewState extends State<DisputeAssignView> {
     final undisputed = (totalDue - amount).clamp(0, double.infinity);
 
     if (!_initialized) {
-      _owner = store.salesmen.isNotEmpty
-          ? store.salesmen.first['name'] as String
-          : '';
       _department = _departments.first;
       _priority = (d['priority'] as String?) ?? 'Medium';
       _followUpMode = _followUpModes.last;
@@ -154,14 +198,38 @@ class _DisputeAssignViewState extends State<DisputeAssignView> {
                       const SizedBox(height: 18),
                       const SectionLabel('ASSIGNMENT DETAILS'),
                       InfoCard(children: [
-                        _dropdownRow(
-                            'Resolution Owner',
-                            _owner,
-                            store.salesmen
-                                .map((s) => s['name'] as String)
-                                .toList(),
-                            (v) => setState(() => _owner = v),
-                            optionLabel: store.salesmanDisplayName),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('Resolution Owner *', style: TextStyle(fontSize: 12, color: kMuted)),
+                            DropdownButtonHideUnderline(
+                              child: DropdownButton<String>(
+                                value: _owner,
+                                isDense: true,
+                                hint: const Text('Select owner', style: TextStyle(fontSize: 12.5, color: kRed, fontWeight: FontWeight.bold)),
+                                style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: kDark),
+                                items: store.salesmen
+                                    .map((s) => DropdownMenuItem(
+                                          value: s['name'] as String,
+                                          child: Text(store.salesmanDisplayName(s['name'] as String)),
+                                        ))
+                                    .toList(),
+                                onChanged: (v) => setState(() {
+                                  _owner = v;
+                                  _ownerTouched = true;
+                                }),
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (_ownerTouched && _owner == null)
+                          const Padding(
+                            padding: EdgeInsets.only(top: 4),
+                            child: Align(
+                              alignment: Alignment.centerRight,
+                              child: Text('Please select a resolution owner', style: TextStyle(fontSize: 10.5, color: kRed)),
+                            ),
+                          ),
                         const Divider(height: 20, color: kBorder),
                         _dropdownRow(
                             'Internal Department',
@@ -204,7 +272,7 @@ class _DisputeAssignViewState extends State<DisputeAssignView> {
                             _followUpModes,
                             (v) => setState(() => _followUpMode = v)),
                         const SizedBox(height: 14),
-                        const Text('Notes for Resolution Owner',
+                        const Text('Notes for Resolution Owner *',
                             style: TextStyle(
                                 fontSize: 11.5,
                                 color: kMuted,
@@ -214,10 +282,35 @@ class _DisputeAssignViewState extends State<DisputeAssignView> {
                             controller: _notesController,
                             maxLines: 3,
                             style: const TextStyle(fontSize: 12.5),
-                            decoration: const InputDecoration(
-                                border: OutlineInputBorder(),
+                            decoration: InputDecoration(
+                                border: const OutlineInputBorder(),
                                 isDense: true,
-                                contentPadding: EdgeInsets.all(10))),
+                                errorText: _noteError,
+                                contentPadding: const EdgeInsets.all(10))),
+                        const SizedBox(height: 12),
+                        const Text('Attachment (optional)',
+                            style: TextStyle(fontSize: 11.5, color: kMuted, fontWeight: FontWeight.w600)),
+                        const SizedBox(height: 6),
+                        if (_fileBytes != null)
+                          Row(children: [
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: (_fileName ?? '').toLowerCase().endsWith('.pdf')
+                                  ? Container(width: 40, height: 40, color: kRed.withOpacity(0.1), child: const Icon(Icons.picture_as_pdf, color: kRed, size: 18))
+                                  : Image.memory(_fileBytes!, width: 40, height: 40, fit: BoxFit.cover),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(child: Text(_fileName ?? 'file', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12))),
+                            IconButton(icon: const Icon(Icons.close, size: 18, color: kMuted), onPressed: () => setState(() { _fileBytes = null; _fileName = null; })),
+                          ])
+                        else
+                          Row(children: [
+                            Expanded(child: OutlinedButton.icon(onPressed: _busy ? null : () => _pickImage(ImageSource.camera), icon: const Icon(Icons.photo_camera_outlined, size: 15), label: const Text('Camera', style: TextStyle(fontSize: 11.5)))),
+                            const SizedBox(width: 6),
+                            Expanded(child: OutlinedButton.icon(onPressed: _busy ? null : () => _pickImage(ImageSource.gallery), icon: const Icon(Icons.photo_library_outlined, size: 15), label: const Text('Gallery', style: TextStyle(fontSize: 11.5)))),
+                            const SizedBox(width: 6),
+                            Expanded(child: OutlinedButton.icon(onPressed: _busy ? null : _pickPdf, icon: const Icon(Icons.picture_as_pdf_outlined, size: 15), label: const Text('PDF', style: TextStyle(fontSize: 11.5)))),
+                          ]),
                       ]),
                       const SizedBox(height: 18),
                       const SectionLabel('OPERATIONAL EFFECT'),
@@ -278,12 +371,13 @@ class _DisputeAssignViewState extends State<DisputeAssignView> {
                               padding: const EdgeInsets.symmetric(vertical: 13),
                               shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(10))),
-                          onPressed: () => _confirm(context, store, d),
-                          child: const FittedBox(
-                              fit: BoxFit.scaleDown,
-                              child: Text('Confirm Approval & Assign',
-                                  style:
-                                      TextStyle(fontWeight: FontWeight.bold))),
+                          onPressed: _busy ? null : () => _confirm(context, store, d),
+                          child: _busy
+                              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                              : const FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  child: Text('Confirm Approval & Assign',
+                                      style: TextStyle(fontWeight: FontWeight.bold))),
                         ),
                       ),
                     ],
@@ -298,15 +392,39 @@ class _DisputeAssignViewState extends State<DisputeAssignView> {
   }
 
   Future<void> _confirm(BuildContext context, AppStore store, Map<String, dynamic> d) async {
+    final note = _notesController.text.trim();
+    if (_owner == null || _owner!.isEmpty) {
+      setState(() => _ownerTouched = true);
+      showAppMessage(context, message: 'Select a resolution owner before approving.', isError: true);
+      return;
+    }
+    if (note.isEmpty) {
+      setState(() => _noteError = 'A note for the resolution owner is required');
+      return;
+    }
+    setState(() { _noteError = null; _busy = true; });
     final deadline = DateTime(_deadlineDate.year, _deadlineDate.month,
         _deadlineDate.day, _deadlineTime.hour, _deadlineTime.minute);
     final navigator = Navigator.of(context);
     try {
-      await store.approveDispute(
-          d['id'], _owner, deadline, _notesController.text.trim());
-      showAppMessageAfter(navigator, message: 'Dispute approved and assigned for resolution.');
+      String? attachmentPath;
+      if (_fileBytes != null) {
+        attachmentPath = await store.apiClient.uploadAttachment(
+          _fileBytes!,
+          filename: _fileName ?? 'evidence.jpg',
+          contentType: _mimeFor(_fileName ?? 'evidence.jpg'),
+        );
+      }
+      await store.approveDispute(d['id'], _owner!, deadline, note,
+          note: note, attachmentPath: attachmentPath);
+      if (mounted) setState(() => _busy = false);
+      // Close this screen FIRST, then toast — calling showAppMessageAfter
+      // before onConfirmed() made the pop dismiss the toast dialog instead
+      // of the dispute screen, leaving the spinner stuck underneath.
       widget.onConfirmed();
+      showAppMessageAfter(navigator, message: 'Dispute approved and assigned for resolution.');
     } catch (e) {
+      if (mounted) setState(() => _busy = false);
       showAppMessageAfter(navigator, message: 'Could not approve: $e', isError: true);
     }
   }

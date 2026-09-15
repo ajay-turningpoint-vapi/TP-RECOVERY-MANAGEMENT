@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:salesman_mobile/v2/utils/initials.dart';
 import 'package:provider/provider.dart';
 import 'package:salesman_mobile/v2/stores/app_store.dart';
 import 'package:salesman_mobile/v2/screens/customer_360_screen.dart';
@@ -125,7 +126,7 @@ class ReSalesmanControlScreen extends StatelessWidget {
                               children: [
                                 CircleAvatar(
                                   backgroundColor: const Color(0xFFE3F2FD),
-                                  child: Text(c.name.substring(0, 2).toUpperCase(), style: const TextStyle(color: Color(0xFF0052CC), fontWeight: FontWeight.bold)),
+                                  child: Text(avatarInitials(c.name), style: const TextStyle(color: Color(0xFF0052CC), fontWeight: FontWeight.bold)),
                                 ),
                                 const SizedBox(width: 16),
                                 Expanded(

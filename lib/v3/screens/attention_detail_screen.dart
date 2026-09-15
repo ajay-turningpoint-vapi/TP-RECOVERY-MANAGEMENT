@@ -3,10 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:salesman_mobile/v2/stores/app_store.dart';
 import 'package:salesman_mobile/v2/models/ptp.dart';
-import 'package:salesman_mobile/v2/models/customer.dart';
 import 'package:salesman_mobile/v2/screens/customer_360_screen.dart';
-import 'package:salesman_mobile/v3/screens/request_detail_scaffold.dart' show AttachmentsSection;
-import 'package:salesman_mobile/widgets/app_message.dart';
 import 'package:salesman_mobile/widgets/call_helper.dart';
 
 const _dark = Color(0xFF0F172A);
@@ -150,37 +147,22 @@ class AttentionDetailScreen extends StatelessWidget {
       ),
       bottomNavigationBar: SafeArea(
         child: Container(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
           decoration: const BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: _border))),
-          child: Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(side: const BorderSide(color: _blue), foregroundColor: _blue, padding: const EdgeInsets.symmetric(vertical: 12), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-                  onPressed: () => _contactSalesman(context, s),
-                  icon: const Icon(Icons.call_outlined, size: 16),
-                  label: const FittedBox(fit: BoxFit.scaleDown, child: Text('Contact Salesman', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5))),
-                ),
+          child: SizedBox(
+            width: double.infinity,
+            height: 46,
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _blue,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(side: const BorderSide(color: _navy), foregroundColor: _navy, padding: const EdgeInsets.symmetric(vertical: 12), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-                  onPressed: () => _assignTask(context, store, s, owned),
-                  icon: const Icon(Icons.assignment_outlined, size: 16),
-                  label: const FittedBox(fit: BoxFit.scaleDown, child: Text('Assign Task', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5))),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(backgroundColor: _navy, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 12), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-                  onPressed: () => _addNote(context, store, s),
-                  icon: const Icon(Icons.sticky_note_2_outlined, size: 16),
-                  label: const FittedBox(fit: BoxFit.scaleDown, child: Text('Add Note', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5))),
-                ),
-              ),
-            ],
+              onPressed: () => _contactSalesman(context, s),
+              icon: const Icon(Icons.call_outlined, size: 16),
+              label: const Text('Call Salesman', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+            ),
           ),
         ),
       ),
@@ -225,7 +207,7 @@ class AttentionDetailScreen extends StatelessWidget {
                     const SizedBox(height: 6),
                     Row(children: [const Icon(Icons.people_outline, size: 12, color: _muted), const SizedBox(width: 4), Text('${s['customers']} Customers', style: const TextStyle(fontSize: 11, color: _muted))]),
                     const SizedBox(height: 3),
-                    Row(children: [const Icon(Icons.location_on_outlined, size: 12, color: _muted), const SizedBox(width: 4), Text('${s['branch']} Branch', style: const TextStyle(fontSize: 11, color: _muted))]),
+                    Row(children: [const Icon(Icons.location_on_outlined, size: 12, color: _muted), const SizedBox(width: 4), Text('${(s['branch'] as String?) ?? 'Turning Point'} Branch', style: const TextStyle(fontSize: 11, color: _muted))]),
                     const SizedBox(height: 3),
                     CallablePhoneNumber(phoneNumber: s['phone'] as String?, iconColor: _muted, iconSize: 12, style: const TextStyle(fontSize: 11)),
                   ],
@@ -448,217 +430,6 @@ class AttentionDetailScreen extends StatelessWidget {
     contactActions(context, s['phone'] as String?);
   }
 
-  void _assignTask(BuildContext context, AppStore store, Map<String, dynamic> s, List<Customer> owned) {
-    if (owned.isEmpty) {
-      showAppMessage(context, message: 'No customer available to attach this task to.');
-      return;
-    }
-    Customer target = owned.first;
-    String priority = 'Critical';
-    final reasonController = TextEditingController();
-    DateTime deadline = DateTime.now().add(const Duration(days: 1));
-    String? reasonError;
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (sheetCtx) => StatefulBuilder(builder: (context, setState) {
-        return Padding(
-          padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(children: [
-                  Container(padding: const EdgeInsets.all(9), decoration: BoxDecoration(color: _navy.withOpacity(0.08), shape: BoxShape.circle), child: const Icon(Icons.assignment_outlined, color: _navy, size: 18)),
-                  const SizedBox(width: 10),
-                  const Expanded(child: Text('Assign Task', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: _navy))),
-                  IconButton(icon: const Icon(Icons.close, size: 20, color: _muted), onPressed: () => Navigator.pop(sheetCtx)),
-                ]),
-                const SizedBox(height: 4),
-                Text(
-                  'Creates a Management Instruction owned by ${(s['fullName'] as String?) ?? s['name']} on the chosen customer. This is a direct, RE-issued required action that overrides the salesperson\'s own judgment on next step — use it when a salesman is not self-directing correctly and needs a specific push.',
-                  style: const TextStyle(fontSize: 11.5, color: _muted, height: 1.4),
-                ),
-                const SizedBox(height: 18),
-                const Text('Customer *', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _dark)),
-                const SizedBox(height: 6),
-                DropdownButtonFormField<Customer>(
-                  value: target,
-                  isExpanded: true,
-                  decoration: const InputDecoration(border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10)),
-                  items: owned.map((c) => DropdownMenuItem(value: c, child: Text('${c.name} · ${_rupee.format(c.totalDue)} due', overflow: TextOverflow.ellipsis))).toList(),
-                  onChanged: (v) { if (v != null) setState(() => target = v); },
-                ),
-                const SizedBox(height: 16),
-                const Text('Task Instruction *', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _dark)),
-                const SizedBox(height: 6),
-                TextField(
-                  controller: reasonController,
-                  maxLines: 3,
-                  decoration: InputDecoration(hintText: 'e.g. Visit customer today and obtain a firm PTP before 5 PM', border: const OutlineInputBorder(), errorText: reasonError),
-                ),
-                const SizedBox(height: 16),
-                Row(children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('Priority *', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _dark)),
-                        const SizedBox(height: 6),
-                        DropdownButtonFormField<String>(
-                          value: priority,
-                          decoration: const InputDecoration(border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10)),
-                          items: ['Critical', 'High', 'Normal'].map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(),
-                          onChanged: (v) { if (v != null) setState(() => priority = v); },
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('Deadline *', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _dark)),
-                        const SizedBox(height: 6),
-                        InkWell(
-                          onTap: () async {
-                            final picked = await showDatePicker(context: context, initialDate: deadline, firstDate: DateTime.now(), lastDate: DateTime.now().add(const Duration(days: 30)));
-                            if (picked != null) setState(() => deadline = picked);
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
-                            decoration: BoxDecoration(border: Border.all(color: Colors.grey.withOpacity(0.5)), borderRadius: BorderRadius.circular(4)),
-                            child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                              Text(DateFormat('dd MMM yyyy').format(deadline), style: const TextStyle(fontSize: 13)),
-                              const Icon(Icons.calendar_today, size: 15, color: _muted),
-                            ]),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ]),
-                const SizedBox(height: 22),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(backgroundColor: _navy, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-                    onPressed: () async {
-                      if (reasonController.text.trim().isEmpty) {
-                        setState(() => reasonError = 'Task instruction is required');
-                        return;
-                      }
-                      final navigator = Navigator.of(context);
-                      Navigator.pop(sheetCtx);
-                      try {
-                        await store.assignManagementInstruction(target.id, s['name'], reasonController.text.trim(), deadline, priority: priority);
-                        showAppMessageAfter(navigator, message: '$priority task assigned to ${(s['fullName'] as String?) ?? s['name']} on ${target.name}.');
-                      } catch (e) {
-                        showAppMessageAfter(navigator, message: 'Could not assign: $e', isError: true);
-                      }
-                    },
-                    child: const Text('Assign Task', style: TextStyle(fontWeight: FontWeight.bold)),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      }),
-    );
-  }
-
-  void _addNote(BuildContext context, AppStore store, Map<String, dynamic> s) {
-    final controller = TextEditingController();
-    final existingNotes = store.notesFor(s['name']);
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (sheetCtx) => StatefulBuilder(builder: (context, setState) {
-        return Padding(
-          padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(children: [
-                  Container(padding: const EdgeInsets.all(9), decoration: BoxDecoration(color: _navy.withOpacity(0.08), shape: BoxShape.circle), child: const Icon(Icons.sticky_note_2_outlined, color: _navy, size: 18)),
-                  const SizedBox(width: 10),
-                  Expanded(child: Text('Notes — ${(s['fullName'] as String?) ?? s['name']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: _navy))),
-                  IconButton(icon: const Icon(Icons.close, size: 20, color: _muted), onPressed: () => Navigator.pop(sheetCtx)),
-                ]),
-                const SizedBox(height: 4),
-                const Text(
-                  'A private RE-to-RE record kept against this salesperson — not sent to them and not a task. Use it to log context for the next control review (e.g. "spoke to him, promised improvement by Friday") so it isn\'t lost between shifts.',
-                  style: TextStyle(fontSize: 11.5, color: _muted, height: 1.4),
-                ),
-                const SizedBox(height: 16),
-                if (existingNotes.isNotEmpty) ...[
-                  const Text('PREVIOUS NOTES', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: _muted, letterSpacing: 0.4)),
-                  const SizedBox(height: 8),
-                  Container(
-                    constraints: const BoxConstraints(maxHeight: 180),
-                    decoration: BoxDecoration(color: _bg, borderRadius: BorderRadius.circular(10), border: Border.all(color: _border)),
-                    child: Scrollbar(
-                      child: ListView.separated(
-                        shrinkWrap: true,
-                        padding: const EdgeInsets.all(10),
-                        itemCount: existingNotes.length,
-                        separatorBuilder: (_, __) => const Divider(height: 14, color: _border),
-                        itemBuilder: (ctx, i) {
-                          final n = existingNotes[i];
-                          return Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(n['note'] as String, style: const TextStyle(fontSize: 12, color: _dark)),
-                              const SizedBox(height: 3),
-                              Text('${n['author']} · ${DateFormat('dd MMM yyyy, hh:mm a').format(n['timestamp'] as DateTime)}', style: const TextStyle(fontSize: 9.5, color: _muted)),
-                            ],
-                          );
-                        },
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                ],
-                const Text('New Note', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _dark)),
-                const SizedBox(height: 6),
-                TextField(controller: controller, maxLines: 3, decoration: const InputDecoration(hintText: 'Add a note for this salesman…', border: OutlineInputBorder())),
-                const SizedBox(height: 18),
-                // Same refId scheme as every Tasks-screen item — evidence
-                // attached here (e.g. a screenshot of a WhatsApp
-                // conversation) shows up wherever this salesman's refId is
-                // referenced.
-                AttachmentsSection(refId: s['name'] as String),
-                const SizedBox(height: 18),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(backgroundColor: _navy, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-                    onPressed: () {
-                      if (controller.text.trim().isEmpty) return;
-                      store.addSalesmanNote(s['name'], controller.text.trim());
-                      Navigator.pop(sheetCtx);
-                      showAppMessage(context, message: 'Note added.');
-                    },
-                    child: const Text('Save Note', style: TextStyle(fontWeight: FontWeight.bold)),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      }),
-    );
-  }
 }
 
 class _TimelineEvent {
