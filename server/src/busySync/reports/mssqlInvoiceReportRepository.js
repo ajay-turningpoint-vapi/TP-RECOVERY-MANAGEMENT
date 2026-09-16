@@ -21,7 +21,7 @@ function mapRow(raw) {
 }
 
 async function getInvoices(options = {}) {
-  const conn = options.database ? await poolForDatabase(options.database) : mssqlDb;
+  const conn = options.database ? await poolForDatabase(options.database, options.conn) : mssqlDb;
   if (!conn.isConnected) {
     await conn.connect();
   }

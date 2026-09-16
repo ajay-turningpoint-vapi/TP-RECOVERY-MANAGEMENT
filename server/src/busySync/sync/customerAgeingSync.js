@@ -128,6 +128,7 @@ async function runLockedInner() {
           database: branch.database,
           parentGroups: branch.parentGroups,
           branchLabel: branch.label,
+          conn: branch.conn,
         })
       );
 

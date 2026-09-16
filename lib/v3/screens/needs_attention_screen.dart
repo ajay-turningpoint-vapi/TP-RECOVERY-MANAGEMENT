@@ -227,26 +227,24 @@ class _NeedsAttentionScreenState extends State<NeedsAttentionScreen> {
       child: Row(
         children: [
           Expanded(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              decoration: BoxDecoration(color: _bg, borderRadius: BorderRadius.circular(10), border: Border.all(color: _border)),
-              child: Row(
-                children: [
-                  const Icon(Icons.search, size: 16, color: _muted),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: TextField(
-                      onChanged: (v) => setState(() => _query = v),
-                      style: const TextStyle(fontSize: 12, color: _dark),
-                      decoration: const InputDecoration(
-                        isDense: true,
-                        border: InputBorder.none,
-                        hintText: 'Search by Salesman / Customer / Mobile / Invoice',
-                        hintStyle: TextStyle(fontSize: 11.5, color: _muted),
-                      ),
-                    ),
-                  ),
-                ],
+            child: SizedBox(
+              height: 38,
+              child: TextField(
+                onChanged: (v) => setState(() => _query = v),
+                style: const TextStyle(fontSize: 12, color: _dark),
+                decoration: InputDecoration(
+                  isDense: true,
+                  filled: true,
+                  fillColor: _bg,
+                  prefixIcon: const Icon(Icons.search, size: 18, color: _muted),
+                  prefixIconConstraints: const BoxConstraints(minWidth: 34, minHeight: 34),
+                  contentPadding: const EdgeInsets.symmetric(vertical: 9),
+                  hintText: 'Search by Salesman / Customer / Mobile / Invoice',
+                  hintStyle: const TextStyle(fontSize: 11.5, color: _muted),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: _border)),
+                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: _border)),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: _border)),
+                ),
               ),
             ),
           ),

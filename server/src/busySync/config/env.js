@@ -27,4 +27,16 @@ const mssql = {
   connectionTimeout: process.env.DB_CONNECTION_TIMEOUT ? parseInt(process.env.DB_CONNECTION_TIMEOUT, 10) : 30000,
 };
 
-module.exports = { mssql };
+// Second BUSY ERP host — FP-VAPI, FP-NAVSARI and PORSHIVE company databases
+// live here instead of on `mssql`'s host (see config/branches.js). Same
+// pool/timeout settings; only server/port/user/password differ per host.
+const mssql2 = {
+  ...mssql,
+  server: process.env.BUSY2_DB_SERVER || '',
+  port: process.env.BUSY2_DB_PORT ? parseInt(process.env.BUSY2_DB_PORT, 10) : undefined,
+  database: '',
+  user: process.env.BUSY2_DB_USER || '',
+  password: process.env.BUSY2_DB_PASSWORD || '',
+};
+
+module.exports = { mssql, mssql2 };

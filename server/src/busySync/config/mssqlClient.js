@@ -2,52 +2,58 @@ const mssql = require('mssql');
 const logger = require('../../config/logger');
 const { mssql: mssqlEnv } = require('./env');
 
-const rawServer = mssqlEnv.server || '0.0.0.0';
-const port = mssqlEnv.port;
-
-let server = rawServer;
-const baseOptions = {
-  encrypt: mssqlEnv.encrypt,
-  trustServerCertificate: mssqlEnv.trustServerCertificate,
-  enableArithAbort: true,
-  useUTC: true,
-};
-
-// host\INSTANCE — when a fixed port is also given, connect by host:port
-// instead (typical for static ports); only one of instanceName/port is used.
-if (rawServer.includes('\\')) {
-  const [host, instanceName] = rawServer.split('\\');
-  server = host;
-  if (!port) {
-    baseOptions.instanceName = instanceName;
+/**
+ * Resolves `host\INSTANCE` server strings — when a fixed port is also given,
+ * connect by host:port instead (typical for static ports); only one of
+ * instanceName/port is used.
+ */
+function resolveServer(rawServer, port) {
+  let server = rawServer || '0.0.0.0';
+  const options = {};
+  if (server.includes('\\')) {
+    const [host, instanceName] = server.split('\\');
+    server = host;
+    if (!port) options.instanceName = instanceName;
   }
+  return { server, options };
 }
 
 /**
- * Same server / login / pool sizing for every branch — only the target
- * database differs (see config/branches.js).
+ * Builds a per-branch connection config. `conn` (server/port/user/password/
+ * encrypt/trustServerCertificate/poolMin/poolMax/requestTimeout/
+ * connectionTimeout) defaults to the original single-host `mssqlEnv` so
+ * existing tp/claart call sites are unaffected; branches on a second BUSY
+ * host (see config/branches.js) pass their own `conn` (e.g. `mssql2`).
  */
-function buildConfig(database) {
+function buildConfig(database, conn = mssqlEnv) {
+  const { server, options } = resolveServer(conn.server, conn.port);
   return {
     server,
-    port,
+    port: conn.port,
     database,
-    user: mssqlEnv.user,
-    password: mssqlEnv.password,
-    options: { ...baseOptions },
+    user: conn.user,
+    password: conn.password,
+    options: {
+      encrypt: conn.encrypt,
+      trustServerCertificate: conn.trustServerCertificate,
+      enableArithAbort: true,
+      useUTC: true,
+      ...options,
+    },
     pool: {
-      min: mssqlEnv.poolMin,
-      max: mssqlEnv.poolMax,
+      min: conn.poolMin,
+      max: conn.poolMax,
       idleTimeoutMillis: 30000,
     },
-    requestTimeout: mssqlEnv.requestTimeout,
-    connectionTimeout: mssqlEnv.connectionTimeout,
+    requestTimeout: conn.requestTimeout,
+    connectionTimeout: conn.connectionTimeout,
   };
 }
 
 class MssqlConnection {
-  constructor(database = mssqlEnv.database) {
+  constructor(database = mssqlEnv.database, conn = mssqlEnv) {
     this.database = database;
+    this.conn = conn;
     this.pool = null;
     this._isConnected = false;
     this._lastError = null;
@@ -62,9 +68,10 @@ class MssqlConnection {
   }
 
   async connect() {
+    const { server } = resolveServer(this.conn.server, this.conn.port);
     try {
-      logger.info(`[BUSY ERP] Connecting to ${server}${port ? ':' + port : ''} / ${this.database}...`);
-      this.pool = await new mssql.ConnectionPool(buildConfig(this.database)).connect();
+      logger.info(`[BUSY ERP] Connecting to ${server}${this.conn.port ? ':' + this.conn.port : ''} / ${this.database}...`);
+      this.pool = await new mssql.ConnectionPool(buildConfig(this.database, this.conn)).connect();
 
       this.pool.on('error', (err) => {
         this._isConnected = false;
@@ -95,21 +102,22 @@ class MssqlConnection {
   }
 }
 
-// One MssqlConnection per database name, created lazily and reused.
+// One MssqlConnection per host+database, created lazily and reused.
 const poolsByDatabase = new Map();
 
-/** Returns a *connected* MssqlConnection for `database`, connecting on first use. */
-async function poolForDatabase(database) {
-  const key = database || mssqlEnv.database;
-  let conn = poolsByDatabase.get(key);
-  if (!conn) {
-    conn = new MssqlConnection(key);
-    poolsByDatabase.set(key, conn);
+/** Returns a *connected* MssqlConnection for `database` on `conn`'s host, connecting on first use. */
+async function poolForDatabase(database, conn = mssqlEnv) {
+  const db = database || mssqlEnv.database;
+  const key = `${conn.server}:${conn.port}:${db}`;
+  let entry = poolsByDatabase.get(key);
+  if (!entry) {
+    entry = new MssqlConnection(db, conn);
+    poolsByDatabase.set(key, entry);
   }
-  if (!conn.isConnected) {
-    await conn.connect();
+  if (!entry.isConnected) {
+    await entry.connect();
   }
-  return conn;
+  return entry;
 }
 
 // Back-compat singleton — the Turning Point / default database. Used by
@@ -117,6 +125,6 @@ async function poolForDatabase(database) {
 // (mssqlDb.isConnected / .lastError). connect() is still called lazily by
 // those callers.
 const mssqlDb = new MssqlConnection();
-poolsByDatabase.set(mssqlDb.database, mssqlDb);
+poolsByDatabase.set(`${mssqlEnv.server}:${mssqlEnv.port}:${mssqlDb.database}`, mssqlDb);
 
 module.exports = { MssqlConnection, mssqlDb, poolForDatabase, sql: mssql };

@@ -164,11 +164,17 @@ async function finalizeDuePtps(getReceiptTotals = receiptTotalsRepository.getRec
       // after the promise date, and on/before the promise date + 1 day.
       const startDate = dueDate;
       const endDate = verificationDate;
-      const cacheKey = `${branch.database}|${startDate}|${endDate}`;
+      const cacheKey = `${branch.key}|${startDate}|${endDate}`;
       let rows = receiptTotalsCache.get(cacheKey);
       if (!rows) {
         rows = await withRetry('BUSY receipt totals fetch', () =>
-          getReceiptTotals({ startDate, endDate, database: branch.database, parentGroups: branch.parentGroups })
+          getReceiptTotals({
+            startDate,
+            endDate,
+            database: branch.database,
+            parentGroups: branch.parentGroups,
+            conn: branch.conn,
+          })
         );
         receiptTotalsCache.set(cacheKey, rows);
       }

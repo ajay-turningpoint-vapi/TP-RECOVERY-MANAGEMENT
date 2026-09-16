@@ -92,18 +92,19 @@ class _TasksScreenState extends State<TasksScreen> {
                   const SizedBox(height: 16),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                      decoration: BoxDecoration(color: const Color(0xFFF8F9FB), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey.withOpacity(0.1))),
-                      child: TextField(
-                        onChanged: (v) => setState(() => _query = v),
-                        decoration: const InputDecoration(
-                          icon: Icon(Icons.search, color: Color(0xFFA0AEC0), size: 20),
-                          hintText: 'Search tasks, customers...',
-                          hintStyle: TextStyle(color: Color(0xFFA0AEC0), fontSize: 14),
-                          border: InputBorder.none,
-                          isDense: true,
-                        ),
+                    child: TextField(
+                      onChanged: (v) => setState(() => _query = v),
+                      decoration: InputDecoration(
+                        isDense: true,
+                        filled: true,
+                        fillColor: const Color(0xFFF8F9FB),
+                        prefixIcon: const Icon(Icons.search, color: Color(0xFFA0AEC0), size: 20),
+                        contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                        hintText: 'Search tasks, customers...',
+                        hintStyle: const TextStyle(color: Color(0xFFA0AEC0), fontSize: 14),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.withOpacity(0.1))),
+                        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.withOpacity(0.1))),
+                        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.withOpacity(0.1))),
                       ),
                     ),
                   )

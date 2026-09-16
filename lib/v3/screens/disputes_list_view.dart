@@ -142,25 +142,35 @@ class _DisputesListViewState extends State<DisputesListView> {
           Container(
             color: Colors.white,
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              decoration: BoxDecoration(color: kBg, borderRadius: BorderRadius.circular(10), border: Border.all(color: kBorder)),
-              child: Row(
-                children: [
-                  const Icon(Icons.search, size: 16, color: kMuted),
-                  const SizedBox(width: 8),
-                  Expanded(
+            child: Row(
+              children: [
+                Expanded(
+                  child: SizedBox(
+                    height: 38,
                     child: TextField(
                       onChanged: (v) => setState(() => _query = v),
                       style: const TextStyle(fontSize: 12, color: kDark),
-                      decoration: const InputDecoration(isDense: true, border: InputBorder.none, hintText: 'Search by Customer / Invoice / Dispute ID', hintStyle: TextStyle(fontSize: 11.5, color: kMuted)),
+                      decoration: InputDecoration(
+                        isDense: true,
+                        filled: true,
+                        fillColor: kBg,
+                        prefixIcon: const Icon(Icons.search, size: 18, color: kMuted),
+                        prefixIconConstraints: const BoxConstraints(minWidth: 34, minHeight: 34),
+                        contentPadding: const EdgeInsets.symmetric(vertical: 9),
+                        hintText: 'Search by Customer / Invoice / Dispute ID',
+                        hintStyle: const TextStyle(fontSize: 11.5, color: kMuted),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: kBorder)),
+                        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: kBorder)),
+                        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: kBorder)),
+                      ),
                     ),
                   ),
-                  const Icon(Icons.swap_vert, size: 15, color: _blue),
-                  const SizedBox(width: 4),
-                  const Text('Sort by', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: kDark)),
-                ],
-              ),
+                ),
+                const SizedBox(width: 8),
+                const Icon(Icons.swap_vert, size: 15, color: _blue),
+                const SizedBox(width: 4),
+                const Text('Sort by', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: kDark)),
+              ],
             ),
           ),
           Expanded(

@@ -30,20 +30,27 @@ const CONNECTION_ERROR = /failed to connect|econnrefused|etimedout|enotfound|soc
 // a genuinely stalled / killed job worth warning the user about.
 const STALLED_AFTER_MS = 30 * 60 * 1000;
 
-function summariseLastSync(run) {
-  if (!run) return null;
-  const error = run.errorMessage || null;
-  const isConnection = run.status === 'failed' && !!error && CONNECTION_ERROR.test(error);
-  const branchLabel = run.branch ? ` (${run.branch})` : '';
+/**
+ * `batch` is every branch's `sync_runs` row sharing the last run's
+ * (job_name, started_at) — see syncRunsRepository.getLatestBatchAny().
+ * customerAgeingSync.js/customerInvoiceSync.js write one row per branch
+ * (5 branches across 2 BUSY hosts) per run, so the run's real outcome is
+ * "did every branch succeed", not just whichever row has the highest id.
+ */
+function summariseLastSync(batch) {
+  if (!batch || batch.length === 0) return null;
 
-  const startedMs = run.startedAt ? new Date(run.startedAt).getTime() : 0;
-  const runningLooksStalled =
-    run.status === 'running' && startedMs > 0 && Date.now() - startedMs > STALLED_AFTER_MS;
+  const runningLooksStalled = (run) => {
+    const startedMs = run.startedAt ? new Date(run.startedAt).getTime() : 0;
+    return run.status === 'running' && startedMs > 0 && Date.now() - startedMs > STALLED_AFTER_MS;
+  };
 
-  // The one case that is NOT a problem: a fresh `running` row = a sync in
-  // progress. Report it plainly so the client can say "syncing…" rather
-  // than "sync failed".
-  if (run.status === 'running' && !runningLooksStalled) {
+  const runningFresh = batch.filter((r) => r.status === 'running' && !runningLooksStalled(r));
+  // Any branch still genuinely mid-sync ⇒ report the whole batch as in
+  // progress, same as before — the client shows "syncing…", not "failed",
+  // while other branches in the same run have already finished.
+  if (runningFresh.length > 0) {
+    const run = runningFresh[0];
     return {
       status: 'inProgress',
       branch: run.branch,
@@ -52,28 +59,59 @@ function summariseLastSync(run) {
       finishedAt: null,
       error: null,
       connectionError: false,
+      failedBranches: [],
       message: null,
     };
   }
 
+  const stalled = batch.filter((r) => runningLooksStalled(r));
+  const failed = batch.filter((r) => r.status === 'failed');
+  const failedBranches = [...stalled, ...failed].map((r) => r.branch).filter(Boolean);
+
+  const jobName = batch[0].jobName;
+  const startedAt = batch[0].startedAt;
+  const finishedAt = batch.reduce((latest, r) => {
+    if (!r.finishedAt) return latest;
+    return !latest || new Date(r.finishedAt) > new Date(latest) ? r.finishedAt : latest;
+  }, null);
+
+  if (failedBranches.length === 0) {
+    return {
+      status: 'success',
+      branch: null,
+      jobName,
+      startedAt,
+      finishedAt,
+      error: null,
+      connectionError: false,
+      failedBranches: [],
+      message: null,
+    };
+  }
+
+  const failedRun = failed.find((r) => CONNECTION_ERROR.test(r.errorMessage || '')) || failed[0] || stalled[0];
+  const isConnection = !!failedRun && failed.length > 0 && CONNECTION_ERROR.test(failedRun.errorMessage || '');
+  const branchList = failedBranches.join(', ');
   const RETRY_NOTE = 'It runs again automatically — no action needed.';
-  let message = null;
-  if (run.status === 'failed') {
-    message = isConnection
-      ? `Couldn't reach BUSY${branchLabel} — the connection failed. Customer balances, PTPs and tasks may be out of date. ${RETRY_NOTE}`
-      : `The last BUSY sync${branchLabel} didn't finish, so customer data may be out of date. ${RETRY_NOTE}`;
-  } else if (runningLooksStalled) {
-    message = `A BUSY sync${branchLabel} was interrupted before it finished, so customer data may be out of date. ${RETRY_NOTE}`;
+
+  let message;
+  if (stalled.length > 0 && failed.length === 0) {
+    message = `A BUSY sync (${branchList}) was interrupted before it finished, so customer data may be out of date. ${RETRY_NOTE}`;
+  } else if (isConnection) {
+    message = `Couldn't reach BUSY (${branchList}) — the connection failed. Customer balances, PTPs and tasks for that branch may be out of date. ${RETRY_NOTE}`;
+  } else {
+    message = `The last BUSY sync didn't finish for: ${branchList}. Customer data for that branch may be out of date. ${RETRY_NOTE}`;
   }
 
   return {
-    status: runningLooksStalled ? 'stalled' : run.status, // 'success' | 'failed' | 'stalled'
-    branch: run.branch,
-    jobName: run.jobName,
-    startedAt: run.startedAt,
-    finishedAt: run.finishedAt,
-    error,
+    status: stalled.length > 0 && failed.length === 0 ? 'stalled' : 'failed',
+    branch: failedBranches.length === 1 ? failedBranches[0] : null,
+    jobName,
+    startedAt,
+    finishedAt,
+    error: failedRun ? failedRun.errorMessage : null,
     connectionError: isConnection,
+    failedBranches,
     message,
   };
 }
@@ -86,7 +124,7 @@ router.get(
 
     let lastSync = null;
     try {
-      lastSync = summariseLastSync(await syncRunsRepository.getLatestRunAny());
+      lastSync = summariseLastSync(await syncRunsRepository.getLatestBatchAny());
     } catch (_) {
       // Status reporting only — never fail the poll over it.
     }

@@ -26,10 +26,13 @@ ALTER TABLE customers
 -- Backfill: the salesman accounts already created by the single-branch
 -- sync are all Turning Point. Give them the display-name suffix the
 -- multi-branch sync maintains from now on (idempotent — skips names that
--- already carry a suffix).
+-- already carry ANY branch suffix, current or future, not just the two
+-- that existed when this migration was written — migrate.js re-runs
+-- every .sql file on every invocation, so a narrower check here kept
+-- re-appending ' -TP' onto branches added later, e.g. 'BHARAT -FPNAVSARI'
+-- → 'BHARAT -FPNAVSARI -TP' on every subsequent `npm run migrate`).
 UPDATE users
   SET full_name = CONCAT(full_name, ' -TP')
   WHERE role = 'SALESPERSON'
     AND busy_salesman_code IS NOT NULL
-    AND full_name NOT LIKE '% -TP'
-    AND full_name NOT LIKE '% -Claart';
+    AND full_name NOT LIKE '% -%';

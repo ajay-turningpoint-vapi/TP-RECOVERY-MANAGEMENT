@@ -32,10 +32,10 @@ function mapRow(raw) {
  * database + PARENTGRP list (config/branches.js). Omitting them keeps the
  * historical Turning Point-only behaviour.
  *
- * @param {{ startDate: string, endDate: string, database?: string, parentGroups?: string[] }} opts
+ * @param {{ startDate: string, endDate: string, database?: string, parentGroups?: string[], conn?: object }} opts
  */
-async function getReceiptTotals({ startDate, endDate, database, parentGroups }) {
-  const conn = database ? await poolForDatabase(database) : mssqlDb;
+async function getReceiptTotals({ startDate, endDate, database, parentGroups, conn: hostConn }) {
+  const conn = database ? await poolForDatabase(database, hostConn) : mssqlDb;
   if (!conn.isConnected) {
     await conn.connect();
   }

@@ -57,15 +57,36 @@ async function getLatestRun(branch = null, jobName = JOB_NAME) {
 }
 
 /**
- * The single most recent run across every job_name / branch — used by the
- * universal /api/sync-status endpoint to tell active clients whether the
- * last BUSY sync attempt (ageing or invoice, any branch) actually
- * succeeded, so a failed / unreachable-source run can surface a real
- * message instead of the app silently showing stale data.
+ * The single most recent run across every job_name / branch — kept for
+ * callers that only care about "what's the very latest row", but NOT what
+ * /api/sync-status uses: customerAgeingSync.js/customerInvoiceSync.js write
+ * one row per branch (5 branches, 2 hosts) under one shared `started_at`
+ * per run, sequentially — so the highest-`id` row is just whichever branch
+ * happened to finish last, not the run's overall outcome. See
+ * getLatestBatchAny() below for the real "did the last run actually
+ * succeed, across every branch" answer.
  */
 async function getLatestRunAny() {
   const rows = await query(`SELECT * FROM sync_runs ORDER BY id DESC LIMIT 1`);
   return rows.length > 0 ? mapRun(rows[0]) : null;
+}
+
+/**
+ * The most recent *batch* — every branch's row sharing the same
+ * (job_name, started_at) as the single latest row — so a partial failure
+ * (e.g. 2 of 5 branches down) is visible instead of masked by whichever
+ * branch's row happens to have the highest `id`. Used by the universal
+ * /api/sync-status endpoint.
+ */
+async function getLatestBatchAny() {
+  const latest = await query(`SELECT job_name, started_at FROM sync_runs ORDER BY id DESC LIMIT 1`);
+  if (latest.length === 0) return [];
+  const { job_name: jobName, started_at: startedAt } = latest[0];
+  const rows = await query(
+    `SELECT * FROM sync_runs WHERE job_name = ? AND started_at = ? ORDER BY id ASC`,
+    [jobName, startedAt]
+  );
+  return rows.map(mapRun);
 }
 
 async function getRecentRuns(limit = 20, jobName = JOB_NAME) {
@@ -73,4 +94,13 @@ async function getRecentRuns(limit = 20, jobName = JOB_NAME) {
   return rows.map(mapRun);
 }
 
-module.exports = { JOB_NAME, isRunInProgress, startRun, completeRun, getLatestRun, getLatestRunAny, getRecentRuns };
+module.exports = {
+  JOB_NAME,
+  isRunInProgress,
+  startRun,
+  completeRun,
+  getLatestRun,
+  getLatestRunAny,
+  getLatestBatchAny,
+  getRecentRuns,
+};

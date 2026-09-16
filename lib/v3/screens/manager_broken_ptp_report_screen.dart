@@ -51,7 +51,15 @@ class _ManagerBrokenPtpReportScreenState extends State<ManagerBrokenPtpReportScr
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
     final branches = store.branchOptions;
-    final salesmenNames = ['All Salesmen', ...store.salesmen.map((s) => s['name'] as String)];
+    // Exclude salesmen with zero total overdue — nothing to chase, so they
+    // just clutter this filter (same convention as control_dashboard_screen
+    // / report_detail_screens' salesman leaderboard).
+    final salesmenNames = [
+      'All Salesmen',
+      ...store.salesmen
+          .where((s) => ((s['totalOverdue'] as num?) ?? 0) > 0)
+          .map((s) => s['name'] as String),
+    ];
     final now = DateTime.now();
 
     bool inScope(PromiseToPay p) {
@@ -356,21 +364,24 @@ class _ManagerBrokenPtpReportScreenState extends State<ManagerBrokenPtpReportScr
         Row(
           children: [
             Expanded(
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                decoration: BoxDecoration(color: kBg, borderRadius: BorderRadius.circular(8), border: Border.all(color: kBorder)),
-                child: Row(
-                  children: [
-                    const Icon(Icons.search, size: 14, color: kMuted),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: TextField(
-                        onChanged: (v) => setState(() => _query = v),
-                        style: const TextStyle(fontSize: 11.5, color: kDark),
-                        decoration: const InputDecoration(isDense: true, border: InputBorder.none, hintText: 'Search customer or salesman', hintStyle: TextStyle(fontSize: 11, color: kMuted)),
-                      ),
-                    ),
-                  ],
+              child: SizedBox(
+                height: 34,
+                child: TextField(
+                  onChanged: (v) => setState(() => _query = v),
+                  style: const TextStyle(fontSize: 11.5, color: kDark),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    filled: true,
+                    fillColor: kBg,
+                    prefixIcon: const Icon(Icons.search, size: 16, color: kMuted),
+                    prefixIconConstraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+                    contentPadding: const EdgeInsets.symmetric(vertical: 6),
+                    hintText: 'Search customer or salesman',
+                    hintStyle: const TextStyle(fontSize: 11, color: kMuted),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: kBorder)),
+                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: kBorder)),
+                    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: kBorder)),
+                  ),
                 ),
               ),
             ),

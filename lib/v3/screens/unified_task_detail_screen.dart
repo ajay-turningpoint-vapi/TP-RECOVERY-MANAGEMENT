@@ -449,8 +449,8 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
         bannerText = '${store.salesmanDisplayName(customer.assignedSalesmanId)} has not achieved their collection target — this is their largest overdue account.';
         description = 'Overdue ${_rupee.format(customer.totalDue)} on ${customer.name}, ${customer.oldestOverdueDays} days overdue.';
         actionOptions = [
-          _ActionOption(Icons.person_outline, kBlue, 'View Customer 360', 'Open the full account view and assign a task from there.', () => Navigator.push(context, MaterialPageRoute(builder: (_) => Customer360Screen(customer: customer)))),
-          _ActionOption(Icons.call_outlined, kBlue, 'Contact Salesman', 'Call or WhatsApp the assigned salesperson about this account.', () => contactActions(context, store.salesmanPhone(customer.assignedSalesmanId))),
+          _ActionOption(Icons.person_outline, kBlue, 'View Customer 360', 'Open the full account view and assign a task from there.', () => Navigator.push(context, MaterialPageRoute(builder: (_) => Customer360Screen(customer: customer))), outlined: true),
+          _ActionOption(Icons.call_outlined, kBlue, 'Contact Salesman', 'Call or WhatsApp the assigned salesperson about this account.', () => contactActions(context, store.salesmanPhone(customer.assignedSalesmanId)), outlined: true),
           _ActionOption(Icons.check_circle_outline, kGreen, 'Mark Complete', 'Clears this salesman for today. It returns tomorrow if they are still below target.', () => _dismissUnderperformance(context, store, customer.assignedSalesmanId)),
         ];
         break;
@@ -1030,11 +1030,11 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
     final label = Text(o.title,
         textAlign: TextAlign.center,
         style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5));
-    if (o.color == kRed) {
+    if (o.color == kRed || o.outlined) {
       return OutlinedButton.icon(
         style: OutlinedButton.styleFrom(
-          foregroundColor: kRed,
-          side: const BorderSide(color: kRed, width: 1.4),
+          foregroundColor: o.color,
+          side: BorderSide(color: o.color, width: 1.4),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         ),
         onPressed: o.onTap,
@@ -1199,7 +1199,12 @@ class _ActionOption {
   final String title;
   final String description;
   final VoidCallback onTap;
-  _ActionOption(this.icon, this.color, this.title, this.description, this.onTap);
+  // Secondary/informational actions (navigate, contact) render outlined so
+  // only the one real primary action (e.g. Mark Complete) stands out as a
+  // solid button — matching the rest of the app's CTA hierarchy instead of
+  // stacking several equally-loud solid-color buttons.
+  final bool outlined;
+  _ActionOption(this.icon, this.color, this.title, this.description, this.onTap, {this.outlined = false});
 }
 
 // Task attachments render via request_detail_scaffold.dart's shared

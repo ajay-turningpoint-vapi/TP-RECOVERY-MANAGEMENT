@@ -18,6 +18,25 @@ const _border = Color(0xFFEEF1F5);
 
 final _rupee = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
 
+// Salesmen Performance table columns — fixed widths (not Expanded/flex) so
+// a long salesman name gets real room instead of being squeezed by the
+// numeric columns; the whole table scrolls horizontally when it doesn't
+// fit the screen instead of shrinking everything down to illegible text.
+const double _perfColSalesman = 150;
+const double _perfColOverdue = 100;
+const double _perfColDueToday = 100;
+const double _perfColTasks = 60;
+const double _perfColKept = 60;
+const double _perfColTrailing = 26;
+const double _perfColGap = 10;
+const double _perfTableWidth = _perfColSalesman +
+    _perfColOverdue +
+    _perfColDueToday +
+    _perfColTasks +
+    _perfColKept +
+    _perfColTrailing +
+    _perfColGap * 5;
+
 const List<Color> _avatarPalette = [
   Color(0xFF2563EB),
   Color(0xFF16A34A),
@@ -94,8 +113,7 @@ class _ControlDashboardScreenState extends State<ControlDashboardScreen> {
   // Header
   // -------------------------------------------------------------------
   Widget _buildHeader(BuildContext context, AppStore store) {
-    final hour = DateTime.now().hour;
-    final greeting = hour < 12 ? 'Good Morning' : (hour < 17 ? 'Good Afternoon' : 'Good Evening');
+    const greeting = 'Hello';
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 14, 12, 6),
       child: Row(
@@ -110,7 +128,7 @@ class _ControlDashboardScreenState extends State<ControlDashboardScreen> {
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.calendar_today_outlined, color: _dark, size: 19),
+            icon: const Icon(Icons.access_time_rounded, color: _dark, size: 19),
             tooltip: '5 PM Control',
             onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FivePmControlScreen())),
           ),
@@ -270,12 +288,12 @@ class _ControlDashboardScreenState extends State<ControlDashboardScreen> {
     // accounts (no salesman assigned, so the RE works these directly).
     final ownerless = store.ownerMappingRequiredCustomers;
     final tiles = [
-      _AttentionTileData(Icons.priority_high, const Color(0xFF9333EA), '${store.openEscalationCases.length}', 'Escalations', 'L2 / L3 / L4',
-          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const EscalationsScreen()))),
-      _AttentionTileData(Icons.person_off_outlined, const Color(0xFFDB2777), '${ownerless.length}', 'Ownerless\nAccounts', _rupee.format(store.ownerlessExposure),
-          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NeedsAttentionScreen(initialTab: 13)))),
       _AttentionTileData(Icons.warning_amber_rounded, const Color(0xFFDC2626), '${store.criticalApprovalsCount}', 'Critical\nApprovals', 'High priority',
           onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ApprovalsListScreen(onlyCritical: true)))),
+      _AttentionTileData(Icons.person_off_outlined, const Color(0xFFDB2777), '${ownerless.length}', 'Ownerless\nAccounts', _rupee.format(store.ownerlessExposure),
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NeedsAttentionScreen(initialTab: 13)))),
+      _AttentionTileData(Icons.priority_high, const Color(0xFF9333EA), '${store.openEscalationCases.length}', 'Escalations', 'L2 / L3 / L4',
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const EscalationsScreen()))),
     ];
     final visibleAttentionCount = tiles.fold(0, (s, t) => s + int.parse(t.value));
 
@@ -355,7 +373,7 @@ class _ControlDashboardScreenState extends State<ControlDashboardScreen> {
         children: [
           Row(
             children: [
-              const Expanded(child: Text('Salesmen Performance (Today)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14.5, color: _dark))),
+              const Expanded(child: Text('Salesmen Performance', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14.5, color: _dark))),
               if (all.length >= 10)
                 GestureDetector(
                   onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NeedsAttentionScreen())),
@@ -364,21 +382,37 @@ class _ControlDashboardScreenState extends State<ControlDashboardScreen> {
             ],
           ),
           const SizedBox(height: 14),
-          const Row(
-            children: [
-              Expanded(flex: 5, child: Text('Salesman', style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
-              Expanded(flex: 3, child: Text('Total Overdue', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
-              Expanded(flex: 3, child: Text('Due Today', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
-              Expanded(flex: 2, child: Text('Tasks', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
-              Expanded(flex: 2, child: Text('Kept %', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
-              SizedBox(width: 14),
-            ],
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SizedBox(
+              width: _perfTableWidth,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      SizedBox(width: _perfColSalesman, child: Text('Salesman', style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
+                      SizedBox(width: _perfColGap),
+                      SizedBox(width: _perfColOverdue, child: Text('Total Overdue', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
+                      SizedBox(width: _perfColGap),
+                      SizedBox(width: _perfColDueToday, child: Text('Due Today', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
+                      SizedBox(width: _perfColGap),
+                      SizedBox(width: _perfColTasks, child: Text('Tasks', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
+                      SizedBox(width: _perfColGap),
+                      SizedBox(width: _perfColKept, child: Text('Kept %', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
+                      SizedBox(width: _perfColGap),
+                      SizedBox(width: _perfColTrailing),
+                    ],
+                  ),
+                  const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Divider(height: 1, color: _border)),
+                  if (all.isEmpty)
+                    const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Center(child: Text('No salesmen match this filter.', style: TextStyle(fontSize: 12, color: _muted))))
+                  else
+                    ...visible.asMap().entries.map((entry) => _performanceRow(context, entry.value, entry.key)),
+                ],
+              ),
+            ),
           ),
-          const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Divider(height: 1, color: _border)),
-          if (all.isEmpty)
-            const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Center(child: Text('No salesmen match this filter.', style: TextStyle(fontSize: 12, color: _muted))))
-          else
-            ...visible.asMap().entries.map((entry) => _performanceRow(context, entry.value, entry.key)),
           const SizedBox(height: 4),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -415,53 +449,51 @@ class _ControlDashboardScreenState extends State<ControlDashboardScreen> {
         padding: const EdgeInsets.symmetric(vertical: 7),
         child: Row(
           children: [
-            Expanded(
-              // Was flex: 3, competing with two currency columns of the same
-              // weight — any name past ~5 characters hard-truncated to
-              // "AAKA…". Widened, and the name itself now shrinks to fit
-              // (like the numeric columns already did) instead of clipping,
-              // so a real full name (even a long one) stays fully legible.
-              flex: 5,
+            // Fixed width, not Expanded/flex — the name gets its own real
+            // column instead of being squeezed by the numeric columns, and
+            // the whole table scrolls horizontally (see _perfTableWidth)
+            // rather than shrinking everything down to illegible text.
+            SizedBox(
+              width: _perfColSalesman,
               child: Row(
                 children: [
                   CircleAvatar(radius: 13, backgroundColor: color.withOpacity(0.15), child: Text(initials, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold))),
                   const SizedBox(width: 6),
                   Expanded(
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.centerLeft,
-                      child: Text(displayName, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: _dark)),
+                    child: Text(
+                      displayName,
+                      style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: _dark),
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ],
               ),
             ),
-            Expanded(
-              flex: 3,
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerRight,
-                child: Text(_rupee.format(totalOverdue), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _dark)),
-              ),
+            const SizedBox(width: _perfColGap),
+            SizedBox(
+              width: _perfColOverdue,
+              child: Text(_rupee.format(totalOverdue), textAlign: TextAlign.right, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _dark)),
             ),
-            Expanded(
-              flex: 3,
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerRight,
-                child: Text(_rupee.format(dueToday), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFEA580C))),
-              ),
+            const SizedBox(width: _perfColGap),
+            SizedBox(
+              width: _perfColDueToday,
+              child: Text(_rupee.format(dueToday), textAlign: TextAlign.right, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFEA580C))),
             ),
-            Expanded(
-              flex: 2,
+            const SizedBox(width: _perfColGap),
+            SizedBox(
+              width: _perfColTasks,
               child: Text('$taskCompletionRate%', textAlign: TextAlign.right, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _dark)),
             ),
-            Expanded(
-              flex: 2,
+            const SizedBox(width: _perfColGap),
+            SizedBox(
+              width: _perfColKept,
               child: Text('$kept%', textAlign: TextAlign.right, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: keptColor)),
             ),
-            const SizedBox(width: 4),
-            const Icon(Icons.chevron_right, size: 16, color: _muted),
+            const SizedBox(width: _perfColGap),
+            const SizedBox(
+              width: _perfColTrailing,
+              child: Icon(Icons.chevron_right, size: 16, color: _muted),
+            ),
           ],
         ),
       ),

@@ -317,7 +317,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                   const SizedBox(height: 16),
                   _buildPaymentTimeline(currentCustomer),
                   const SizedBox(height: 16),
-                  _buildRecentInvoices(currentCustomer),
+                  _buildRecoveryActivities(currentCustomer, store),
                 ],
               ),
             ),
@@ -1521,18 +1521,9 @@ class _Customer360ScreenState extends State<Customer360Screen> {
     );
   }
 
-  // BUSY-sourced customers (c.address is only ever set by BUSY responses —
-  // see Customer.fromJson) carry a real, server-computed futureDue; RMS
-  // customers don't (the field just defaults to 0), so those still derive
-  // it client-side from invoices, same as before this screen had a real
-  // BUSY futureDue field to read.
-  double _futureDue(Customer c) {
-    if (c.address != null) return c.futureDue;
-    const dueLikeStatuses = {'Overdue', 'Severely Overdue', 'Due Soon'};
-    return c.invoices
-        .where((inv) => !dueLikeStatuses.contains(inv['status']))
-        .fold(0.0, (s, inv) => s + ((inv['TotalAmount'] ?? inv['amount'] ?? 0) as num).toDouble());
-  }
+  // futureDue is synced straight from BUSY's own FUTURE_DUE_AMOUNT
+  // (customerReport.mssql.sql) — read it as-is, no client-side recompute.
+  double _futureDue(Customer c) => c.futureDue;
 
   Widget _buildDataCol(String label, String value, Color valueColor) {
     return Column(
@@ -1620,7 +1611,28 @@ class _Customer360ScreenState extends State<Customer360Screen> {
     );
   }
 
-  Widget _buildRecentInvoices(Customer c) {
+  // Calls done = every recorded outcome (source='Record Outcome' — each one
+  // is logged only after the salesperson actually reaches the customer or
+  // logs a No Answer attempt); physical visits = completed physicalVisit
+  // tasks, identified from TASK_COMPLETED's description (taskService.js
+  // embeds the task type in quotes there, there's no separate channel
+  // field on the audit event itself).
+  Widget _buildRecoveryActivities(Customer c, AppStore store) {
+    final callsDone = c.auditHistory
+        .where((a) => a.source == 'Record Outcome')
+        .length;
+    final visitsDone = c.auditHistory
+        .where((a) =>
+            a.type == 'TASK_COMPLETED' &&
+            a.description.contains('"physicalVisit" task'))
+        .length;
+
+    final customerPtps = store.ptps.where((p) => p.customerId == c.id).toList();
+    final totalPtps = customerPtps.length;
+    final totalPtpAmount = customerPtps.fold(0.0, (s, p) => s + p.amountPromised);
+    final totalCollected = customerPtps.fold(0.0, (s, p) => s + (p.amountReceived ?? 0));
+    final brokenPtps = customerPtps.where((p) => p.status == PtpStatus.broken).toList();
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -1631,43 +1643,29 @@ class _Customer360ScreenState extends State<Customer360Screen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          const Text('Recovery Activities',
+              style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                  color: Color(0xFF1B2B48))),
+          const SizedBox(height: 16),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('Recent Invoices',
-                  style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                      color: Color(0xFF1B2B48))),
-              Builder(
-                builder: (ctx) => InkWell(
-                  onTap: () => DefaultTabController.of(ctx).animateTo(1),
-                  child: const Text('View All Invoices',
-                      style: TextStyle(
-                          color: Color(0xFF0052CC),
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold)),
-                ),
-              ),
+              _buildDataCol('Calls Done', '$callsDone', const Color(0xFF1B2B48)),
+              _buildDataCol('Physical Visits', '$visitsDone', const Color(0xFF1B2B48)),
+              _buildDataCol('Total Collected', _rupee.format(totalCollected), const Color(0xFF388E3C)),
             ],
           ),
-          const SizedBox(height: 16),
-          // Real invoices only — this used to always render 2 fabricated
-          // rows (fake "INV-2025-00x" ids, today-derived fake dates) on
-          // every single customer regardless of whether real invoice data
-          // existed. c.invoices is real (server's GET /customers/:id), just
-          // empty for now since BUSY invoice sync isn't wired up yet.
-          if (c.invoices.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 8),
-              child: Text('No invoices on file yet.',
-                  style: TextStyle(color: Color(0xFF5A6B87), fontSize: 13)),
-            )
-          else
-            for (var i = 0; i < c.invoices.length && i < 2; i++) ...[
-              if (i > 0) const Divider(height: 24, color: Color(0xFFEDF2F7)),
-              _buildInvoiceRowNew(c.invoices[i]),
+          const Divider(height: 32, color: Color(0xFFEDF2F7)),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _buildDataCol('Total PTP Amount', _rupee.format(totalPtpAmount), const Color(0xFF1B2B48)),
+              _buildDataCol('Total PTPs', '$totalPtps', const Color(0xFF1B2B48)),
+              _buildDataCol('Broken PTPs', '${brokenPtps.length}', const Color(0xFFE53935)),
             ],
+          ),
         ],
       ),
     );

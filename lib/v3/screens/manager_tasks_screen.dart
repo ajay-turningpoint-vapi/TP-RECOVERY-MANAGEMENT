@@ -277,21 +277,24 @@ class _ManagerTasksScreenState extends State<ManagerTasksScreen> {
       child: Row(
         children: [
           Expanded(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10), border: Border.all(color: kBorder)),
-              child: Row(
-                children: [
-                  const Icon(Icons.search, size: 16, color: kMuted),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: TextField(
-                      onChanged: (v) => setState(() => _query = v),
-                      style: const TextStyle(fontSize: 12, color: kDark),
-                      decoration: const InputDecoration(isDense: true, border: InputBorder.none, hintText: 'Search by task title, customer or owner', hintStyle: TextStyle(fontSize: 11.5, color: kMuted)),
-                    ),
-                  ),
-                ],
+            child: SizedBox(
+              height: 38,
+              child: TextField(
+                onChanged: (v) => setState(() => _query = v),
+                style: const TextStyle(fontSize: 12, color: kDark),
+                decoration: InputDecoration(
+                  isDense: true,
+                  filled: true,
+                  fillColor: Colors.white,
+                  prefixIcon: const Icon(Icons.search, size: 18, color: kMuted),
+                  prefixIconConstraints: const BoxConstraints(minWidth: 34, minHeight: 34),
+                  contentPadding: const EdgeInsets.symmetric(vertical: 9),
+                  hintText: 'Search by task title, customer or owner',
+                  hintStyle: const TextStyle(fontSize: 11.5, color: kMuted),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: kBorder)),
+                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: kBorder)),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: kBorder)),
+                ),
               ),
             ),
           ),

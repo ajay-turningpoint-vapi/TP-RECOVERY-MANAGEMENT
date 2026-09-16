@@ -98,20 +98,20 @@ class _ManagerRecoveryOwnerScreenState extends State<ManagerRecoveryOwnerScreen>
   void _snack(BuildContext context, String message) => showAppMessage(context, message: message);
 
   Widget _searchBar() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10), border: Border.all(color: kBorder)),
-      child: Row(
-        children: [
-          Expanded(
-            child: TextField(
-              onChanged: (v) => setState(() => _query = v),
-              style: const TextStyle(fontSize: 12.5, color: kDark),
-              decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.symmetric(vertical: 14), border: InputBorder.none, hintText: 'Search by name, employee ID or branch', hintStyle: TextStyle(fontSize: 12, color: kMuted)),
-            ),
-          ),
-          const Icon(Icons.search, size: 18, color: kMuted),
-        ],
+    return TextField(
+      onChanged: (v) => setState(() => _query = v),
+      style: const TextStyle(fontSize: 12.5, color: kDark),
+      decoration: InputDecoration(
+        isDense: true,
+        filled: true,
+        fillColor: Colors.white,
+        prefixIcon: const Icon(Icons.search, size: 18, color: kMuted),
+        contentPadding: const EdgeInsets.symmetric(vertical: 14),
+        hintText: 'Search by name, employee ID or branch',
+        hintStyle: const TextStyle(fontSize: 12, color: kMuted),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: kBorder)),
+        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: kBorder)),
+        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: kBorder)),
       ),
     );
   }

@@ -58,10 +58,11 @@ function mapRow(raw, branchLabel = 'Turning Point') {
 
 /**
  * @param {{ limit?: number, salesmanCode?: number, customerId?: number|string,
- *           database?: string, parentGroups?: string[], branchLabel?: string }} [options]
+ *           database?: string, parentGroups?: string[], branchLabel?: string,
+ *           conn?: object }} [options]
  */
 async function getCustomers(options = {}) {
-  const conn = options.database ? await poolForDatabase(options.database) : mssqlDb;
+  const conn = options.database ? await poolForDatabase(options.database, options.conn) : mssqlDb;
   if (!conn.isConnected) {
     await conn.connect();
   }

@@ -1,26 +1,47 @@
-/*
- * Canonical customer ledger report against BUSY (MSSQL) — the production
- * query backing MssqlCustomerReportRepository. Based on the updated
- * query supplied directly (narrower than the earlier version: no
- * OPENING_OUTSTANDING / CURRENT_YEAR_* / LAST_RECEIPT_* / EMAIL /
- * AS_OF_DATE, and no salesman-code filter — scoped by PARENTGRP only).
- *
- * Two deliberate deviations from the supplied query, both proven
- * necessary against this exact BUSY data (not speculative):
- *  1. TRY_CONVERT(INT, ...) around A.OF2 / M.I2 and TRY_CONVERT(DECIMAL, ...)
- *     around M.D1 — these columns are declared numeric-ish but contain
- *     stray text (e.g. 'INCENTIVE') in some rows; without the guard the
- *     whole query throws "Conversion failed... to data type int" (hit
- *     this for real, twice, on live data).
- *  2. ORDER BY X.CUSTOMER_NAME at the end — the supplied query has none,
- *     which makes row order (and therefore "TOP (n)" previews) arbitrary
- *     between runs. Adding it back changes nothing about which rows
- *     match, only their order.
- *
- * mssqlCustomerReportRepository.ts injects "TOP (n)" into this query's
- * own leading SELECT when options.limit is set.
- */
-SELECT X.*
+SELECT TOP 5
+    X.CUSTOMER_ID,
+    X.CUSTOMER_NAME,
+
+    X.OPENING_OUTSTANDING,
+    X.CURRENT_YEAR_INVOICE_AMOUNT,
+    X.CURRENT_YEAR_SALES_RETURN,
+    X.CURRENT_YEAR_RECEIPTS,
+
+    X.LEDGER_CLOSING_BALANCE,
+    X.BALANCE_TYPE,
+
+    X.AMOUNT_ALREADY_DUE,
+    X.FUTURE_DUE_AMOUNT,
+
+    X.AGE_0_30,
+    X.AGE_31_60,
+    X.AGE_61_90,
+    X.AGE_90_PLUS,
+
+    X.MAX_DAYS_OVERDUE,
+
+    CASE
+        WHEN X.LEDGER_CLOSING_BALANCE > 0
+        THEN 'OUTSTANDING'
+        ELSE 'SETTLED'
+    END AS OUTSTANDING_STATUS,
+	
+    X.LAST_INVOICE_DATE,
+    X.LAST_INVOICE_AMOUNT,
+    X.LAST_RECEIPT_DATE,
+    X.LAST_RECEIPT_AMOUNT,
+
+    X.MOBILE,
+    X.EMAIL,
+    X.GSTNO,
+    X.ADDRESS,
+    X.SALESMAN,
+	X.SALESMANCODE,
+    X.CREDIT_DAYS,
+    X.CREDIT_LIMIT,
+
+    CAST(GETDATE() AS DATE) AS AS_OF_DATE
+
 FROM
 (
     SELECT
@@ -28,9 +49,62 @@ FROM
         M.CODE AS CUSTOMER_ID,
         M.NAME AS CUSTOMER_NAME,
 
-        /* =========================================
-           LEDGER CLOSING BALANCE
-           ========================================= */
+      
+
+        CASE
+            WHEN ISNULL(F.D1,0) < 0
+            THEN ABS(ISNULL(F.D1,0))
+            ELSE 0
+        END AS OPENING_OUTSTANDING,
+
+
+        
+
+        ISNULL(
+            (
+                SELECT SUM(ABS(ISNULL(T.VALUE1,0)))
+                FROM TRAN3 T
+                WHERE
+                    T.MASTERCODE1 = M.CODE
+                    AND T.VCHTYPE = 9
+                    AND T.TYPE = 1
+                    AND T.STATUS IN (1,2)
+            ),0
+        ) AS CURRENT_YEAR_INVOICE_AMOUNT,
+
+
+      
+
+        ISNULL(
+            (
+                SELECT SUM(ABS(ISNULL(T.VALUE1,0)))
+                FROM TRAN3 T
+                WHERE
+                    T.MASTERCODE1 = M.CODE
+                    AND T.VCHTYPE = 3
+                    AND T.TYPE = 2
+                    AND T.STATUS = 1
+                    AND T.METHOD = 2
+            ),0
+        ) AS CURRENT_YEAR_SALES_RETURN,
+
+
+    
+        ISNULL(
+            (
+                SELECT SUM(ABS(ISNULL(T.VALUE1,0)))
+                FROM TRAN3 T
+                WHERE
+                    T.MASTERCODE1 = M.CODE
+                    AND T.VCHTYPE = 14
+                    AND T.TYPE = 2
+                    AND T.STATUS = 1
+                    AND T.METHOD = 2
+            ),0
+        ) AS CURRENT_YEAR_RECEIPTS,
+
+
+ 
 
         ABS(
             ISNULL(F.D1,0)
@@ -67,9 +141,7 @@ FROM
         ) AS LEDGER_CLOSING_BALANCE,
 
 
-        /* =========================================
-           BALANCE TYPE
-           ========================================= */
+        
 
         CASE
 
@@ -142,9 +214,7 @@ FROM
         END AS BALANCE_TYPE,
 
 
-        /* =========================================
-           AMOUNT ALREADY DUE
-           ========================================= */
+  
 
         ISNULL(
         (
@@ -164,7 +234,7 @@ FROM
                                 FROM TRAN3 P
                                 WHERE
                                     P.REFCODE = I.REFCODE
-                                    AND P.VCHTYPE IN (14,3)
+                                    AND P.VCHTYPE IN (14,3,16)
                                     AND P.TYPE = 2
                                     AND P.STATUS = 1
                                     AND P.METHOD = 2
@@ -180,7 +250,7 @@ FROM
                                 FROM TRAN3 P
                                 WHERE
                                     P.REFCODE = I.REFCODE
-                                    AND P.VCHTYPE IN (14,3)
+                                    AND P.VCHTYPE IN (14,3,16)
                                     AND P.TYPE = 2
                                     AND P.STATUS = 1
                                     AND P.METHOD = 2
@@ -209,9 +279,7 @@ FROM
         ),0) AS AMOUNT_ALREADY_DUE,
 
 
-        /* =========================================
-           FUTURE DUE AMOUNT
-           ========================================= */
+       
 
         ISNULL(
         (
@@ -231,7 +299,7 @@ FROM
                                 FROM TRAN3 P
                                 WHERE
                                     P.REFCODE = I.REFCODE
-                                    AND P.VCHTYPE IN (14,3)
+                                    AND P.VCHTYPE IN (14,3,16)
                                     AND P.TYPE = 2
                                     AND P.STATUS = 1
                                     AND P.METHOD = 2
@@ -247,7 +315,7 @@ FROM
                                 FROM TRAN3 P
                                 WHERE
                                     P.REFCODE = I.REFCODE
-                                    AND P.VCHTYPE IN (14,3)
+                                    AND P.VCHTYPE IN (14,3,16)
                                     AND P.TYPE = 2
                                     AND P.STATUS = 1
                                     AND P.METHOD = 2
@@ -276,9 +344,6 @@ FROM
         ),0) AS FUTURE_DUE_AMOUNT,
 
 
-        /* =========================================
-           0 - 30 DAYS
-           ========================================= */
 
         ISNULL(
         (
@@ -296,7 +361,7 @@ FROM
                         FROM TRAN3 P
                         WHERE
                             P.REFCODE = I.REFCODE
-                            AND P.VCHTYPE IN (14,3)
+                            AND P.VCHTYPE IN (14,3,16)
                             AND P.TYPE = 2
                             AND P.STATUS = 1
                             AND P.METHOD = 2
@@ -322,9 +387,7 @@ FROM
         ),0) AS AGE_0_30,
 
 
-        /* =========================================
-           31 - 60 DAYS
-           ========================================= */
+      
 
         ISNULL(
         (
@@ -342,7 +405,7 @@ FROM
                         FROM TRAN3 P
                         WHERE
                             P.REFCODE = I.REFCODE
-                            AND P.VCHTYPE IN (14,3)
+                            AND P.VCHTYPE IN (14,3,16)
                             AND P.TYPE = 2
                             AND P.STATUS = 1
                             AND P.METHOD = 2
@@ -368,9 +431,7 @@ FROM
         ),0) AS AGE_31_60,
 
 
-        /* =========================================
-           61 - 90 DAYS
-           ========================================= */
+ 
 
         ISNULL(
         (
@@ -388,7 +449,7 @@ FROM
                         FROM TRAN3 P
                         WHERE
                             P.REFCODE = I.REFCODE
-                            AND P.VCHTYPE IN (14,3)
+                            AND P.VCHTYPE IN (14,3,16)
                             AND P.TYPE = 2
                             AND P.STATUS = 1
                             AND P.METHOD = 2
@@ -414,9 +475,7 @@ FROM
         ),0) AS AGE_61_90,
 
 
-        /* =========================================
-           90+ DAYS
-           ========================================= */
+       
 
         ISNULL(
         (
@@ -434,7 +493,7 @@ FROM
                         FROM TRAN3 P
                         WHERE
                             P.REFCODE = I.REFCODE
-                            AND P.VCHTYPE IN (14,3)
+                            AND P.VCHTYPE IN (14,3,16)
                             AND P.TYPE = 2
                             AND P.STATUS = 1
                             AND P.METHOD = 2
@@ -460,9 +519,7 @@ FROM
         ),0) AS AGE_90_PLUS,
 
 
-        /* =========================================
-           MAX DAYS OVERDUE
-           ========================================= */
+      
 
         ISNULL(
         (
@@ -480,7 +537,7 @@ FROM
                         FROM TRAN3 P
                         WHERE
                             P.REFCODE = I.REFCODE
-                            AND P.VCHTYPE IN (14,3)
+                            AND P.VCHTYPE IN (14,3,16)
                             AND P.TYPE = 2
                             AND P.STATUS = 1
                             AND P.METHOD = 2
@@ -503,10 +560,10 @@ FROM
                 AND Q.DUEDATE <= GETDATE()
 
         ),0) AS MAX_DAYS_OVERDUE,
-
-
-        /* =========================================
-           LAST INVOICE DATE & AMOUNT
+		/* =========================================
+           LAST INVOICE DATE & AMOUNT  (NEW)
+           Same filter as CURRENT_YEAR_INVOICE_AMOUNT
+           but picks the most recent invoice only
            ========================================= */
 
         (
@@ -543,10 +600,57 @@ FROM
 
 
         /* =========================================
-           CUSTOMER DETAILS
+           LAST RECEIPT DATE & AMOUNT  (NEW)
+           Same filter as CURRENT_YEAR_RECEIPTS.
+           A single receipt can be split across multiple
+           invoices (bill-wise allocation), creating
+           multiple TRAN3 rows with the same VchCode but
+           different RefCode -- so we SUM all rows sharing
+           the latest VchCode instead of taking one row.
            ========================================= */
 
+        (
+            SELECT TOP 1 T.[Date]
+            FROM TRAN3 T
+            WHERE
+                T.MASTERCODE1 = M.CODE
+                AND T.VCHTYPE = 14
+                AND T.TYPE = 2
+                AND T.STATUS = 1
+                AND T.METHOD = 2
+            ORDER BY T.[Date] DESC, T.VchCode DESC
+        ) AS LAST_RECEIPT_DATE,
+
+        (
+            SELECT SUM(ABS(ISNULL(T2.VALUE1,0)))
+            FROM TRAN3 T2
+            WHERE
+                T2.MASTERCODE1 = M.CODE
+                AND T2.VCHTYPE = 14
+                AND T2.TYPE = 2
+                AND T2.STATUS = 1
+                AND T2.METHOD = 2
+                AND T2.VchCode =
+                (
+                    SELECT TOP 1 T3.VchCode
+                    FROM TRAN3 T3
+                    WHERE
+                        T3.MASTERCODE1 = M.CODE
+                        AND T3.VCHTYPE = 14
+                        AND T3.TYPE = 2
+                        AND T3.STATUS = 1
+                        AND T3.METHOD = 2
+                    ORDER BY T3.[Date] DESC, T3.VchCode DESC
+                )
+        ) AS LAST_RECEIPT_AMOUNT,
+
+
+
+
+     
+
         ISNULL(A.MOBILE,'') AS MOBILE,
+        ISNULL(A.EMAIL,'') AS EMAIL,
         ISNULL(A.GSTNO,'') AS GSTNO,
 
         ISNULL(A.ADDRESS1,'')
@@ -563,14 +667,14 @@ FROM
         (
             SELECT TOP 1 S.NAME
             FROM MASTER1 S
-            WHERE S.CODE = TRY_CONVERT(INT, A.OF2)
+            WHERE S.CODE = A.OF2
         ) AS SALESMAN,
+		A.OF2 AS SALESMANCODE,
 
-        TRY_CONVERT(INT, A.OF2) AS salesmancode,
 
-        ISNULL(TRY_CONVERT(INT, M.I2),0) AS CREDIT_DAYS,
+        ISNULL(M.I2,0) AS CREDIT_DAYS,
 
-        ISNULL(TRY_CONVERT(DECIMAL(18,2), M.D1),0) AS CREDIT_LIMIT
+        ISNULL(M.D1,0) AS CREDIT_LIMIT
 
 
     FROM MASTER1 M
@@ -589,12 +693,11 @@ FROM
 
 ) X
 
-/* =========================================
-   ONLY DR CUSTOMERS
-   ========================================= */
+
 
 WHERE
     X.BALANCE_TYPE = 'DR'
+    AND X.LEDGER_CLOSING_BALANCE > 1  
     /*{{SALESMAN_FILTER}}*/
 
 ORDER BY

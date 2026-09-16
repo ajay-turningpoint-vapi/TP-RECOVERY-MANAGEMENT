@@ -20,9 +20,15 @@ function refreshTokenExpiry() {
   return new Date(Date.now() + env.refreshToken.ttlDays * 24 * 60 * 60 * 1000);
 }
 
-/** Issues both tokens for a user who's already been authenticated by whatever means (password, or a just-rotated refresh token). */
-async function issueTokenPair(publicUser) {
-  const accessToken = signToken(publicUser);
+/**
+ * Issues both tokens for a user who's already been authenticated by
+ * whatever means (password, or a just-rotated refresh token). `sessionVersion`
+ * is embedded in the access token but never returned to the client as part
+ * of `user` — it's purely for the `authenticate` middleware to compare
+ * against the current DB value on every request (see migration 028).
+ */
+async function issueTokenPair(publicUser, sessionVersion) {
+  const accessToken = signToken({ ...publicUser, sessionVersion });
   const refreshToken = refreshTokenRepository.generateRawToken();
   await refreshTokenRepository.insert(publicUser.id, refreshToken, refreshTokenExpiry());
   return { accessToken, refreshToken };
@@ -39,14 +45,18 @@ async function login(username, password) {
     throw new UnauthorizedError('Invalid username or password');
   }
 
-  // Single-device login: a fresh password sign-in is the newest session,
-  // so every previously-issued refresh token for this user is revoked here.
-  // Any other device stays usable only until its short-lived (1h) access
-  // token expires — its next silent refresh then fails and it's logged out.
+  // Single-device login: a fresh password sign-in is the newest session.
+  // Every previously-issued refresh token for this user is revoked (so no
+  // other device can silently refresh again), AND session_version is
+  // bumped + embedded in this device's access token — the `authenticate`
+  // middleware rejects any token carrying an older version, so an already
+  // signed-in device is logged out on its very next request instead of
+  // staying usable until its access token happens to expire.
   await refreshTokenRepository.revokeAllForUser(user.id);
+  const sessionVersion = await userRepository.bumpSessionVersion(user.id);
 
   const publicUser = toPublicUser(user);
-  const { accessToken, refreshToken } = await issueTokenPair(publicUser);
+  const { accessToken, refreshToken } = await issueTokenPair(publicUser, sessionVersion);
   return { accessToken, refreshToken, user: publicUser };
 }
 
@@ -76,8 +86,9 @@ async function refresh(rawRefreshToken) {
   }
 
   await refreshTokenRepository.revokeById(record.id);
+  const sessionVersion = await userRepository.getSessionVersion(user.id);
   const publicUser = toPublicUser(user);
-  const { accessToken, refreshToken } = await issueTokenPair(publicUser);
+  const { accessToken, refreshToken } = await issueTokenPair(publicUser, sessionVersion);
   return { accessToken, refreshToken, user: publicUser };
 }
 
@@ -103,9 +114,10 @@ async function changePassword(userId, newPassword) {
 
   await userRepository.updatePasswordHash(userId, await hashPassword(newPassword));
   await refreshTokenRepository.revokeAllForUser(userId);
+  const sessionVersion = await userRepository.bumpSessionVersion(userId);
 
   const publicUser = toPublicUser(user);
-  const { accessToken, refreshToken } = await issueTokenPair(publicUser);
+  const { accessToken, refreshToken } = await issueTokenPair(publicUser, sessionVersion);
   return { accessToken, refreshToken, user: publicUser };
 }
 

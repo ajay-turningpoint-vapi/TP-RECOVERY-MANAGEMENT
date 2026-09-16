@@ -76,7 +76,7 @@ async function runLocked() {
     try {
       progress = { phase: 'fetching', runId, rowsFetched: null, branch: branch.label };
       const rows = await withRetry(`BUSY customer invoice report fetch (${branch.label})`, () =>
-        getInvoices({ database: branch.database, parentGroups: branch.parentGroups })
+        getInvoices({ database: branch.database, parentGroups: branch.parentGroups, conn: branch.conn })
       );
 
       progress = { phase: 'writing', runId, rowsFetched: rows.length, branch: branch.label };
