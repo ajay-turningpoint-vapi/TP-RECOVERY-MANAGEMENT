@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const { startTestApp, login, authHeaders } = require('./helpers/app');
 const { resetDb } = require('./helpers/db');
 const { teardownAll } = require('./helpers/teardown');
+const taskRepository = require('../src/repositories/taskRepository');
 
 let app;
 
@@ -27,7 +28,13 @@ test('completing a task with a PTP covering only part of the balance keeps a rec
   const t1 = before1.find((t) => t.id === 'T1');
   assert.equal(t1.status, 'pending');
 
-  const res = await fetch(`${app.baseUrl}/api/tasks/T1/complete`, { method: 'POST', headers: authHeaders(token) });
+  // T1 is a physicalVisit task — completing it now requires real photo
+  // evidence the visit happened (attachmentPath).
+  const res = await fetch(`${app.baseUrl}/api/tasks/T1/complete`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: JSON.stringify({ attachmentPath: '/uploads/test-visit-photo.jpg' }),
+  });
   assert.equal(res.status, 200);
   assert.equal((await res.json()).status, 'completed');
 
@@ -45,16 +52,20 @@ test('completing the last open task with money still due and no active PTP reope
 
   // C3 (PQR Stores) has no seed task and its only PTP (P3) is already
   // "kept", not active — create one via record-outcome, then complete it.
+  // (Uses 'Customer Refused', not 'Follow-up' — a Will Confirm no longer
+  // creates any task immediately, only once its scheduled time passes via
+  // followUpQueue; 'Customer Refused' still retargets the recovery task
+  // right away, same as before, and exercises the same reopen path below.)
   const outcomeRes = await fetch(`${app.baseUrl}/api/customers/C3/record-outcome`, {
     method: 'POST',
     headers: authHeaders(token),
-    body: JSON.stringify({ nextAction: 'Follow-up', reason: 'Customer asked to call back', details: 'Call back tomorrow' }),
+    body: JSON.stringify({ nextAction: 'Call Customer', reason: 'Customer Refused', details: 'Refused to commit to a date' }),
   });
   assert.equal(outcomeRes.status, 200);
 
   const midTasks = await tasksFor(token);
   const newTask = midTasks.find((t) => t.customerId === 'C3' && t.status !== 'completed');
-  assert.ok(newTask, 'record-outcome with Follow-up should have created an open task for C3');
+  assert.ok(newTask, 'record-outcome with Customer Refused should have created an open task for C3');
 
   const completeRes = await fetch(`${app.baseUrl}/api/tasks/${newTask.id}/complete`, { method: 'POST', headers: authHeaders(token) });
   assert.equal(completeRes.status, 200);
@@ -65,6 +76,32 @@ test('completing the last open task with money still due and no active PTP reope
 
   const detail = await fetch(`${app.baseUrl}/api/customers/C3`, { headers: authHeaders(token) }).then((r) => r.json());
   assert.ok(detail.auditHistory.some((e) => e.type === 'RECOVERY_TASK_CREATED'));
+});
+
+test('completing a Physical Visit task without a photo is rejected — the server, not just the UI, enforces it', async () => {
+  const token = await login(app.baseUrl, 'rahul');
+  const visitId = await taskRepository.insert({
+    type: 'physicalVisit',
+    customerId: 'C1',
+    ownerId: 'rahul',
+    deadline: new Date(Date.now() - 3600000),
+    priority: 'High',
+    reason: 'Test physical visit — no photo yet',
+  });
+
+  const noPhoto = await fetch(`${app.baseUrl}/api/tasks/${visitId}/complete`, { method: 'POST', headers: authHeaders(token) });
+  assert.equal(noPhoto.status, 400, 'a Physical Visit must not complete without photo evidence');
+
+  const withPhoto = await fetch(`${app.baseUrl}/api/tasks/${visitId}/complete`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: JSON.stringify({ attachmentPath: '/uploads/second-test-visit-photo.jpg' }),
+  });
+  assert.equal(withPhoto.status, 200, 'the same visit must complete once a photo is provided');
+
+  const detail = await fetch(`${app.baseUrl}/api/customers/C1`, { headers: authHeaders(token) }).then((r) => r.json());
+  const visitAudit = detail.auditHistory.find((e) => e.type === 'TASK_COMPLETED' && e.description.includes('physicalVisit') && e.attachmentPath);
+  assert.ok(visitAudit, 'the visit photo must be preserved in the customer\'s history, not just the task');
 });
 
 test('a salesperson cannot complete another salesperson\'s task', async () => {

@@ -380,7 +380,7 @@ class _ManagerDisputeManagementSummaryScreenState extends State<ManagerDisputeMa
                       ),
                     ),
                     const SizedBox(width: 8),
-                    SizedBox(width: 82, child: Text('${_rupee.format(amt)} (${pct.toStringAsFixed(1)}%)', textAlign: TextAlign.right, style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: color))),
+                    SizedBox(width: 82, child: FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerRight, child: Text('${_rupee.format(amt)} (${pct.toStringAsFixed(1)}%)', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: color)))),
                   ],
                 ),
               );
@@ -627,14 +627,14 @@ class _ManagerDisputeManagementSummaryScreenState extends State<ManagerDisputeMa
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SizedBox(width: 90, child: Text(d['id'] as String, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: kDark))),
+            SizedBox(width: 90, child: Text(d['id'] as String, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: kDark))),
             SizedBox(
               width: 140,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(d['customer'] as String, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: kDark)),
-                  Text((d['invoice'] as String?) ?? 'No invoice', style: const TextStyle(fontSize: 9.5, color: kMuted)),
+                  Text((d['invoice'] as String?) ?? 'No invoice', overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 9.5, color: kMuted)),
                 ],
               ),
             ),

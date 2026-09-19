@@ -1,6 +1,7 @@
 const { withTransaction } = require('../config/db');
 const escalationRepository = require('../repositories/escalationRepository');
 const customerRepository = require('../repositories/customerRepository');
+const taskRepository = require('../repositories/taskRepository');
 const auditRepository = require('../repositories/auditRepository');
 const { enqueueNotification } = require('../queues/notificationQueue');
 const { notifyDecision, salesmanForCustomer } = require('./decisionNotify');
@@ -95,6 +96,22 @@ async function resolve(escalationId, user, note) {
       await customerRepository.update(escalation.customerId, { escalationLevel: 'none' }, conn);
     }
 
+    // If this was a Customer Refused escalation, stop its growing-cadence
+    // call task (missedDeadlineService.sweepRefusedCycle), the RE alert
+    // task it may have raised once the cadence hit its steady 5-day
+    // interval (source='Refused Cycle'), and reset the counter —
+    // driveRecoveryTask below replaces the salesperson's task with a
+    // single ordinary Recovery task instead.
+    const openRefused = (await taskRepository.findByCustomer(escalation.customerId, conn)).filter(
+      (t) => ['Customer Refused', 'Refused Cycle'].includes(t.source) && !['completed', 'closed', 'cancelled'].includes(t.status)
+    );
+    for (const t of openRefused) {
+      await taskRepository.update(t.id, { status: 'completed', completedAt: new Date(), outcome: `${escalation.level} escalation resolved.` }, conn);
+    }
+    if (openRefused.length > 0) {
+      await customerRepository.update(escalation.customerId, { refusedReopenCount: 0 }, conn);
+    }
+
     await auditRepository.record(
       escalation.customerId,
       {
@@ -111,14 +128,16 @@ async function resolve(escalationId, user, note) {
   });
 
   // Hand the account back to the salesman: drive the one `source='Recovery'`
-  // call task to the current outstanding, due 9 PM. This also re-enables
-  // Record Outcome for the customer in the app.
+  // call task to the current outstanding, due 6 PM. This also re-enables
+  // Record Outcome for the customer in the app — replacing whatever
+  // special-cadence task (e.g. Customer Refused's growing reopen, closed
+  // above) was driving it before.
   {
     const customer = await customerRepository.findById(escalation.customerId);
     await driveRecoveryTask(escalation.customerId, {
       headline: `${escalation.level} escalation resolved — re-engage ${(customer && customer.name) || 'the customer'}.`,
       priority: 'Normal',
-      deadlineHour: 21,
+      deadlineHour: 18,
     });
   }
 

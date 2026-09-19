@@ -8,6 +8,7 @@ import 'package:salesman_mobile/v2/screens/customer_360_screen.dart';
 import 'package:salesman_mobile/v3/screens/request_detail_scaffold.dart';
 import 'package:salesman_mobile/widgets/app_message.dart';
 import 'package:salesman_mobile/widgets/call_helper.dart';
+import 'package:salesman_mobile/services/attachment_picker.dart';
 
 final _rupee = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
 
@@ -76,11 +77,17 @@ class TaskDetailsScreenV3 extends StatelessWidget {
                         icon: const Icon(Icons.forum_outlined, size: 16),
                         label: const FittedBox(fit: BoxFit.scaleDown, child: Text('Message RE', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
                       ),
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(side: const BorderSide(color: kRed), foregroundColor: kRed, padding: const EdgeInsets.symmetric(vertical: 13), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+                        onPressed: () => _rejectDisputeAssignment(context, store, t),
+                        icon: const Icon(Icons.person_off_outlined, size: 16),
+                        label: const FittedBox(fit: BoxFit.scaleDown, child: Text('Wrong Owner — Reject', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                      ),
                       ElevatedButton.icon(
                         style: ElevatedButton.styleFrom(backgroundColor: kGreen, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 13), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
                         onPressed: () => _resolveDispute(context, store, t),
                         icon: const Icon(Icons.check_circle_outline, size: 16),
-                        label: const FittedBox(fit: BoxFit.scaleDown, child: Text('Resolve Dispute', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                        label: const FittedBox(fit: BoxFit.scaleDown, child: Text('Submit for Verification', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
                       ),
                     ]
                   : isClarification
@@ -113,7 +120,7 @@ class TaskDetailsScreenV3 extends StatelessWidget {
                   children: [
                     GestureDetector(
                       onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => Customer360Screen(customer: customer))),
-                      child: Text(customer.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: kBlue, decoration: TextDecoration.underline)),
+                      child: Text(customer.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: kBlue, decoration: TextDecoration.underline)),
                     ),
                     const SizedBox(height: 3),
                     Text('${customer.branch} Branch', style: const TextStyle(fontSize: 10.5, color: kMuted)),
@@ -142,6 +149,7 @@ class TaskDetailsScreenV3 extends StatelessWidget {
           KeyValueRow('Status', t.status.name[0].toUpperCase() + t.status.name.substring(1)),
           KeyValueRow('Source', t.source),
           KeyValueRow('Deadline', DateFormat('dd MMM yyyy, hh:mm a').format(t.deadline), valueColor: (!isDone && t.isOverdue) ? kRed : kDark),
+          if (isDisputeTask) KeyValueRow('Disputed Amount', _rupee.format((dispute['amount'] as num?) ?? 0), valueColor: kRed),
           if (t.approvalStatus == 'Pending') KeyValueRow('Extension Requested', t.pendingDeadline != null ? DateFormat('dd MMM yyyy').format(t.pendingDeadline!) : '-', valueColor: kAmber),
         ]),
         const SizedBox(height: 18),
@@ -249,25 +257,14 @@ class TaskDetailsScreenV3 extends StatelessWidget {
               TextField(controller: controller, maxLines: 3, autofocus: true,
                   decoration: const InputDecoration(border: OutlineInputBorder(), isDense: true, hintText: 'Type a message…')),
               const SizedBox(height: 10),
-              Row(children: [
-                OutlinedButton.icon(
-                  onPressed: busy ? null : () async {
-                    final p = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 70);
-                    if (p != null) setSheet(() => picked = p);
-                  },
-                  icon: const Icon(Icons.photo_library_outlined, size: 15),
-                  label: Text(picked == null ? 'Attach photo' : 'Photo attached', style: const TextStyle(fontSize: 11.5)),
-                ),
-                const SizedBox(width: 8),
-                OutlinedButton.icon(
-                  onPressed: busy ? null : () async {
-                    final p = await ImagePicker().pickImage(source: ImageSource.camera, imageQuality: 70);
-                    if (p != null) setSheet(() => picked = p);
-                  },
-                  icon: const Icon(Icons.photo_camera_outlined, size: 15),
-                  label: const Text('Camera', style: TextStyle(fontSize: 11.5)),
-                ),
-              ]),
+              OutlinedButton.icon(
+                onPressed: busy ? null : () async {
+                  final p = await pickEvidenceFile(sheetCtx);
+                  if (p != null) setSheet(() => picked = p);
+                },
+                icon: Icon(picked == null ? Icons.attach_file : Icons.check, size: 15),
+                label: Text(picked == null ? 'Attach photo or PDF' : 'Attached: ${picked!.name}', style: const TextStyle(fontSize: 11.5)),
+              ),
               const SizedBox(height: 12),
               SizedBox(
                 width: double.infinity,
@@ -310,12 +307,12 @@ class TaskDetailsScreenV3 extends StatelessWidget {
       context: context,
       builder: (dialogCtx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Resolve Dispute', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text('Submit for Verification', style: TextStyle(fontWeight: FontWeight.bold)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Marks the dispute resolved and closes this task. The salesman who raised it gets a follow-up task.',
+            const Text('Closes this task and sends the dispute to the RE for verification against BUSY. Nothing is written off and the raised salesman is not notified until the RE verifies it.',
                 style: TextStyle(fontSize: 12, color: kMuted)),
             const SizedBox(height: 12),
             TextField(controller: noteController, maxLines: 2,
@@ -332,12 +329,57 @@ class TaskDetailsScreenV3 extends StatelessWidget {
               try {
                 await store.resolveDisputeByOwner(t.disputeId!, t.id, note: noteController.text.trim());
                 navigator.pop();
-                showAppMessageAfter(navigator, message: 'Dispute resolved.');
+                showAppMessageAfter(navigator, message: 'Submitted for RE verification.');
               } catch (e) {
-                showAppMessageAfter(navigator, message: 'Could not resolve: $e', isError: true);
+                showAppMessageAfter(navigator, message: 'Could not submit: $e', isError: true);
               }
             },
-            child: const Text('Resolve', style: TextStyle(fontWeight: FontWeight.bold)),
+            child: const Text('Submit', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _rejectDisputeAssignment(BuildContext context, AppStore store, AppTask t) {
+    final reasonController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Reject Assignment', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Closes this task and sends the dispute back to the RE for reassignment. Use this when the RE assigned this to the wrong person.',
+                style: TextStyle(fontSize: 12, color: kMuted)),
+            const SizedBox(height: 12),
+            TextField(controller: reasonController, maxLines: 2,
+                decoration: const InputDecoration(hintText: 'Reason (required)', border: OutlineInputBorder())),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: kRed, foregroundColor: Colors.white),
+            onPressed: () async {
+              final reason = reasonController.text.trim();
+              if (reason.isEmpty) {
+                showAppMessageAfter(Navigator.of(dialogCtx), message: 'A reason is required.', isError: true);
+                return;
+              }
+              final navigator = Navigator.of(context);
+              Navigator.pop(dialogCtx);
+              try {
+                await store.rejectDisputeByOwner(t.disputeId!, t.id, reason);
+                navigator.pop();
+                showAppMessageAfter(navigator, message: 'Sent back to the RE for reassignment.');
+              } catch (e) {
+                showAppMessageAfter(navigator, message: 'Could not reject: $e', isError: true);
+              }
+            },
+            child: const Text('Reject', style: TextStyle(fontWeight: FontWeight.bold)),
           ),
         ],
       ),

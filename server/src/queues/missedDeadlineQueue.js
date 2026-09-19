@@ -16,11 +16,12 @@ const missedDeadlineQueue = new Queue(QUEUE_NAME, {
 });
 
 /**
- * Every 2 hours (on the hour). One tick runs all three sweeps in
+ * Every 2 hours (on the hour). One tick runs the sweeps in
  * services/missedDeadlineService.js: the No Answer 2-hour cycle (nag the
- * single call task / roll to a Physical Visit after a full day), roll
- * expired Will-Confirm tasks into a fresh call task, and hand the RE a
- * same-day follow-up for any lapsed salesman deadline. `upsertJobScheduler`
+ * single call task / roll to a Physical Visit after a full day) and hand
+ * the RE a same-day follow-up for any lapsed salesman deadline. (Will
+ * Confirm / Follow-up rollover is no longer part of this — it's an
+ * exact-time job, see src/queues/followUpQueue.js.) `upsertJobScheduler`
  * is idempotent — safe on every boot.
  */
 async function scheduleMissedDeadlineSweep() {

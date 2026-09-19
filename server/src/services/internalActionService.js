@@ -60,7 +60,7 @@ async function approve(taskId, user, { note, attachmentPath }) {
   await driveRecoveryTask(task.customerId, {
     headline: 'Internal action approved — continue recovery.',
     priority: 'Normal',
-    deadlineHour: 21,
+    deadlineHour: 18,
   });
   return taskRepository.findById(taskId);
 }
@@ -95,7 +95,7 @@ async function reject(taskId, user, { reason, attachmentPath }) {
   await driveRecoveryTask(task.customerId, {
     headline: 'Internal action reviewed — continue recovery.',
     priority: 'Normal',
-    deadlineHour: 21,
+    deadlineHour: 18,
   });
   return taskRepository.findById(taskId);
 }

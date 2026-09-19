@@ -19,6 +19,8 @@ function mapDispute(row) {
     raisedDate: row.raised_date,
     lastUpdated: row.last_updated,
     attachmentPath: row.attachment_path,
+    resolutionDeadline: row.resolution_deadline,
+    department: row.department,
   };
 }
 
@@ -35,6 +37,21 @@ async function findById(id) {
 async function findPendingApproval() {
   const rows = await query("SELECT * FROM disputes WHERE status = 'Pending Approval'");
   return rows.map(mapDispute);
+}
+
+/** Distinct customer ids of every dispute this user is (or was) the resolution owner on. */
+async function findCustomerIdsByResolutionOwner(userId) {
+  const rows = await query('SELECT DISTINCT customer_id FROM disputes WHERE resolution_owner = :userId', { userId });
+  return rows.map((r) => r.customer_id);
+}
+
+/** Whether this user is (or was) the resolution owner on any dispute for this customer. */
+async function isResolutionOwner(customerId, userId) {
+  const rows = await query(
+    'SELECT 1 FROM disputes WHERE customer_id = :customerId AND resolution_owner = :userId LIMIT 1',
+    { customerId, userId }
+  );
+  return rows.length > 0;
 }
 
 async function insert(dispute, connection) {
@@ -67,6 +84,8 @@ const COLUMN_MAP = {
   resolutionOwner: 'resolution_owner',
   rejectionReason: 'rejection_reason',
   infoRequestNote: 'info_request_note',
+  resolutionDeadline: 'resolution_deadline',
+  department: 'department',
 };
 
 async function update(id, fields, connection) {
@@ -77,4 +96,4 @@ async function update(id, fields, connection) {
   await run(`UPDATE disputes SET ${setClause} WHERE id = :id`, { ...fields, id });
 }
 
-module.exports = { mapDispute, findAll, findById, findPendingApproval, insert, update };
+module.exports = { mapDispute, findAll, findById, findPendingApproval, findCustomerIdsByResolutionOwner, isResolutionOwner, insert, update };

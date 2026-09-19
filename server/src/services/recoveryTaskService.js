@@ -24,13 +24,15 @@ const OPEN_TASK = (s) => !['completed', 'closed', 'cancelled'].includes(s);
 const ADOPTABLE_SOURCES = ['Recovery Reconcile', 'Daily Snapshot', 'Task Completion Guard'];
 
 // Open call tasks that a live lifecycle job owns and keys off their source
-// string — the No-Answer 2-hourly cycle (`sweepNoAnswerCycle`) and the
-// Will-Confirm rollover (`sweepExpiredFollowUps`). We must NOT adopt these
-// (renaming the source silently kills that job's handling of the customer
-// and lets `applyOutcome` create a duplicate). A SPECIFIC event (broken
-// PTP, rejected dispute, failed claim) still opens its own recovery task
-// alongside; only the generic nightly refresh defers to the owning job.
-const JOB_OWNED_CALL_SOURCES = ['No Answer', 'Record Outcome'];
+// string — currently just the No-Answer 2-hourly cycle (`sweepNoAnswerCycle`).
+// We must NOT adopt these (renaming the source silently kills that job's
+// handling of the customer and lets `applyOutcome` create a duplicate). A
+// SPECIFIC event (broken PTP, rejected dispute, failed claim) still opens
+// its own recovery task alongside; only the generic nightly refresh defers
+// to the owning job. (A "Will Confirm" outcome no longer creates any
+// customerCall task at all until followUpQueue's job fires, so there's
+// nothing left to job-own under a 'Record Outcome' source.)
+const JOB_OWNED_CALL_SOURCES = ['No Answer'];
 
 function atHourLocal(hour, base = new Date()) {
   const d = new Date(base);
@@ -56,14 +58,17 @@ function rupees(n) {
  * supervising an account never means the salesperson stops calling.
  * Suppressed only while a physical visit is open. `conn` optional.
  *
- * opts: { headline, priority, deadlineHour = 21, deadlineOverride, collectAmount, refreshOnly }
+ * opts: { headline, priority, deadlineHour = 18, deadlineOverride, collectAmount, refreshOnly }
  * `collectAmount` overrides the figure to chase; otherwise it's the
  * customer's ACTIONABLE overdue = totalDue − (open PTPs + payment claims
  * with the RE + disputes with the RE), so a fully-promised/claimed
  * account correctly parks. `deadlineOverride` (a Date) beats `deadlineHour`.
+ * Every automatically-generated call task is due same-day 6 PM (18:00) —
+ * every caller in this codebase passes 18 explicitly; the default here
+ * matches for any future caller that omits it.
  */
 async function driveRecoveryTask(customerId, opts = {}, conn) {
-  const { headline = 'Follow up.', priority = 'Normal', deadlineHour = 21, deadlineOverride, collectAmount, refreshOnly = false } = opts;
+  const { headline = 'Follow up.', priority = 'Normal', deadlineHour = 18, deadlineOverride, collectAmount, refreshOnly = false } = opts;
 
   const body = async (c) => {
     const customer = await customerRepository.findById(customerId);
@@ -277,4 +282,4 @@ async function driveRecoveryTask(customerId, opts = {}, conn) {
   }
 }
 
-module.exports = { driveRecoveryTask, RECOVERY_SOURCE, rupees };
+module.exports = { driveRecoveryTask, RECOVERY_SOURCE, rupees, atHourLocal };

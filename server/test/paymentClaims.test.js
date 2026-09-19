@@ -8,10 +8,13 @@ const ptpRepository = require('../src/repositories/ptpRepository');
 let app;
 
 async function createClaimForC1(salespersonToken) {
+  // C1 carries a seeded open Physical Visit task — recording ANY outcome
+  // supersedes it, so an attachment is required regardless of what this
+  // particular outcome is about.
   const res = await fetch(`${app.baseUrl}/api/customers/C1/record-outcome`, {
     method: 'POST',
     headers: authHeaders(salespersonToken),
-    body: JSON.stringify({ nextAction: 'Verification Pending', reason: 'Payment Already Made', details: 'Amount: ₹20000' }),
+    body: JSON.stringify({ nextAction: 'Verification Pending', reason: 'Payment Already Made', details: 'Amount: ₹20000', attachmentPath: '/uploads/test-evidence.jpg' }),
   });
   assert.equal(res.status, 200);
 }
@@ -128,7 +131,7 @@ test('RE verifying a claim as successful creates a call-customer follow-up task 
   assert.equal(followUp.ownerId, 'rahul');
   assert.match(followUp.reason, /verified/, 'task reason describes the decision');
   assert.match(followUp.reason, /Collect ₹/, 'task says exactly what to collect');
-  assert.equal(new Date(followUp.deadline).getHours(), 21, 'due 9 PM (RE-decision default)');
+  assert.equal(new Date(followUp.deadline).getHours(), 18, 'due same-day 6 PM (auto-generated call task default)');
 });
 
 test('RE marking a claim Failed creates a high-priority follow-up call task', async () => {

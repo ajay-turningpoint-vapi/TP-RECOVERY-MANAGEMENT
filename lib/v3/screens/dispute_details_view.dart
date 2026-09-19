@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:salesman_mobile/v2/stores/app_store.dart';
 import 'package:salesman_mobile/v2/screens/customer_360_screen.dart';
 import 'package:salesman_mobile/v3/screens/request_detail_scaffold.dart';
 import 'package:salesman_mobile/widgets/app_message.dart';
+import 'package:salesman_mobile/services/attachment_picker.dart';
 
 final _rupee =
     NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
@@ -37,11 +39,17 @@ class DisputeDetailsView extends StatelessWidget {
     final status = d['status'] as String;
     final isPending = status == 'Pending Approval';
     // Real server-side second-stage verification (disputeService.resolve)
-    // becomes available once RE has Approved the dispute — this is the
-    // primary Disputes tab, so it's the natural place to reach it (an
-    // Approved dispute is not reachable from the Needs Attention or RE
-    // Tasks screens, which only ever list Pending Approval disputes).
-    final needsVerification = status == 'Approved';
+    // becomes available only once the resolution owner has submitted their
+    // work (status → Awaiting Verification) — NOT as soon as the RE
+    // approves. This is the primary Disputes tab, so it's the natural
+    // place to reach it (an Awaiting Verification dispute is not reachable
+    // from the Needs Attention or RE Tasks screens, which only ever list
+    // Pending Approval disputes).
+    final needsVerification = status == 'Awaiting Verification';
+    // The resolution owner declined the assignment (rejectByOwner clears
+    // resolutionOwner but leaves status Approved) — RE must pick someone
+    // else via the same Approve & Assign flow used at Pending Approval.
+    final needsReassignment = status == 'Approved' && (d['resolutionOwner'] as String?) == null;
     // Both are really internal user ids (assignedSalesmanId / the RE's
     // chosen resolutionOwner from the approve dialog) — resolved to real,
     // readable names once here since neither is ever used again as an id.
@@ -155,7 +163,7 @@ class DisputeDetailsView extends StatelessWidget {
                                   ),
                                   const SizedBox(height: 3),
                                   Text(
-                                      'Customer ID: ${d['customerCode']}  ·  Invoice: ${d['invoice']}',
+                                      'Customer ID: ${d['customerCode']}  ·  Invoice: ${(d['invoice'] as String?) ?? 'No invoice'}',
                                       style: const TextStyle(
                                           fontSize: 10.5, color: kMuted)),
                                   Text('${customer.branch} Branch',
@@ -321,6 +329,32 @@ class DisputeDetailsView extends StatelessWidget {
                           ),
                         ),
                       ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          if (needsReassignment)
+            SafeArea(
+              top: false,
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: const BoxDecoration(
+                    color: Colors.white,
+                    border: Border(top: BorderSide(color: kBorder))),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 600),
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                          backgroundColor: _blue,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 13),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+                      onPressed: onApproveAssign,
+                      child: const FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text('Reassign Resolution Owner', style: TextStyle(fontWeight: FontWeight.bold))),
                     ),
                   ),
                 ),
@@ -532,35 +566,76 @@ class DisputeDetailsView extends StatelessWidget {
     );
   }
 
+  /// Same bottom-sheet shape as the resolution owner's "Message RE" —
+  /// text plus an optional photo/PDF attachment on the RE's side of the
+  /// same dispute thread (see task_details_screen_v3.dart's
+  /// _disputeMessage, which the resolution owner uses to reply).
   void _sendMessage(BuildContext context, AppStore store, Map<String, dynamic> d) {
     final controller = TextEditingController();
-    showDialog(
+    XFile? picked;
+    bool busy = false;
+    showModalBottomSheet(
       context: context,
-      builder: (dialogCtx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Message resolution owner', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-        content: TextField(controller: controller, maxLines: 3, autofocus: true,
-            decoration: const InputDecoration(hintText: 'Type a message…', border: OutlineInputBorder())),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('Cancel')),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: _indigo, foregroundColor: Colors.white),
-            onPressed: () async {
-              final body = controller.text.trim();
-              if (body.isEmpty) return;
-              final navigator = Navigator.of(context);
-              Navigator.pop(dialogCtx);
-              try {
-                await store.postDisputeMessage(d['id'], body: body);
-                showAppMessageAfter(navigator, message: 'Message sent.');
-              } catch (e) {
-                showAppMessageAfter(navigator, message: 'Could not send: $e', isError: true);
-              }
-            },
-            child: const Text('Send', style: TextStyle(fontWeight: FontWeight.bold)),
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+      builder: (sheetCtx) => StatefulBuilder(builder: (sheetCtx, setSheet) {
+        return Padding(
+          padding: EdgeInsets.only(left: 16, right: 16, top: 16, bottom: MediaQuery.of(sheetCtx).viewInsets.bottom + 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                const Expanded(child: Text('Message resolution owner', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: _navy))),
+                IconButton(icon: const Icon(Icons.close, size: 20), onPressed: () => Navigator.pop(sheetCtx)),
+              ]),
+              const Text('Back-and-forth on this dispute — no decision is recorded.', style: TextStyle(fontSize: 11.5, color: kMuted)),
+              const SizedBox(height: 12),
+              TextField(controller: controller, maxLines: 3, autofocus: true,
+                  decoration: const InputDecoration(border: OutlineInputBorder(), isDense: true, hintText: 'Type a message…')),
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                onPressed: busy ? null : () async {
+                  final p = await pickEvidenceFile(sheetCtx);
+                  if (p != null) setSheet(() => picked = p);
+                },
+                icon: Icon(picked == null ? Icons.attach_file : Icons.check, size: 15),
+                label: Text(picked == null ? 'Attach photo or PDF' : 'Attached: ${picked!.name}', style: const TextStyle(fontSize: 11.5)),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: _indigo, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 13), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+                  onPressed: busy ? null : () async {
+                    final body = controller.text.trim();
+                    if (body.isEmpty) return;
+                    setSheet(() => busy = true);
+                    final navigator = Navigator.of(context);
+                    try {
+                      String? path;
+                      if (picked != null) {
+                        final b = await picked!.readAsBytes();
+                        path = await store.apiClient.uploadAttachment(b, filename: picked!.name, contentType: picked!.mimeType ?? 'image/jpeg');
+                      }
+                      await store.postDisputeMessage(d['id'], body: body, attachmentPath: path);
+                      Navigator.pop(sheetCtx);
+                      showAppMessageAfter(navigator, message: 'Message sent.');
+                    } catch (e) {
+                      setSheet(() => busy = false);
+                      showAppMessageAfter(navigator, message: 'Could not send: $e', isError: true);
+                    }
+                  },
+                  child: busy
+                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      : const Text('Send', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      }),
     );
   }
 
@@ -613,7 +688,13 @@ class DisputeDetailsView extends StatelessWidget {
         ? raiserId
         : (store.salesmen.isNotEmpty ? store.salesmen.first['name'] as String : '');
     final descController = TextEditingController();
-    DateTime deadline = DateTime.now().add(const Duration(days: 1));
+    // A clarification is needed now, so this must land in the salesperson's
+    // Today's Tasks, not tomorrow's — matches disputeService.js's own
+    // defaultCallDeadline() fallback (today, unless already past 9 PM).
+    final now = DateTime.now();
+    DateTime deadline = now.hour >= 21
+        ? DateTime(now.year, now.month, now.day + 1, 21)
+        : DateTime(now.year, now.month, now.day, 21);
     showDialog(
       context: context,
       builder: (dialogCtx) => StatefulBuilder(builder: (context, setState) {

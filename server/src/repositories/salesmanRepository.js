@@ -24,6 +24,17 @@ function usernameFromName(name, code) {
   return slug || `sm.${code}`;
 }
 
+/**
+ * Strips a parenthetical BUSY sometimes appends to a salesman's name — a
+ * phone number, usually, e.g. "NILESH FURIA(9004185676)" -> "NILESH FURIA".
+ * usernameFromName already strips this for the login username; the
+ * display name (full_name) never did, so the raw phone number leaked into
+ * every screen that shows a salesman's name.
+ */
+function stripParenthetical(name) {
+  return String(name).replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 /** Base salesperson rows — every real, derived roster figure (recovery score, collection %, task completion, etc.) is computed by salesmanService from real customers/ptps/tasks, not stored here. */
 async function findAllSalespersons() {
   return query(
@@ -58,7 +69,7 @@ async function upsertBusySalesmen(rows, branch = { key: 'tp', label: 'Turning Po
   const nameByCode = new Map();
   for (const r of rows) {
     const code = r.salesmanCode;
-    const name = (r.salesman || '').trim();
+    const name = stripParenthetical((r.salesman || '').trim());
     if (code == null || !name) continue;
     if (!nameByCode.has(code)) nameByCode.set(code, name);
   }

@@ -29,13 +29,14 @@ class PtpCorrectionReviewScreen extends StatelessWidget {
       bannerIcon: Icons.swap_horiz,
       actions: isPending
           ? [
-              OutlinedButton(
-                style: OutlinedButton.styleFrom(side: const BorderSide(color: kRed), foregroundColor: kRed, padding: const EdgeInsets.symmetric(vertical: 13), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(side: const BorderSide(color: kRed, width: 1.4), foregroundColor: kRed, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
                 onPressed: () => _reject(context, store, p.id),
-                child: const Text('Reject', style: TextStyle(fontWeight: FontWeight.bold)),
+                icon: const Icon(Icons.cancel_outlined, size: 17),
+                label: const Text('Reject', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5)),
               ),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: kGreen, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 13), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(backgroundColor: kGreen, foregroundColor: Colors.white, elevation: 0, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
                 onPressed: () async {
                   final navigator = Navigator.of(context);
                   try {
@@ -46,7 +47,8 @@ class PtpCorrectionReviewScreen extends StatelessWidget {
                     showAppMessageAfter(navigator, message: 'Could not approve: $e', isError: true);
                   }
                 },
-                child: const Text('Approve', style: TextStyle(fontWeight: FontWeight.bold)),
+                icon: const Icon(Icons.check_circle_outline, size: 17),
+                label: const Text('Approve', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5)),
               ),
             ]
           : [],
@@ -85,7 +87,7 @@ class PtpCorrectionReviewScreen extends StatelessWidget {
         InfoCard(children: [
           KeyValueRow('Amount', _rupee.format(p.correctionRequestedAmount ?? p.amountPromised), valueColor: _teal),
           KeyValueRow('Date & Time', p.correctionRequestedDate != null ? DateFormat('dd MMM yyyy, hh:mm a').format(p.correctionRequestedDate!) : '-', valueColor: _teal),
-          KeyValueRow('Payment Mode', p.correctionRequestedPaymentMode ?? p.paymentMode, valueColor: _teal),
+          KeyValueRow('Mode of the Communication', p.correctionRequestedPaymentMode ?? p.paymentMode, valueColor: _teal),
           KeyValueRow('Reason', p.correctionReason ?? '-'),
         ]),
       ],

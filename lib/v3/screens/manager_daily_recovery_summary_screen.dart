@@ -10,6 +10,23 @@ import 'package:salesman_mobile/widgets/app_message.dart';
 final _rupee = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
 String _crore(double v) => '${(v / 10000000).toStringAsFixed(2)} Cr';
 
+// Branch table columns — fixed widths (not Expanded/flex) so a branch name
+// gets real room instead of being squeezed by the currency columns; the
+// table scrolls horizontally when it doesn't fit instead of shrinking
+// everything down to illegible text.
+const double _branchColName = 110;
+const double _branchColTarget = 100;
+const double _branchColReceived = 100;
+const double _branchColAchv = 40;
+const double _branchColGap = 10;
+const double _branchTableWidth = _branchColName + _branchColTarget + _branchColReceived + _branchColAchv + _branchColGap * 3;
+
+const double _topCustColName = 170;
+const double _topCustColReceived = 100;
+const double _topCustColMode = 50;
+const double _topCustColGap = 10;
+const double _topCustTableWidth = _topCustColName + _topCustColReceived + _topCustColMode + _topCustColGap * 2;
+
 /// Manager's Daily Recovery Summary — Target vs Received, branch-wise
 /// breakdown and top customers by amount received, all derived live from
 /// the shared store (real salesmen/PTPs/customers), matching the Manager
@@ -366,42 +383,60 @@ class _ManagerDailyRecoverySummaryScreenState extends State<ManagerDailyRecovery
       children: [
         const Text('Target vs Received by Branch', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5, color: kNavy)),
         const SizedBox(height: 12),
-        const Row(
-          children: [
-            Expanded(flex: 3, child: Text('Branch', style: TextStyle(fontSize: 9.5, color: kMuted, fontWeight: FontWeight.bold))),
-            Expanded(flex: 3, child: Text('Target (₹)', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: kMuted, fontWeight: FontWeight.bold))),
-            Expanded(flex: 3, child: Text('Received (₹)', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: kMuted, fontWeight: FontWeight.bold))),
-            Expanded(flex: 2, child: Text('Achv', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: kMuted, fontWeight: FontWeight.bold))),
-          ],
-        ),
-        const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Divider(height: 1, color: kBorder)),
-        ...rows.map((r) => Padding(
-              padding: const EdgeInsets.symmetric(vertical: 7),
-              child: Row(
-                children: [
-                  Expanded(flex: 3, child: Text(r.branch, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: kDark))),
-                  Expanded(flex: 3, child: FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerRight, child: Text(_rupee.format(r.target), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: kDark)))),
-                  Expanded(flex: 3, child: FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerRight, child: Text(_rupee.format(r.received), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: kGreen)))),
-                  Expanded(
-                    flex: 2,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        SizedBox(width: 20, height: 20, child: CircularProgressIndicator(value: (r.achievement / 100).clamp(0, 1).toDouble(), strokeWidth: 2.5, backgroundColor: kBorder, valueColor: AlwaysStoppedAnimation<Color>(r.achievement >= 60 ? kGreen : (r.achievement >= 35 ? kOrange : kRed)))),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            )),
-        const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Divider(height: 1, color: kBorder)),
-        Row(
-          children: [
-            const Expanded(flex: 3, child: Text('Total', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: kNavy))),
-            Expanded(flex: 3, child: FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerRight, child: Text(_rupee.format(totalTarget), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: kNavy)))),
-            Expanded(flex: 3, child: FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerRight, child: Text(_rupee.format(totalReceived), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: kGreen)))),
-            Expanded(flex: 2, child: Text('${totalAchievement.toStringAsFixed(1)}%', textAlign: TextAlign.right, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: kOrange))),
-          ],
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: SizedBox(
+            width: _branchTableWidth,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Row(
+                  children: [
+                    SizedBox(width: _branchColName, child: Text('Branch', style: TextStyle(fontSize: 9.5, color: kMuted, fontWeight: FontWeight.bold))),
+                    SizedBox(width: _branchColGap),
+                    SizedBox(width: _branchColTarget, child: Text('Target (₹)', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: kMuted, fontWeight: FontWeight.bold))),
+                    SizedBox(width: _branchColGap),
+                    SizedBox(width: _branchColReceived, child: Text('Received (₹)', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: kMuted, fontWeight: FontWeight.bold))),
+                    SizedBox(width: _branchColGap),
+                    SizedBox(width: _branchColAchv, child: Text('Achv', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: kMuted, fontWeight: FontWeight.bold))),
+                  ],
+                ),
+                const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Divider(height: 1, color: kBorder)),
+                ...rows.map((r) => Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 7),
+                      child: Row(
+                        children: [
+                          SizedBox(width: _branchColName, child: Text(r.branch, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: kDark))),
+                          const SizedBox(width: _branchColGap),
+                          SizedBox(width: _branchColTarget, child: Text(_rupee.format(r.target), textAlign: TextAlign.right, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: kDark))),
+                          const SizedBox(width: _branchColGap),
+                          SizedBox(width: _branchColReceived, child: Text(_rupee.format(r.received), textAlign: TextAlign.right, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: kGreen))),
+                          const SizedBox(width: _branchColGap),
+                          SizedBox(
+                            width: _branchColAchv,
+                            child: Align(
+                              alignment: Alignment.centerRight,
+                              child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(value: (r.achievement / 100).clamp(0, 1).toDouble(), strokeWidth: 2.5, backgroundColor: kBorder, valueColor: AlwaysStoppedAnimation<Color>(r.achievement >= 60 ? kGreen : (r.achievement >= 35 ? kOrange : kRed)))),
+                            ),
+                          ),
+                        ],
+                      ),
+                    )),
+                const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Divider(height: 1, color: kBorder)),
+                Row(
+                  children: [
+                    const SizedBox(width: _branchColName, child: Text('Total', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: kNavy))),
+                    const SizedBox(width: _branchColGap),
+                    SizedBox(width: _branchColTarget, child: Text(_rupee.format(totalTarget), textAlign: TextAlign.right, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: kNavy))),
+                    const SizedBox(width: _branchColGap),
+                    SizedBox(width: _branchColReceived, child: Text(_rupee.format(totalReceived), textAlign: TextAlign.right, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: kGreen))),
+                    const SizedBox(width: _branchColGap),
+                    SizedBox(width: _branchColAchv, child: Text('${totalAchievement.toStringAsFixed(1)}%', textAlign: TextAlign.right, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: kOrange))),
+                  ],
+                ),
+              ],
+            ),
+          ),
         ),
       ],
     );
@@ -421,58 +456,77 @@ class _ManagerDailyRecoverySummaryScreenState extends State<ManagerDailyRecovery
         const SizedBox(height: 12),
         if (rows.isEmpty)
           const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Text('No payments received in this view.', style: TextStyle(fontSize: 12, color: kMuted)))
-        else ...[
-          const Row(
+        else
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(flex: 4, child: Text('Customer', style: TextStyle(fontSize: 9.5, color: kMuted, fontWeight: FontWeight.bold))),
-              Expanded(flex: 3, child: Text('Received (₹)', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: kMuted, fontWeight: FontWeight.bold))),
-              Expanded(flex: 2, child: Text('Mode', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: kMuted, fontWeight: FontWeight.bold))),
-            ],
-          ),
-          const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Divider(height: 1, color: kBorder)),
-          ...rows.map((r) => Padding(
-                padding: const EdgeInsets.symmetric(vertical: 7),
-                child: Row(
-                  children: [
-                    Expanded(
-                      flex: 4,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: SizedBox(
+                  width: _topCustTableWidth,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Row(
                         children: [
-                          Text(r.customer.name, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: kDark)),
-                          Text('${r.customer.branch}  ·  ${r.payments} payment${r.payments == 1 ? '' : 's'}', style: const TextStyle(fontSize: 9.5, color: kMuted)),
+                          SizedBox(width: _topCustColName, child: Text('Customer', style: TextStyle(fontSize: 9.5, color: kMuted, fontWeight: FontWeight.bold))),
+                          SizedBox(width: _topCustColGap),
+                          SizedBox(width: _topCustColReceived, child: Text('Received (₹)', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: kMuted, fontWeight: FontWeight.bold))),
+                          SizedBox(width: _topCustColGap),
+                          SizedBox(width: _topCustColMode, child: Text('Mode', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: kMuted, fontWeight: FontWeight.bold))),
                         ],
                       ),
-                    ),
-                    Expanded(flex: 3, child: FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerRight, child: Text(_rupee.format(r.received), style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: kGreen)))),
-                    Expanded(
-                      flex: 2,
-                      child: Align(
-                        alignment: Alignment.centerRight,
-                        child: Icon(_modeIcon(r.mode), size: 16, color: _modeColor(r.mode)),
-                      ),
-                    ),
-                  ],
+                      const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Divider(height: 1, color: kBorder)),
+                      ...rows.map((r) => Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 7),
+                            child: Row(
+                              children: [
+                                SizedBox(
+                                  width: _topCustColName,
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(r.customer.name, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: kDark)),
+                                      Text('${r.customer.branch}  ·  ${r.payments} payment${r.payments == 1 ? '' : 's'}', overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 9.5, color: kMuted)),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: _topCustColGap),
+                                SizedBox(width: _topCustColReceived, child: Text(_rupee.format(r.received), textAlign: TextAlign.right, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: kGreen))),
+                                const SizedBox(width: _topCustColGap),
+                                SizedBox(
+                                  width: _topCustColMode,
+                                  child: Align(
+                                    alignment: Alignment.centerRight,
+                                    child: Icon(_modeIcon(r.mode), size: 16, color: _modeColor(r.mode)),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )),
+                    ],
+                  ),
                 ),
-              )),
-          const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Divider(height: 1, color: kBorder)),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.account_balance_outlined, size: 13, color: _modeColor('NEFT')),
-              const SizedBox(width: 4),
-              const Text('NEFT', style: TextStyle(fontSize: 9.5, color: kMuted)),
-              const SizedBox(width: 12),
-              Icon(Icons.qr_code, size: 13, color: _modeColor('UPI')),
-              const SizedBox(width: 4),
-              const Text('UPI', style: TextStyle(fontSize: 9.5, color: kMuted)),
-              const SizedBox(width: 12),
-              Icon(Icons.receipt_long_outlined, size: 13, color: _modeColor('Cheque')),
-              const SizedBox(width: 4),
-              const Text('Cheque', style: TextStyle(fontSize: 9.5, color: kMuted)),
+              ),
+              const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Divider(height: 1, color: kBorder)),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.account_balance_outlined, size: 13, color: _modeColor('NEFT')),
+                  const SizedBox(width: 4),
+                  const Text('NEFT', style: TextStyle(fontSize: 9.5, color: kMuted)),
+                  const SizedBox(width: 12),
+                  Icon(Icons.qr_code, size: 13, color: _modeColor('UPI')),
+                  const SizedBox(width: 4),
+                  const Text('UPI', style: TextStyle(fontSize: 9.5, color: kMuted)),
+                  const SizedBox(width: 12),
+                  Icon(Icons.receipt_long_outlined, size: 13, color: _modeColor('Cheque')),
+                  const SizedBox(width: 4),
+                  const Text('Cheque', style: TextStyle(fontSize: 9.5, color: kMuted)),
+                ],
+              ),
             ],
           ),
-        ],
       ],
     );
   }

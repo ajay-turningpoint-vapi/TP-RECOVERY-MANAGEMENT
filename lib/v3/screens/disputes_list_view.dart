@@ -254,8 +254,8 @@ class _DisputesListViewState extends State<DisputesListView> {
                     children: [
                       Text(d['customer'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14.5, color: _navy)),
                       const SizedBox(height: 2),
-                      Text('${d['invoice']}  ·  ${d['customerCode']}', style: const TextStyle(fontSize: 10.5, color: kMuted)),
-                      Text('Dispute ID: ${d['id']}  ·  Raised: ${DateFormat('dd MMM yyyy').format(d['raisedDate'])}', style: const TextStyle(fontSize: 10, color: kMuted)),
+                      Text('${(d['invoice'] as String?) ?? 'No invoice'}  ·  ${d['customerCode']}', style: const TextStyle(fontSize: 10.5, color: kMuted)),
+                      Text('Raised: ${DateFormat('dd MMM yyyy').format(d['raisedDate'])}', style: const TextStyle(fontSize: 10, color: kMuted)),
                     ],
                   ),
                 ),

@@ -180,7 +180,7 @@ class _DisputeAssignViewState extends State<DisputeAssignView> {
                                 color: _navy)),
                         const SizedBox(height: 3),
                         Text(
-                            'Customer ID: ${d['customerCode']}  ·  Invoice: ${d['invoice']}',
+                            'Customer ID: ${d['customerCode']}  ·  Invoice: ${(d['invoice'] as String?) ?? 'No invoice'}',
                             style:
                                 const TextStyle(fontSize: 10.5, color: kMuted)),
                         Text('Branch: ${customer.branch}',
@@ -416,7 +416,7 @@ class _DisputeAssignViewState extends State<DisputeAssignView> {
         );
       }
       await store.approveDispute(d['id'], _owner!, deadline, note,
-          note: note, attachmentPath: attachmentPath);
+          note: note, attachmentPath: attachmentPath, department: _department);
       if (mounted) setState(() => _busy = false);
       // Close this screen FIRST, then toast — calling showAppMessageAfter
       // before onConfirmed() made the pop dismiss the toast dialog instead

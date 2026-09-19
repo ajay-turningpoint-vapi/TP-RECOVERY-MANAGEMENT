@@ -13,6 +13,7 @@ const approveSchema = z.object({
   description: z.string().min(1),
   note: z.string().min(1), // mandatory note for the resolution owner
   attachmentPath: z.string().optional(),
+  department: z.string().optional(),
 });
 const messageSchema = z.object({
   body: z.string().min(1),
@@ -21,6 +22,10 @@ const messageSchema = z.object({
 const resolveByOwnerSchema = z.object({
   taskId: z.string().min(1),
   note: z.string().optional(),
+});
+const rejectByOwnerSchema = z.object({
+  taskId: z.string().min(1),
+  reason: z.string().min(1),
 });
 const rejectSchema = z.object({ reason: z.string().min(1) });
 const infoSchema = z.object({
@@ -45,5 +50,6 @@ router.post('/:id/resolve', authorize('RECOVERY_EXECUTIVE', 'MANAGEMENT'), valid
 router.post('/:id/answer', authorize('SALESPERSON'), validate(answerSchema), controller.answerClarification);
 router.post('/:id/message', validate(messageSchema), controller.postMessage);
 router.post('/:id/resolve-by-owner', authorize('SALESPERSON'), validate(resolveByOwnerSchema), controller.resolveByOwner);
+router.post('/:id/reject-by-owner', authorize('SALESPERSON'), validate(rejectByOwnerSchema), controller.rejectByOwner);
 
 module.exports = router;

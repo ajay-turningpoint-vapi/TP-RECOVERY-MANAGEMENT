@@ -25,10 +25,13 @@ after(async () => {
 
 /** Records an Internal Action outcome for the given customer, returns the RE task it created. */
 async function raiseInternalAction(customerId, salespersonToken, reToken, details) {
+  // C1 (used by the test below) carries a seeded open Physical Visit task
+  // — recording ANY outcome supersedes it, so an attachment is required
+  // regardless of what this particular outcome is about.
   const res = await fetch(`${app.baseUrl}/api/customers/${customerId}/record-outcome`, {
     method: 'POST',
     headers: authHeaders(salespersonToken),
-    body: JSON.stringify({ nextAction: 'Internal Action', reason: 'Internal Task', details }),
+    body: JSON.stringify({ nextAction: 'Internal Action', reason: 'Internal Task', details, attachmentPath: '/uploads/test-evidence.jpg' }),
   });
   assert.equal(res.status, 200);
 

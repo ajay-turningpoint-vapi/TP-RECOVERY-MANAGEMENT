@@ -5,7 +5,6 @@ const escalationService = require('./escalationService');
 const taskService = require('./taskService');
 const { notifyDecision, salesmanForCustomer } = require('./decisionNotify');
 const { driveRecoveryTask, rupees } = require('./recoveryTaskService');
-const { withTransaction } = require('../config/db');
 const { NotFoundError, ValidationError } = require('../errors/AppError');
 
 const OUTCOME_LABELS = {
@@ -87,14 +86,10 @@ async function approveCorrection(ptpId, user) {
     body: `${user.fullName} approved your PTP change — now ₹${newAmount.toFixed(0)} due ${new Date(newDate).toLocaleDateString('en-IN')}.`,
     customerId: ptp.customerId,
   });
-  // The promised amount just moved — re-point the salesperson's single
-  // recovery task at whatever slice of the overdue this PTP no longer
-  // covers (and close it / park if it now covers everything).
-  await driveRecoveryTask(ptp.customerId, {
-    headline: `PTP corrected to ${rupees(newAmount)} — keep working the part it no longer covers.`,
-    priority: 'Normal',
-    deadlineHour: 21,
-  });
+  // Deliberately no driveRecoveryTask here — the PTP is still unverified
+  // (still 'scheduled', just corrected). It must stay quiet, and Record
+  // Outcome stays locked, until ptpVerificationService.finalizeDuePtps
+  // actually verifies it against BUSY (kept/partiallyKept/broken).
   return ptpRepository.findById(ptpId);
 }
 
@@ -113,41 +108,38 @@ async function rejectCorrection(ptpId, user, reason) {
     body: `${user.fullName} rejected your PTP correction request. Reason: "${reason}". The original PTP stands.`,
     customerId: ptp.customerId,
   });
-  // Original PTP stands — re-point the recovery task anyway so its ₹ figure
-  // reflects the (unchanged) covered/uncovered split with no drift.
-  await driveRecoveryTask(ptp.customerId, {
-    headline: 'PTP correction rejected — the original promise stands. Keep working the uncovered balance.',
-    priority: 'Normal',
-    deadlineHour: 21,
-  });
+  // The original PTP stands, still unverified — no driveRecoveryTask here
+  // either; same reasoning as approveCorrection above.
   return ptpRepository.findById(ptpId);
 }
 
 const LEVEL_SEVERITY = { none: 0, L1: 1, L2: 2, L3: 3, L4: 4 };
 
 /**
- * Real manual reconciliation of a Scheduled PTP — RE records whether the
- * customer actually paid (Kept/Partially Kept, with a real amount) or
- * didn't (Broken), after genuinely checking with accounts/BUSY. There is
- * no live payment-gateway integration to auto-detect this, so — exactly
- * like Payment Already Made claims — it's a real, evidence-backed RE
- * action, never an automatic simulation.
- *
  * A Kept/Partially Kept outcome IS the confirmed payment — it reduces the
  * customer's real financial exposure by amountReceived (Product Law: a
  * matured PTP must actually move the numbers, not just relabel itself).
  * A Broken outcome re-evaluates the broken-PTP escalation ladder for this
  * customer: 2 broken PTPs reaches L2, 3+ reaches L3 — never auto L4, which
  * stays a human/RE judgment call.
+ *
+ * There is exactly one way a PTP's outcome gets decided: the automated
+ * verification service (`services/ptpVerificationService.js`), which
+ * queries real BUSY receipt data once the PTP matures. An RE has no manual
+ * "mark outcome" override — their only lever on an open PTP is the
+ * correction flow below (request/approve/reject an amount/date/mode edit),
+ * never a direct kept/partiallyKept/broken call. This keeps every PTP
+ * outcome — and the task/Record-Outcome unlock that follows it — backed by
+ * a real BUSY-verified answer.
  */
 /**
  * The shared write core of "a Scheduled/PendingVerification PTP got an
- * outcome". Called by the manual RE flow (`markOutcome`, with
- * `moveBalance: true` — an RE reconciling before the next BUSY sync must
- * move the numbers themselves) and by the automated verification service
- * (`services/ptpVerificationService.js`, with `moveBalance: false` — BUSY
+ * outcome". Currently only called by the automated verification service
+ * (`services/ptpVerificationService.js`, `moveBalance: false` — BUSY
  * sync/receipts are already the source of truth, so touching customer
- * balances here would double-count).
+ * balances here would double-count). `moveBalance: true` remains supported
+ * for any future caller that needs to move the balance itself, but nothing
+ * in this codebase currently exercises that branch.
  *
  * Runs entirely on the passed-in transaction `conn`. Never calls the
  * escalation ladder itself — the caller does that after commit, same as
@@ -179,51 +171,6 @@ async function applyPtpOutcomeTx(
     { type: OUTCOME_LABELS[outcome].type, description, actor, previousState: prev, newState: next, source },
     conn
   );
-}
-
-async function markOutcome(ptpId, user, { outcome, amountReceived, brokenReason }) {
-  if (!OUTCOME_LABELS[outcome]) throw new ValidationError(`Invalid outcome "${outcome}" — must be kept, partiallyKept, or broken`);
-  const ptp = await getOrThrow(ptpId);
-  if (!['scheduled', 'pendingVerification'].includes(ptp.status)) {
-    throw new ValidationError(`This PTP is already "${ptp.status}" — it can only be reconciled once`);
-  }
-
-  const received = outcome === 'broken' ? 0 : Number(amountReceived) || 0;
-
-  await withTransaction(async (conn) => {
-    const customer = await customerRepository.findById(ptp.customerId);
-
-    const description =
-      outcome !== 'broken' && received > 0
-        ? `${user.fullName} reconciled against BUSY and confirmed this PTP was ${OUTCOME_LABELS[outcome].verb} — ₹${received.toFixed(0)} received against the promised ₹${ptp.amountPromised.toFixed(0)}. Financial exposure reduced by ₹${received.toFixed(0)}.`
-        : `${user.fullName} reconciled against BUSY and found NO qualifying receipt for the promised ₹${ptp.amountPromised.toFixed(0)} — this PTP is marked Broken.${brokenReason ? ` Reason: "${brokenReason}".` : ''}`;
-
-    await applyPtpOutcomeTx(conn, {
-      ptp,
-      customer,
-      outcome,
-      received,
-      brokenReason,
-      moveBalance: true,
-      actor: user.fullName,
-      source: 'PTP Reconciliation',
-      description,
-    });
-  });
-
-  if (outcome === 'broken') {
-    await evaluateBrokenPtpEscalation(ptp.customerId);
-  }
-  // Every outcome — kept, partiallyKept, or broken — can still leave money
-  // owed; reopenRecoveryAfterPtpOutcome drives the single recovery task to
-  // the current balance (or closes it at ₹0), so recovery continues until
-  // it's zero.
-  await reopenRecoveryAfterPtpOutcome(ptp.customerId, outcome, {
-    promised: ptp.amountPromised,
-    received,
-  });
-
-  return ptpRepository.findById(ptpId);
 }
 
 async function evaluateBrokenPtpEscalation(customerId) {
@@ -282,7 +229,6 @@ module.exports = {
   requestCorrection,
   approveCorrection,
   rejectCorrection,
-  markOutcome,
   applyPtpOutcomeTx,
   evaluateBrokenPtpEscalation,
   reopenRecoveryAfterPtpOutcome,

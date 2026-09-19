@@ -15,8 +15,12 @@
          permission_handler before first use. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.VIBRATE"/>
+    <!-- Voice-to-text dictation for the dispute reason / additional notes
+         fields (Hindi speech, translated to English) — see
+         lib/v2/widgets/voice_translate_field.dart. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <application
-        android:label="salesman_mobile"
+        android:label="Clock-TMS"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:allowBackup="false"

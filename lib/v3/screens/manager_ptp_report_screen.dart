@@ -586,7 +586,7 @@ class _ManagerPtpReportScreenState extends State<ManagerPtpReportScreen> {
               padding: const EdgeInsets.symmetric(vertical: 4),
               child: Row(
                 children: [
-                  SizedBox(width: 92, child: Text(r, style: const TextStyle(fontSize: 9.5, color: kDark))),
+                  SizedBox(width: 92, child: Text(r, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 9.5, color: kDark))),
                   Expanded(
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(4),

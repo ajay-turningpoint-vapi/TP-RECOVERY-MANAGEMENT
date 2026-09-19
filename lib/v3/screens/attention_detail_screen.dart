@@ -19,6 +19,20 @@ const _green = Color(0xFF16A34A);
 
 final _rupee = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
 
+// Customers table columns — fixed widths (not Expanded/flex) so a long
+// customer name gets real room instead of being squeezed by the numeric
+// columns; scrolls horizontally when it doesn't fit instead of shrinking
+// everything down to illegible text. Width includes the avatar+gap so
+// header and body rows line up (the body row has an avatar the header
+// doesn't, which the old flex ratios didn't account for).
+const double _custColAvatarGap = 34; // CircleAvatar(26) + SizedBox(width: 8)
+const double _custColName = 116;
+const double _custColOverdue = 90;
+const double _custColDays = 50;
+const double _custColHealth = 80;
+const double _custColGap = 8;
+const double _custTableWidth = _custColAvatarGap + _custColName + _custColOverdue + _custColDays + _custColHealth + _custColGap * 3;
+
 const List<Color> _avatarPalette = [
   Color(0xFF2563EB),
   Color(0xFF16A34A),
@@ -315,38 +329,52 @@ class AttentionDetailScreen extends StatelessWidget {
     }
     return Container(
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: _border)),
-      child: Column(
-        children: [
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            child: Row(
-              children: [
-                Expanded(flex: 3, child: Text('Customer Name', style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
-                Expanded(flex: 2, child: Text('Overdue Amt', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
-                Expanded(flex: 2, child: Text('Days', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
-                Expanded(flex: 2, child: Text('Credit Health', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
-              ],
-            ),
-          ),
-          const Divider(height: 1, color: _border),
-          ...owned.map((c) => GestureDetector(
-                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => Customer360Screen(customer: c))),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                  decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: _border))),
-                  child: Row(
-                    children: [
-                      CircleAvatar(radius: 13, backgroundColor: _avatarColorFor(c.name).withOpacity(0.15), child: Text(_initialsFor(c.name), style: TextStyle(color: _avatarColorFor(c.name), fontSize: 9, fontWeight: FontWeight.bold))),
-                      const SizedBox(width: 8),
-                      Expanded(flex: 3, child: Text(c.name, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: _dark), overflow: TextOverflow.ellipsis)),
-                      Expanded(flex: 2, child: FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerRight, child: Text(_rupee.format(c.totalDue), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _red)))),
-                      Expanded(flex: 2, child: Text('${c.oldestOverdueDays}d', textAlign: TextAlign.right, style: const TextStyle(fontSize: 11, color: _dark))),
-                      Expanded(flex: 2, child: Text(c.creditHealthBand, textAlign: TextAlign.right, style: const TextStyle(fontSize: 10, color: _muted))),
-                    ],
-                  ),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: SizedBox(
+          width: _custTableWidth,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                child: Row(
+                  children: [
+                    const SizedBox(width: _custColAvatarGap),
+                    const SizedBox(width: _custColName, child: Text('Customer Name', style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
+                    const SizedBox(width: _custColGap),
+                    const SizedBox(width: _custColOverdue, child: Text('Overdue Amt', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
+                    const SizedBox(width: _custColGap),
+                    const SizedBox(width: _custColDays, child: Text('Days', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
+                    const SizedBox(width: _custColGap),
+                    const SizedBox(width: _custColHealth, child: Text('Credit Health', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
+                  ],
                 ),
-              )),
-        ],
+              ),
+              const Divider(height: 1, color: _border),
+              ...owned.map((c) => GestureDetector(
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => Customer360Screen(customer: c))),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: _border))),
+                      child: Row(
+                        children: [
+                          CircleAvatar(radius: 13, backgroundColor: _avatarColorFor(c.name).withOpacity(0.15), child: Text(_initialsFor(c.name), style: TextStyle(color: _avatarColorFor(c.name), fontSize: 9, fontWeight: FontWeight.bold))),
+                          const SizedBox(width: 8),
+                          SizedBox(width: _custColName, child: Text(c.name, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: _dark), overflow: TextOverflow.ellipsis)),
+                          const SizedBox(width: _custColGap),
+                          SizedBox(width: _custColOverdue, child: Text(_rupee.format(c.totalDue), textAlign: TextAlign.right, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _red))),
+                          const SizedBox(width: _custColGap),
+                          SizedBox(width: _custColDays, child: Text('${c.oldestOverdueDays}d', textAlign: TextAlign.right, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, color: _dark))),
+                          const SizedBox(width: _custColGap),
+                          SizedBox(width: _custColHealth, child: Text(c.creditHealthBand, textAlign: TextAlign.right, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10, color: _muted))),
+                        ],
+                      ),
+                    ),
+                  )),
+            ],
+          ),
+        ),
       ),
     );
   }

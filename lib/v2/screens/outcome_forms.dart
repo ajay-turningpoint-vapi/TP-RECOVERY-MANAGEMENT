@@ -4,9 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:salesman_mobile/v2/theme/app_theme.dart';
 import 'package:salesman_mobile/v2/stores/app_store.dart';
+import 'package:salesman_mobile/services/attachment_picker.dart';
+import 'package:salesman_mobile/v2/widgets/voice_translate_field.dart';
 
 final _money = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
 
@@ -352,65 +353,8 @@ Future<XFile?> _pickImage(BuildContext context) async {
   return ImagePicker().pickImage(source: source, imageQuality: 85);
 }
 
-/// Camera / gallery / PDF picker for evidence that may be a document, not
-/// just a photo (Internal Action). PDFs come back as an [XFile] built from
-/// their bytes so the same `screenshot:` upload path handles them.
-Future<XFile?> _pickEvidenceFile(BuildContext context) async {
-  final choice = await showModalBottomSheet<String>(
-    context: context,
-    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-    builder: (ctx) => SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const SizedBox(height: 12),
-          const Text('Add attachment', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF1B2B48))),
-          const SizedBox(height: 2),
-          ListTile(
-            leading: const CircleAvatar(backgroundColor: Color(0xFFE3EDFB), child: Icon(Icons.photo_camera, color: Color(0xFF0052CC))),
-            title: const Text('Take photo', style: TextStyle(fontWeight: FontWeight.bold)),
-            onTap: () => Navigator.pop(ctx, 'camera'),
-          ),
-          ListTile(
-            leading: const CircleAvatar(backgroundColor: Color(0xFFDCFCE7), child: Icon(Icons.photo_library, color: Color(0xFF16A34A))),
-            title: const Text('Choose from gallery', style: TextStyle(fontWeight: FontWeight.bold)),
-            onTap: () => Navigator.pop(ctx, 'gallery'),
-          ),
-          ListTile(
-            leading: const CircleAvatar(backgroundColor: Color(0xFFFEE2E2), child: Icon(Icons.picture_as_pdf, color: Color(0xFFDC2626))),
-            title: const Text('Upload PDF', style: TextStyle(fontWeight: FontWeight.bold)),
-            onTap: () => Navigator.pop(ctx, 'pdf'),
-          ),
-          const SizedBox(height: 8),
-        ],
-      ),
-    ),
-  );
-  if (choice == null) return null;
-  if (choice == 'pdf') {
-    final r = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['pdf'], withData: true);
-    final f = r?.files.isNotEmpty == true ? r!.files.first : null;
-    if (f == null) return null;
-    final name = f.name.trim().isNotEmpty ? f.name.trim() : 'document.pdf';
-    // The picker's own cached path is best — a real file means XFile.name
-    // and readAsBytes both work. cross_file's io XFile.fromData otherwise
-    // drops the name (XFile.name reads the path basename), which left the
-    // attach button and the upload with an empty filename.
-    if (f.path != null && f.path!.isNotEmpty && File(f.path!).existsSync()) {
-      return XFile(f.path!, mimeType: 'application/pdf');
-    }
-    if (f.bytes == null) return null;
-    final dir = Directory('${Directory.systemTemp.path}/tp_evidence/${DateTime.now().millisecondsSinceEpoch}');
-    await dir.create(recursive: true);
-    final tmp = File('${dir.path}/$name');
-    await tmp.writeAsBytes(f.bytes!);
-    return XFile(tmp.path, mimeType: 'application/pdf');
-  }
-  return ImagePicker().pickImage(
-    source: choice == 'camera' ? ImageSource.camera : ImageSource.gallery,
-    imageQuality: 85,
-  );
-}
+// Camera / gallery / PDF picker — see lib/services/attachment_picker.dart's
+// pickEvidenceFile, shared with the dispute chat threads.
 
 // 1. PTP
 class PtpOutcomeForm extends StatefulWidget {
@@ -698,20 +642,21 @@ class _PaymentAlreadyMadeFormState extends State<PaymentAlreadyMadeForm> {
           const SizedBox(height: 16),
           TextField(controller: _amountCtrl, decoration: InputDecoration(labelText: 'Claimed Amount (₹)', errorText: _amountError, helperText: widget.maxOutstanding > 0 ? 'Max ${_money.format(widget.maxOutstanding)} (total outstanding)' : null), keyboardType: TextInputType.number),
           const SizedBox(height: 16),
-          OutlinedButton.icon(
-            onPressed: () async {
-              final file = await _pickImage(context);
-              if (file != null) setState(() => _imageFile = file);
-            }, 
-            icon: Icon(_imageFile != null ? Icons.check : Icons.upload_file, color: _imageFile != null ? AppTheme.accentEmerald : null),
-            label: Text(_imageFile != null ? 'Attached: ${_imageFile!.name}' : 'Upload Evidence / Screenshot'),
-          ),
-          if (_imageFile != null)
-            FutureBuilder(
-              future: _imageFile!.readAsBytes(),
-              builder: (ctx, AsyncSnapshot snap) {
-                if (snap.hasData) return Padding(padding: const EdgeInsets.only(top: 8), child: Image.memory(snap.data, height: 80));
-                return const SizedBox();
+          if (_imageFile == null)
+            OutlinedButton.icon(
+              onPressed: () async {
+                final file = await pickEvidenceFile(context);
+                if (file != null) setState(() => _imageFile = file);
+              },
+              icon: const Icon(Icons.upload_file),
+              label: const Text('Upload Evidence'),
+            )
+          else
+            _AttachmentPreview(
+              file: _imageFile!,
+              onEdit: () async {
+                final file = await pickEvidenceFile(context);
+                if (file != null) setState(() => _imageFile = file);
               },
             ),
           if (_imageError != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(_imageError!, style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12))),
@@ -770,22 +715,23 @@ class _DisputeFormState extends State<DisputeForm> {
         children: [
           TextField(controller: _amountCtrl, decoration: InputDecoration(labelText: 'Disputed Amount (₹)', errorText: _amountError, helperText: widget.maxOutstanding > 0 ? 'Max ${_money.format(widget.maxOutstanding)} (total outstanding)' : null), keyboardType: TextInputType.number),
           const SizedBox(height: 16),
-          TextField(controller: _reasonCtrl, decoration: InputDecoration(labelText: 'Detailed Reason for Dispute', errorText: _reasonError), maxLines: 3),
+          VoiceTranslateField(controller: _reasonCtrl, decoration: InputDecoration(labelText: 'Detailed Reason for Dispute', errorText: _reasonError), maxLines: 3),
           const SizedBox(height: 16),
-          OutlinedButton.icon(
-            onPressed: () async {
-              final file = await _pickImage(context);
-              if (file != null) setState(() => _imageFile = file);
-            }, 
-            icon: Icon(_imageFile != null ? Icons.check : Icons.upload_file, color: _imageFile != null ? AppTheme.accentEmerald : null),
-            label: Text(_imageFile != null ? 'Attached: ${_imageFile!.name}' : 'Upload Evidence (Optional)'),
-          ),
-          if (_imageFile != null)
-            FutureBuilder(
-              future: _imageFile!.readAsBytes(),
-              builder: (ctx, AsyncSnapshot snap) {
-                if (snap.hasData) return Padding(padding: const EdgeInsets.only(top: 8), child: Image.memory(snap.data, height: 80));
-                return const SizedBox();
+          if (_imageFile == null)
+            OutlinedButton.icon(
+              onPressed: () async {
+                final file = await pickEvidenceFile(context);
+                if (file != null) setState(() => _imageFile = file);
+              },
+              icon: const Icon(Icons.upload_file),
+              label: const Text('Upload Evidence (Optional)'),
+            )
+          else
+            _AttachmentPreview(
+              file: _imageFile!,
+              onEdit: () async {
+                final file = await pickEvidenceFile(context);
+                if (file != null) setState(() => _imageFile = file);
               },
             ),
         ],
@@ -847,32 +793,24 @@ class _InternalActionFormState extends State<InternalActionForm> {
             ),
           ],
           const SizedBox(height: 16),
-          OutlinedButton.icon(
-            style: OutlinedButton.styleFrom(
-              foregroundColor: _attachment != null ? AppTheme.accentEmerald : null,
-              minimumSize: const Size.fromHeight(46),
-            ),
-            onPressed: () async {
-              final f = await _pickEvidenceFile(context);
-              if (f != null) setState(() => _attachment = f);
-            },
-            icon: Icon(_attachment != null ? Icons.check : Icons.attach_file,
-                color: _attachment != null ? AppTheme.accentEmerald : null),
-            label: Text(
-              _attachment != null ? 'Attached: ${_attachment!.name}' : 'Attach photo or PDF (optional)',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          if (_attachment != null) ...[
+          if (_attachment == null)
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(46)),
+              onPressed: () async {
+                final f = await pickEvidenceFile(context);
+                if (f != null) setState(() => _attachment = f);
+              },
+              icon: const Icon(Icons.attach_file),
+              label: const Text('Attach photo or PDF (optional)', maxLines: 1, overflow: TextOverflow.ellipsis),
+            )
+          else ...[
             const SizedBox(height: 10),
-            _AttachmentPreview(file: _attachment!),
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton(
-                onPressed: () => setState(() => _attachment = null),
-                child: const Text('Remove', style: TextStyle(fontSize: 12)),
-              ),
+            _AttachmentPreview(
+              file: _attachment!,
+              onEdit: () async {
+                final f = await pickEvidenceFile(context);
+                if (f != null) setState(() => _attachment = f);
+              },
             ),
           ],
         ],
@@ -887,63 +825,98 @@ class _InternalActionFormState extends State<InternalActionForm> {
 /// icon + name).
 class _AttachmentPreview extends StatelessWidget {
   final XFile file;
-  const _AttachmentPreview({required this.file});
+  // When set, overlays a small edit button on the preview's top-right
+  // corner (re-opens the same picker to swap the file) — the only way to
+  // change a picked attachment once it's shown; there's deliberately no
+  // separate "Attached: <name>" pill/border/checkmark above the preview
+  // anymore, since the thumbnail itself already shows what was picked.
+  final VoidCallback? onEdit;
+  const _AttachmentPreview({required this.file, this.onEdit});
 
   bool get _isPdf =>
       file.mimeType == 'application/pdf' ||
       file.name.toLowerCase().endsWith('.pdf');
 
+  Widget _editButton() {
+    return Positioned(
+      top: 6,
+      right: 6,
+      child: Material(
+        color: Colors.black.withOpacity(0.55),
+        shape: const CircleBorder(),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onEdit,
+          child: const Padding(
+            padding: EdgeInsets.all(6),
+            child: Icon(Icons.edit, size: 16, color: Colors.white),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isPdf) {
-      return Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-        decoration: BoxDecoration(
-          color: const Color(0xFFFEF2F2),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: const Color(0xFFFECACA)),
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.picture_as_pdf, color: Color(0xFFDC2626), size: 30),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(file.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 12.5,
-                          color: Color(0xFF1B2B48))),
-                  const SizedBox(height: 2),
-                  const Text('PDF document attached',
-                      style: TextStyle(fontSize: 10.5, color: Color(0xFFB91C1C))),
-                ],
-              ),
+      return Stack(
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFEF2F2),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFFFECACA)),
             ),
-          ],
-        ),
+            child: Row(
+              children: [
+                const Icon(Icons.picture_as_pdf, color: Color(0xFFDC2626), size: 30),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(file.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 12.5,
+                              color: Color(0xFF1B2B48))),
+                      const SizedBox(height: 2),
+                      const Text('PDF document attached',
+                          style: TextStyle(fontSize: 10.5, color: Color(0xFFB91C1C))),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (onEdit != null) _editButton(),
+        ],
       );
     }
     // Image evidence — camera/gallery XFiles have a real path on disk.
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(10),
-      child: Image.file(
-        File(file.path),
-        height: 120,
-        width: double.infinity,
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => Container(
-          height: 120,
-          alignment: Alignment.center,
-          color: const Color(0xFFF1F5F9),
-          child: const Icon(Icons.image_outlined, color: Color(0xFF94A3B8), size: 32),
+    return Stack(
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: Image.file(
+            File(file.path),
+            height: 120,
+            width: double.infinity,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => Container(
+              height: 120,
+              alignment: Alignment.center,
+              color: const Color(0xFFF1F5F9),
+              child: const Icon(Icons.image_outlined, color: Color(0xFF94A3B8), size: 32),
+            ),
+          ),
         ),
-      ),
+        if (onEdit != null) _editButton(),
+      ],
     );
   }
 }
@@ -1025,8 +998,12 @@ class _NoAnswerFormState extends State<NoAnswerForm> {
 }
 
 // 7. Unable To Commit
+// No next-action date/time picker — the system now decides the call-back
+// schedule automatically (server: customerService.js's 'Customer Refused'
+// branch + missedDeadlineService.sweepRefusedCycle's growing 2/3/4/5-day
+// cadence), not the salesperson.
 class UnableToCommitForm extends StatefulWidget {
-  final Function(String, String, DateTime) onSubmit;
+  final Function(String, String) onSubmit;
   const UnableToCommitForm({super.key, required this.onSubmit});
   @override
   State<UnableToCommitForm> createState() => _UnableToCommitFormState();
@@ -1035,38 +1012,19 @@ class UnableToCommitForm extends StatefulWidget {
 class _UnableToCommitFormState extends State<UnableToCommitForm> {
   String _reason = 'Cash flow problem';
   final _notesCtrl = TextEditingController();
-  DateTime? _selectedDate;
-  TimeOfDay? _selectedTime;
   String? _notesError;
-  String? _dateError;
 
   @override
   Widget build(BuildContext context) {
-    String dateStr = _selectedDate == null ? 'Next Action Date (Required)' : DateFormat('yyyy-MM-dd').format(_selectedDate!);
-    String timeStr = _selectedTime == null ? 'Next Action Time (Required)' : _selectedTime!.format(context);
-
     return BaseOutcomeForm(
       title: 'Unable To Commit',
       onSave: () {
-        setState(() {
-          _notesError = null;
-          _dateError = null;
-        });
-        bool hasError = false;
-
-        if (_selectedDate == null || _selectedTime == null) {
-          setState(() => _dateError = 'Please select the Next Action date and time');
-          hasError = true;
-        }
+        setState(() => _notesError = null);
         if (_reason == 'Other' && _notesCtrl.text.trim().isEmpty) {
           setState(() => _notesError = 'Notes required for "Other" reason');
-          hasError = true;
+          return false;
         }
-
-        if (hasError) return false;
-        final when = DateTime(_selectedDate!.year, _selectedDate!.month, _selectedDate!.day,
-            _selectedTime!.hour, _selectedTime!.minute);
-        widget.onSubmit(_reason, _notesCtrl.text.trim(), when);
+        widget.onSubmit(_reason, _notesCtrl.text.trim());
         return true;
       },
       child: Column(
@@ -1078,42 +1036,15 @@ class _UnableToCommitFormState extends State<UnableToCommitForm> {
             value: _reason,
             decoration: const InputDecoration(labelText: 'Structured Reason'),
             items: [
-              'Cash flow problem', 
-              'Owner unavailable', 
-              'Awaiting external funds', 
+              'Cash flow problem',
+              'Owner unavailable',
+              'Awaiting external funds',
               'Other'
             ].map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),
             onChanged: (v) => setState(() => _reason = v!),
           ),
           const SizedBox(height: 16),
-          TextField(controller: _notesCtrl, decoration: InputDecoration(labelText: 'Additional Notes', errorText: _notesError), maxLines: 2),
-          const SizedBox(height: 16),
-          Row(children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(foregroundColor: _selectedDate != null ? AppTheme.accentEmerald : null),
-                onPressed: () async {
-                  final d = await _pickDate(context);
-                  if (d != null) setState(() => _selectedDate = d);
-                },
-                icon: Icon(_selectedDate != null ? Icons.check : Icons.calendar_month, size: 18),
-                label: Text(dateStr, overflow: TextOverflow.ellipsis),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(foregroundColor: _selectedTime != null ? AppTheme.accentEmerald : null),
-                onPressed: () async {
-                  final t = await _pickTime(context);
-                  if (t != null) setState(() => _selectedTime = t);
-                },
-                icon: Icon(_selectedTime != null ? Icons.check : Icons.access_time, size: 18),
-                label: Text(timeStr, overflow: TextOverflow.ellipsis),
-              ),
-            ),
-          ]),
-          if (_dateError != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(_dateError!, style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12))),
+          VoiceTranslateField(controller: _notesCtrl, decoration: InputDecoration(labelText: 'Additional Notes', errorText: _notesError), maxLines: 2),
         ],
       ),
     );

@@ -26,7 +26,10 @@ function mapRow(raw, branchLabel = 'Turning Point') {
     lastReceiptDate: raw.LAST_RECEIPT_DATE ?? null,
     lastReceiptAmount: raw.LAST_RECEIPT_AMOUNT ?? null,
 
-    amountAlreadyDue: raw.AMOUNT_ALREADY_DUE ?? 0,
+    // The outer SELECT now surfaces AMOUNT_ALREADY_DUE_NET_OF_ADVANCE (an
+    // opening-credit-advance-netted figure), not the plain AMOUNT_ALREADY_DUE
+    // column — see customerReport.mssql.sql's header comment.
+    amountAlreadyDue: raw.AMOUNT_ALREADY_DUE_NET_OF_ADVANCE ?? 0,
     futureDueAmount: raw.FUTURE_DUE_AMOUNT ?? 0,
 
     age0_30: raw.AGE_0_30 ?? 0,

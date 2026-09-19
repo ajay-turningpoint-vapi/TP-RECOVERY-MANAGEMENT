@@ -28,7 +28,10 @@ async function add({ disputeId, authorId, authorName, authorRole, kind, body, at
 
 async function listForDispute(disputeId) {
   const rows = await query(
-    'SELECT * FROM dispute_messages WHERE dispute_id = :disputeId ORDER BY created_at ASC',
+    // `seq` (a real AUTO_INCREMENT), not created_at, is the ordering key —
+    // two messages posted in the same millisecond during a fast RE <->
+    // resolution-owner back-and-forth would otherwise sort arbitrarily.
+    'SELECT * FROM dispute_messages WHERE dispute_id = :disputeId ORDER BY seq ASC',
     { disputeId }
   );
   return rows.map(mapMessage);
@@ -36,7 +39,7 @@ async function listForDispute(disputeId) {
 
 /** All messages, grouped by dispute id — for the dispute list payload (avoids N+1). */
 async function listAllGrouped() {
-  const rows = await query('SELECT * FROM dispute_messages ORDER BY created_at ASC');
+  const rows = await query('SELECT * FROM dispute_messages ORDER BY seq ASC');
   const byDispute = {};
   for (const row of rows) {
     (byDispute[row.dispute_id] ||= []).push(mapMessage(row));

@@ -16,6 +16,14 @@ const getNext = asyncHandler(async (req, res) => {
   res.json(customer);
 });
 
+const getAuditHistory = asyncHandler(async (req, res) => {
+  const page = await customerService.getAuditHistoryPage(req.params.id, req.user, {
+    cursor: req.query.cursor,
+    limit: req.query.limit,
+  });
+  res.json(page);
+});
+
 const recordOutcome = asyncHandler(async (req, res) => {
   const customer = await customerService.recordOutcome(req.params.id, req.user, req.body);
   res.json(customer);
@@ -41,4 +49,4 @@ const assignInstruction = asyncHandler(async (req, res) => {
   res.json(customer);
 });
 
-module.exports = { list, getOne, getNext, recordOutcome, takeControl, releaseControl, reassign, assignInstruction };
+module.exports = { list, getOne, getNext, getAuditHistory, recordOutcome, takeControl, releaseControl, reassign, assignInstruction };

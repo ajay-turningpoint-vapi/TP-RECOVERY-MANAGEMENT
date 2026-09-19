@@ -94,8 +94,8 @@ class _CompanySearchScreenState extends State<CompanySearchScreen> {
                                         child: Column(
                                           crossAxisAlignment: CrossAxisAlignment.start,
                                           children: [
-                                            Text(c.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: _dark)),
-                                            Text('${c.branch} · ${store.salesmanDisplayName(c.assignedSalesmanId)}', style: const TextStyle(fontSize: 11, color: _muted)),
+                                            Text(c.name, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: _dark)),
+                                            Text('${c.branch} · ${store.salesmanDisplayName(c.assignedSalesmanId)}', overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, color: _muted)),
                                           ],
                                         ),
                                       ),

@@ -70,11 +70,17 @@ class Customer360Screen extends StatefulWidget {
 class _Customer360ScreenState extends State<Customer360Screen> {
   String? _selectedOutcome;
   bool _isLoading = true;
-  // History tab infinite scroll — a long-tenured customer can have
-  // hundreds of audit events; rendering them all at once used to build
-  // every row up front. Windowed the same way re_tasks_screen.dart's
-  // task list is, growing 20 at a time as the user nears the bottom.
-  int _visibleHistory = 20;
+  // History tab infinite scroll — a long-tenured customer can accumulate
+  // hundreds of audit events (every outcome, RE decision, and
+  // system-generated task writes one). Real server-side keyset pagination
+  // (GET /api/customers/:id/audit-history) fetches 20 at a time as the
+  // user nears the bottom, instead of the customer detail fetch (which
+  // still returns the full history for the Recovery Activities tab's
+  // calls/visits counters) downloading everything just to show a list.
+  final List<AuditEvent> _historyItems = [];
+  String? _historyCursor;
+  bool _historyHasMore = true;
+  bool _historyLoading = false;
 
   // Set when a Payment Timeline ageing bucket is tapped ('0-30' | '31-60' |
   // '61-90' | '90+'); filters the Invoices tab to invoices in that bucket.
@@ -99,7 +105,28 @@ class _Customer360ScreenState extends State<Customer360Screen> {
       if (mounted && widget.editOutcome) {
         _openEditRecordedOutcome();
       }
+      _loadMoreHistory();
     });
+  }
+
+  Future<void> _loadMoreHistory() async {
+    if (_historyLoading || !_historyHasMore) return;
+    setState(() => _historyLoading = true);
+    try {
+      final page = await context.read<AppStore>().fetchAuditHistoryPage(widget.customer.id, cursor: _historyCursor);
+      if (!mounted) return;
+      setState(() {
+        _historyItems.addAll(page.items);
+        _historyCursor = page.nextCursor;
+        _historyHasMore = page.nextCursor != null;
+      });
+    } catch (_) {
+      // A failed page fetch just leaves _historyHasMore as-is — the
+      // scroll-threshold trigger in _buildFullHistory will retry the next
+      // time the user scrolls near the bottom.
+    } finally {
+      if (mounted) setState(() => _historyLoading = false);
+    }
   }
 
   /// Resolves what outcome was recorded for this customer and opens the
@@ -2610,20 +2637,25 @@ class _Customer360ScreenState extends State<Customer360Screen> {
       }
     }
 
-    final visibleCount = _visibleHistory.clamp(0, items.length);
-    final shown = items.take(visibleCount).toList();
-    final hasMore = visibleCount < items.length;
+    // The scrollable feed itself is server-paginated (_historyItems,
+    // loaded via _loadMoreHistory) — `items`/`total` above stay sourced
+    // from the customer detail fetch's full auditHistory purely for the
+    // aggregate stat cards and the "History (N)" header count, which need
+    // a true total, not just what's been paged in so far.
+    final shown = _historyItems;
+    final hasMore = _historyHasMore;
 
     return NotificationListener<ScrollNotification>(
       onNotification: (notification) {
         if (hasMore &&
+            !_historyLoading &&
             notification.metrics.pixels >=
                 notification.metrics.maxScrollExtent - 300) {
           // Deferred to after this frame — scroll notifications fire
           // during layout/paint, and calling setState synchronously here
           // trips Flutter's "setState called during build" assertion.
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted) setState(() => _visibleHistory += 20);
+            if (mounted) _loadMoreHistory();
           });
         }
         return false;
@@ -2689,21 +2721,33 @@ class _Customer360ScreenState extends State<Customer360Screen> {
               ),
             ),
           ),
-          SliverPadding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            sliver: SliverList(
-              delegate: SliverChildBuilderDelegate(
-                (ctx, i) => _timelineEntry(
-                  color: _auditVisuals(shown[i].type).color,
-                  isFirst: i == 0,
-                  isLast: i == shown.length - 1 && !hasMore,
-                  child: _buildHistoryRow(shown[i]),
+          if (shown.isEmpty && _historyLoading)
+            const SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 32),
+                child: Center(
+                    child: SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF0052CC)))),
+              ),
+            )
+          else
+            SliverPadding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              sliver: SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  (ctx, i) => _timelineEntry(
+                    color: _auditVisuals(shown[i].type).color,
+                    isFirst: i == 0,
+                    isLast: i == shown.length - 1 && !hasMore,
+                    child: _buildHistoryRow(shown[i]),
+                  ),
+                  childCount: shown.length,
                 ),
-                childCount: shown.length,
               ),
             ),
-          ),
-          if (hasMore)
+          if (_historyLoading && shown.isNotEmpty)
             const SliverPadding(
               padding: EdgeInsets.symmetric(vertical: 16),
               sliver: SliverToBoxAdapter(
@@ -3021,12 +3065,16 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                 screenshot: file));
       case 'Unable / Refused':
         return UnableToCommitForm(
-            onSubmit: (reason, notes, nextActionDate) => _finish(
+            onSubmit: (reason, notes) => _finish(
                 context,
-                'Management Instruction',
+                // Was 'Management Instruction' — a name collision with the
+                // unrelated real RE/Manager-issued directive feature (see
+                // manager_management_attention_screen.dart), which made the
+                // NEXT ACTION card show that meaningless label instead of
+                // reflecting the call-back this outcome actually drives.
+                'Call Customer',
                 'Customer Refused',
-                'Reason: $reason Notes: $notes',
-                followUpAt: nextActionDate));
+                'Reason: $reason Notes: $notes'));
       case 'Internal Action':
         return InternalActionForm(
             onSubmit: (action, file) => _finish(context, 'Action Required',

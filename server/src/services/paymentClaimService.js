@@ -81,7 +81,7 @@ async function verify(claimId, user, success) {
   await driveRecoveryTask(claim.customerId, {
     headline,
     priority: success ? 'Normal' : 'High',
-    deadlineHour: 21,
+    deadlineHour: 18,
   });
 
   return paymentClaimRepository.findById(claimId);

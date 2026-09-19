@@ -449,7 +449,7 @@ class _ManagerPriorityAccountsScreenState extends State<ManagerPriorityAccountsS
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(c.name, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: kDark)),
-                        Text(c.branch, style: const TextStyle(fontSize: 9.5, color: kMuted)),
+                        Text(c.branch, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 9.5, color: kMuted)),
                       ],
                     ),
                   ),

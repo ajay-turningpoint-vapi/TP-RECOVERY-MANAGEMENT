@@ -7,6 +7,18 @@ import 'package:salesman_mobile/widgets/app_message.dart';
 
 final _rupee = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
 
+// Owner table columns — fixed widths (not Expanded/flex) so a long name
+// gets real room instead of being squeezed by the numeric columns; the
+// table scrolls horizontally when it doesn't fit instead of shrinking
+// everything down to illegible text.
+const double _ownerColName = 160;
+const double _ownerColBranch = 90;
+const double _ownerColAmounts = 110;
+const double _ownerColAchv = 60;
+const double _ownerColTrailing = 26;
+const double _ownerColGap = 10;
+const double _ownerTableWidth = _ownerColName + _ownerColBranch + _ownerColAmounts + _ownerColAchv + _ownerColTrailing + _ownerColGap * 4;
+
 /// Manager's Recovery Owner — View All: every salesman with a real
 /// target/received/achievement/overdue summary, derived from the shared
 /// store. View-only (no reassignment or instruction actions).
@@ -201,45 +213,66 @@ class _ManagerRecoveryOwnerScreenState extends State<ManagerRecoveryOwnerScreen>
   Widget _table(BuildContext context, List<Map<String, dynamic>> owners, double totalTarget, double totalReceived, double totalAchievement, double totalOverdue) {
     return InfoCard(
       children: [
-        const Row(
-          children: [
-            Expanded(flex: 4, child: Text('Owner Name / ID', style: TextStyle(fontSize: 9.5, color: kMuted, fontWeight: FontWeight.bold))),
-            Expanded(flex: 3, child: Text('Branch', style: TextStyle(fontSize: 9.5, color: kMuted, fontWeight: FontWeight.bold))),
-            Expanded(flex: 3, child: Text('Target/Received', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: kMuted, fontWeight: FontWeight.bold))),
-            Expanded(flex: 2, child: Text('Achv', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: kMuted, fontWeight: FontWeight.bold))),
-          ],
-        ),
-        const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Divider(height: 1, color: kBorder)),
-        if (owners.isEmpty)
-          const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Center(child: Text('No recovery owners match this search.', style: TextStyle(fontSize: 12, color: kMuted))))
-        else
-          ...owners.map((s) => _ownerRow(context, s)),
-        const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Divider(height: 1, color: kBorder)),
-        Row(
-          children: [
-            Expanded(
-              flex: 4,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Total', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: kNavy)),
-                  Text('${owners.length} Owners', style: const TextStyle(fontSize: 10, color: kMuted)),
-                ],
-              ),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: SizedBox(
+            width: _ownerTableWidth,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Row(
+                  children: [
+                    SizedBox(width: _ownerColName, child: Text('Owner Name / ID', style: TextStyle(fontSize: 9.5, color: kMuted, fontWeight: FontWeight.bold))),
+                    SizedBox(width: _ownerColGap),
+                    SizedBox(width: _ownerColBranch, child: Text('Branch', style: TextStyle(fontSize: 9.5, color: kMuted, fontWeight: FontWeight.bold))),
+                    SizedBox(width: _ownerColGap),
+                    SizedBox(width: _ownerColAmounts, child: Text('Target/Received', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: kMuted, fontWeight: FontWeight.bold))),
+                    SizedBox(width: _ownerColGap),
+                    SizedBox(width: _ownerColAchv, child: Text('Achv', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: kMuted, fontWeight: FontWeight.bold))),
+                    SizedBox(width: _ownerColGap),
+                    SizedBox(width: _ownerColTrailing),
+                  ],
+                ),
+                const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Divider(height: 1, color: kBorder)),
+                if (owners.isEmpty)
+                  const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Center(child: Text('No recovery owners match this search.', style: TextStyle(fontSize: 12, color: kMuted))))
+                else
+                  ...owners.map((s) => _ownerRow(context, s)),
+                const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Divider(height: 1, color: kBorder)),
+                Row(
+                  children: [
+                    SizedBox(
+                      width: _ownerColName,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Total', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: kNavy)),
+                          Text('${owners.length} Owners', style: const TextStyle(fontSize: 10, color: kMuted)),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: _ownerColGap),
+                    const SizedBox(width: _ownerColBranch),
+                    const SizedBox(width: _ownerColGap),
+                    SizedBox(
+                      width: _ownerColAmounts,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(_rupee.format(totalTarget), overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: kBlue)),
+                          Text(_rupee.format(totalReceived), overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: kGreen)),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: _ownerColGap),
+                    SizedBox(width: _ownerColAchv, child: Text('${totalAchievement.toStringAsFixed(2)}%', textAlign: TextAlign.right, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: kOrange))),
+                    const SizedBox(width: _ownerColGap),
+                    const SizedBox(width: _ownerColTrailing),
+                  ],
+                ),
+              ],
             ),
-            const Expanded(flex: 3, child: SizedBox()),
-            Expanded(
-              flex: 3,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  FittedBox(fit: BoxFit.scaleDown, child: Text(_rupee.format(totalTarget), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: kBlue))),
-                  FittedBox(fit: BoxFit.scaleDown, child: Text(_rupee.format(totalReceived), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: kGreen))),
-                ],
-              ),
-            ),
-            Expanded(flex: 2, child: Text('${totalAchievement.toStringAsFixed(2)}%', textAlign: TextAlign.right, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: kOrange))),
-          ],
+          ),
         ),
       ],
     );
@@ -261,8 +294,8 @@ class _ManagerRecoveryOwnerScreenState extends State<ManagerRecoveryOwnerScreen>
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(
-              flex: 4,
+            SizedBox(
+              width: _ownerColName,
               child: Row(
                 children: [
                   CircleAvatar(radius: 15, backgroundColor: avatarColorFor(name).withOpacity(0.15), child: Text(initialsFor(name), style: TextStyle(color: avatarColorFor(name), fontSize: 10.5, fontWeight: FontWeight.bold))),
@@ -284,20 +317,23 @@ class _ManagerRecoveryOwnerScreenState extends State<ManagerRecoveryOwnerScreen>
                 ],
               ),
             ),
-            Expanded(flex: 3, child: Text(branch, style: const TextStyle(fontSize: 11, color: kDark, fontWeight: FontWeight.w600))),
-            Expanded(
-              flex: 3,
+            const SizedBox(width: _ownerColGap),
+            SizedBox(width: _ownerColBranch, child: Text(branch, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, color: kDark, fontWeight: FontWeight.w600))),
+            const SizedBox(width: _ownerColGap),
+            SizedBox(
+              width: _ownerColAmounts,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  FittedBox(fit: BoxFit.scaleDown, child: Text(_rupee.format(target), style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: kDark))),
-                  FittedBox(fit: BoxFit.scaleDown, child: Text(_rupee.format(received), style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: kGreen))),
-                  Text('Overdue ${_rupee.format(overdue)}', style: const TextStyle(fontSize: 8.5, color: kRed)),
+                  Text(_rupee.format(target), overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: kDark)),
+                  Text(_rupee.format(received), overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: kGreen)),
+                  Text('Overdue ${_rupee.format(overdue)}', overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 8.5, color: kRed)),
                 ],
               ),
             ),
-            Expanded(
-              flex: 2,
+            const SizedBox(width: _ownerColGap),
+            SizedBox(
+              width: _ownerColAchv,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
@@ -307,8 +343,8 @@ class _ManagerRecoveryOwnerScreenState extends State<ManagerRecoveryOwnerScreen>
                 ],
               ),
             ),
-            const SizedBox(width: 2),
-            const Icon(Icons.chevron_right, size: 16, color: kMuted),
+            const SizedBox(width: _ownerColGap),
+            const SizedBox(width: _ownerColTrailing, child: Icon(Icons.chevron_right, size: 16, color: kMuted)),
           ],
         ),
       ),

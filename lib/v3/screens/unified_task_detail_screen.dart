@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:salesman_mobile/v2/stores/app_store.dart';
 import 'package:salesman_mobile/v2/models/customer.dart';
 import 'package:salesman_mobile/v2/models/task.dart';
@@ -10,6 +11,7 @@ import 'package:salesman_mobile/v2/screens/customer_360_screen.dart';
 import 'package:salesman_mobile/v3/screens/request_detail_scaffold.dart';
 import 'package:salesman_mobile/widgets/app_message.dart';
 import 'package:salesman_mobile/widgets/call_helper.dart';
+import 'package:salesman_mobile/services/attachment_picker.dart';
 
 final _rupee = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
 
@@ -230,6 +232,23 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
           actionOptions = [
             _ActionOption(Icons.edit_location_alt_outlined, kBlue, 'Update Customer Details', 'Correct contact number / address, then close this task.', () => _correctCustomerDetails(context, store, task!, customer)),
           ];
+        } else if (task.type == TaskType.customerCall && task.source == 'Missed Deadline') {
+          // The salesperson let their own auto-generated call task (due
+          // 6 PM) lapse — this RE task (due 8 PM) exists specifically to
+          // call THAT salesperson, not the customer.
+          actionOptions = [
+            _ActionOption(Icons.call_outlined, kBlue, 'Call Salesman', 'Find out why the scheduled call/visit was missed.', () => contactActions(context, store.salesmanPhone(customer.assignedSalesmanId))),
+            _ActionOption(Icons.check_circle_outline, kGreen, 'Mark Done', 'Close this task out.', () => _completeTask(context, store, task!)),
+          ];
+        } else if (task.type == TaskType.customerCall && task.source == 'Refused Cycle') {
+          // A Customer Refused case's 5-day non-response cadence just
+          // cycled again with nothing recorded — alerts the RE to call the
+          // salesperson. The salesperson's own reopening call task keeps
+          // running independently; this doesn't touch it.
+          actionOptions = [
+            _ActionOption(Icons.call_outlined, kBlue, 'Call Salesman', 'A 5-day non-response cycle passed on this Customer Refused case with nothing recorded.', () => contactActions(context, store.salesmanPhone(customer.assignedSalesmanId))),
+            _ActionOption(Icons.check_circle_outline, kGreen, 'Mark Done', 'Close this task out.', () => _completeTask(context, store, task!)),
+          ];
         } else if (task.type == TaskType.financialTeamFollowUp && task.source == 'Record Outcome' && task.status != TaskStatus.completed && task.status != TaskStatus.closed) {
           // An "Internal Action" outcome — a real Approve/Reject decision,
           // not just generic complete/reschedule. Whichever way RE
@@ -269,8 +288,10 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
         bannerIcon = Icons.description_outlined;
         final status = dispute['status'] as String;
         // Real server-side second-stage verification (disputeService.resolve)
-        // becomes available once RE has Approved the dispute.
-        final needsVerification = status == 'Approved';
+        // becomes available only once the resolution owner has submitted
+        // their work (status → Awaiting Verification), not as soon as the
+        // RE approves.
+        final needsVerification = status == 'Awaiting Verification';
         bannerText = needsVerification ? 'Resolution complete — verify against BUSY before closing.' : 'This dispute is awaiting your approval decision.';
         description = dispute['reason'];
         actionOptions = needsVerification
@@ -609,9 +630,18 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
   }
 
   Future<void> _completeTask(BuildContext context, AppStore store, AppTask t) async {
+    // A Physical Visit is a real in-person visit — the server rejects a
+    // bare completion with no photo, so ask for one up front rather than
+    // letting the salesman hit the generic error.
+    XFile? visitPhoto;
+    if (t.type == TaskType.physicalVisit) {
+      visitPhoto = await pickEvidenceFile(context);
+      if (visitPhoto == null) return; // salesman cancelled the picker — don't complete
+      if (!context.mounted) return;
+    }
     final navigator = Navigator.of(context);
     try {
-      await store.completeTask(t.id);
+      await store.completeTask(t.id, visitPhoto: visitPhoto);
       navigator.pop();
       showAppMessageAfter(navigator, message: t.type == TaskType.financialTeamFollowUp ? 'Task completed. Customer remains in recovery until financial exposure clears.' : 'Task marked completed.');
     } catch (e) {
@@ -901,7 +931,13 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
   void _clarifyDispute(BuildContext context, AppStore store, Map<String, dynamic> d) {
     String selectedSalesman = store.salesmen.isNotEmpty ? store.salesmen.first['name'] as String : '';
     final descController = TextEditingController();
-    DateTime deadline = DateTime.now().add(const Duration(days: 1));
+    // A clarification is needed now, so this must land in the salesperson's
+    // Today's Tasks, not tomorrow's — matches disputeService.js's own
+    // defaultCallDeadline() fallback (today, unless already past 9 PM).
+    final now = DateTime.now();
+    DateTime deadline = now.hour >= 21
+        ? DateTime(now.year, now.month, now.day + 1, 21)
+        : DateTime(now.year, now.month, now.day, 21);
     showDialog(
       context: context,
       builder: (dialogCtx) => StatefulBuilder(builder: (context, setState) {

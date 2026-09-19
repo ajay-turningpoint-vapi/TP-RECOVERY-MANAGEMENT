@@ -7,6 +7,24 @@ import 'package:salesman_mobile/widgets/app_message.dart';
 
 final _rupee = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
 
+// Team table columns — fixed widths (not Expanded/flex) so a long name
+// gets real room instead of being squeezed by the numeric columns; the
+// table scrolls horizontally when it doesn't fit instead of shrinking
+// everything down to illegible text (same pattern as
+// control_dashboard_screen.dart's Salesmen Performance table).
+const double _teamColSalesman = 160;
+const double _teamColBranch = 90;
+const double _teamColAmounts = 110;
+const double _teamColAchv = 60;
+const double _teamColTrailing = 26;
+const double _teamColGap = 10;
+const double _teamTableWidth = _teamColSalesman +
+    _teamColBranch +
+    _teamColAmounts +
+    _teamColAchv +
+    _teamColTrailing +
+    _teamColGap * 4;
+
 enum _TeamTab { performance, target, overdue, branch }
 
 /// Process compliance is judged purely on the salesman's own conduct —
@@ -348,48 +366,69 @@ class _ManagerTeamRecoveryScreenState extends State<ManagerTeamRecoveryScreen> {
   Widget _table(BuildContext context, List<Map<String, dynamic>> salesmen, double totalTarget, double totalReceived, double avgAchievement, double totalOverdue) {
     return InfoCard(
       children: [
-        const Row(
-          children: [
-            Expanded(flex: 4, child: Text('Salesman / Employee ID', style: TextStyle(fontSize: 9.5, color: kMuted, fontWeight: FontWeight.bold))),
-            Expanded(flex: 3, child: Text('Branch', style: TextStyle(fontSize: 9.5, color: kMuted, fontWeight: FontWeight.bold))),
-            Expanded(flex: 3, child: Text('Target/Received', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: kMuted, fontWeight: FontWeight.bold))),
-            Expanded(flex: 2, child: Text('Achv', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: kMuted, fontWeight: FontWeight.bold))),
-          ],
-        ),
-        const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Divider(height: 1, color: kBorder)),
-        if (salesmen.isEmpty)
-          const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Center(child: Text('No salesmen match this search.', style: TextStyle(fontSize: 12, color: kMuted))))
-        else
-          ...salesmen.map((s) => _salesmanRow(context, s)),
-        if (salesmen.isNotEmpty) ...[
-          const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Divider(height: 1, color: kBorder)),
-          Row(
-            children: [
-              Expanded(
-                flex: 4,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: SizedBox(
+            width: _teamTableWidth,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Row(
                   children: [
-                    const Text('Total / Avg.', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: kNavy)),
-                    Text('${salesmen.length} Salesman', style: const TextStyle(fontSize: 10, color: kMuted)),
+                    SizedBox(width: _teamColSalesman, child: Text('Salesman / Employee ID', style: TextStyle(fontSize: 9.5, color: kMuted, fontWeight: FontWeight.bold))),
+                    SizedBox(width: _teamColGap),
+                    SizedBox(width: _teamColBranch, child: Text('Branch', style: TextStyle(fontSize: 9.5, color: kMuted, fontWeight: FontWeight.bold))),
+                    SizedBox(width: _teamColGap),
+                    SizedBox(width: _teamColAmounts, child: Text('Target/Received', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: kMuted, fontWeight: FontWeight.bold))),
+                    SizedBox(width: _teamColGap),
+                    SizedBox(width: _teamColAchv, child: Text('Achv', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: kMuted, fontWeight: FontWeight.bold))),
+                    SizedBox(width: _teamColGap),
+                    SizedBox(width: _teamColTrailing),
                   ],
                 ),
-              ),
-              const Expanded(flex: 3, child: SizedBox()),
-              Expanded(
-                flex: 3,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    FittedBox(fit: BoxFit.scaleDown, child: Text(_rupee.format(totalTarget), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: kBlue))),
-                    FittedBox(fit: BoxFit.scaleDown, child: Text(_rupee.format(totalReceived), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: kGreen))),
-                  ],
-                ),
-              ),
-              Expanded(flex: 2, child: Text('${avgAchievement.toStringAsFixed(2)}%', textAlign: TextAlign.right, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: kOrange))),
-            ],
+                const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Divider(height: 1, color: kBorder)),
+                if (salesmen.isEmpty)
+                  const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Center(child: Text('No salesmen match this search.', style: TextStyle(fontSize: 12, color: kMuted))))
+                else
+                  ...salesmen.map((s) => _salesmanRow(context, s)),
+                if (salesmen.isNotEmpty) ...[
+                  const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Divider(height: 1, color: kBorder)),
+                  Row(
+                    children: [
+                      SizedBox(
+                        width: _teamColSalesman,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Total / Avg.', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: kNavy)),
+                            Text('${salesmen.length} Salesman', style: const TextStyle(fontSize: 10, color: kMuted)),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: _teamColGap),
+                      const SizedBox(width: _teamColBranch),
+                      const SizedBox(width: _teamColGap),
+                      SizedBox(
+                        width: _teamColAmounts,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text(_rupee.format(totalTarget), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: kBlue)),
+                            Text(_rupee.format(totalReceived), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: kGreen)),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: _teamColGap),
+                      SizedBox(width: _teamColAchv, child: Text('${avgAchievement.toStringAsFixed(2)}%', textAlign: TextAlign.right, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: kOrange))),
+                      const SizedBox(width: _teamColGap),
+                      const SizedBox(width: _teamColTrailing),
+                    ],
+                  ),
+                ],
+              ],
+            ),
           ),
-        ],
+        ),
       ],
     );
   }
@@ -410,8 +449,8 @@ class _ManagerTeamRecoveryScreenState extends State<ManagerTeamRecoveryScreen> {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(
-              flex: 4,
+            SizedBox(
+              width: _teamColSalesman,
               child: Row(
                 children: [
                   CircleAvatar(radius: 15, backgroundColor: avatarColorFor(name).withOpacity(0.15), child: Text(initialsFor(name), style: TextStyle(color: avatarColorFor(name), fontSize: 10.5, fontWeight: FontWeight.bold))),
@@ -421,27 +460,30 @@ class _ManagerTeamRecoveryScreenState extends State<ManagerTeamRecoveryScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(name, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: kDark)),
-                        Text(branch, style: const TextStyle(fontSize: 9.5, color: kMuted)),
+                        Text(branch, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 9.5, color: kMuted)),
                       ],
                     ),
                   ),
                 ],
               ),
             ),
-            Expanded(flex: 3, child: Text(branch, style: const TextStyle(fontSize: 11, color: kDark, fontWeight: FontWeight.w600))),
-            Expanded(
-              flex: 3,
+            const SizedBox(width: _teamColGap),
+            SizedBox(width: _teamColBranch, child: Text(branch, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, color: kDark, fontWeight: FontWeight.w600))),
+            const SizedBox(width: _teamColGap),
+            SizedBox(
+              width: _teamColAmounts,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  FittedBox(fit: BoxFit.scaleDown, child: Text(_rupee.format(target), style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: kDark))),
-                  FittedBox(fit: BoxFit.scaleDown, child: Text(_rupee.format(received), style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: kGreen))),
-                  Text('Overdue ${_rupee.format(overdue)}', style: const TextStyle(fontSize: 8.5, color: kRed)),
+                  Text(_rupee.format(target), overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: kDark)),
+                  Text(_rupee.format(received), overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: kGreen)),
+                  Text('Overdue ${_rupee.format(overdue)}', overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 8.5, color: kRed)),
                 ],
               ),
             ),
-            Expanded(
-              flex: 2,
+            const SizedBox(width: _teamColGap),
+            SizedBox(
+              width: _teamColAchv,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
@@ -454,8 +496,8 @@ class _ManagerTeamRecoveryScreenState extends State<ManagerTeamRecoveryScreen> {
                 ],
               ),
             ),
-            const SizedBox(width: 2),
-            const Icon(Icons.chevron_right, size: 16, color: kMuted),
+            const SizedBox(width: _teamColGap),
+            const SizedBox(width: _teamColTrailing, child: Icon(Icons.chevron_right, size: 16, color: kMuted)),
           ],
         ),
       ),

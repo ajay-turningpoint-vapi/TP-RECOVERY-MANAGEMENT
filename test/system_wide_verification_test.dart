@@ -11,16 +11,15 @@
 //     read by a *different* user than the one who triggered it
 //
 // Customer choice avoids known collisions with other integration test
-// files in this shared dev DB (see ptp_maturity_api_integration_test.dart's
-// header comment for the general pattern): C4 (Mahesh's customer) is the
-// only one of the 5 seed customers whose totalDue no other test file ever
-// changes, so it's used here for the one exact-delta assertion.
+// files in this shared dev DB: C4 (Mahesh's customer) is the only one of
+// the 5 seed customers whose totalDue no other test file ever changes.
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:salesman_mobile/v2/stores/app_store.dart';
 import 'package:salesman_mobile/v2/models/customer.dart';
 import 'package:salesman_mobile/v2/models/ptp.dart';
+import 'package:salesman_mobile/v2/models/task.dart';
 import 'package:salesman_mobile/v2/models/notification_item.dart';
 
 void main() {
@@ -113,8 +112,8 @@ void main() {
     });
   });
 
-  group('PTP scheduling + maturity engine — past and future promise dates', () {
-    test('a past-due and a future-due PTP on the same customer are both correctly scheduled and reconciled, and totalDue reflects the exact real amounts received', () async {
+  group('PTP scheduling engine — past and future promise dates', () {
+    test('a past-due and a future-due PTP on the same customer are both correctly scheduled, and neither creates a task or unlocks Record Outcome until BUSY verifies them', () async {
       final mahesh = AppStore();
       await mahesh.loginWithApi('mahesh', '1234');
 
@@ -135,25 +134,15 @@ void main() {
       expect(pastPtp.status, PtpStatus.scheduled);
       expect(futurePtp.status, PtpStatus.scheduled);
 
-      final re = AppStore();
-      await re.loginWithApi('amit.re', '1234');
-      final before = re.customers.firstWhere((c) => c.id == 'C4').totalDue;
-
-      await re.markPtpOutcome(pastPtp.id, 'kept', amountReceived: pastAmount);
-      await re.markPtpOutcome(futurePtp.id, 'partiallyKept', amountReceived: 30000);
-
-      final after = re.customers.firstWhere((c) => c.id == 'C4').totalDue;
-      expect(after, before - pastAmount - 30000, reason: 'both a past-scheduled and a future-scheduled PTP must genuinely reduce exposure by the real amount received, regardless of which direction the promise date pointed');
-
-      final reconciledPast = re.ptps.firstWhere((p) => p.id == pastPtp.id);
-      final reconciledFuture = re.ptps.firstWhere((p) => p.id == futurePtp.id);
-      expect(reconciledPast.status, PtpStatus.kept);
-      expect(reconciledPast.amountReceived, pastAmount);
-      expect(reconciledFuture.status, PtpStatus.partiallyKept);
-      expect(reconciledFuture.amountReceived, 30000);
-
-      final customer = re.customers.firstWhere((c) => c.id == 'C4');
-      expect(customer.auditHistory.where((e) => e.type == 'PTP_KEPT_PAYMENT_APPLIED' || e.type == 'PTP_PARTIALLY_KEPT_PAYMENT_APPLIED').length, greaterThanOrEqualTo(2), reason: 'both reconciliations must be genuinely recorded in the customer report/audit trail');
+      // There is no manual "mark outcome" path anymore — a PTP's
+      // kept/partiallyKept/broken outcome is decided exclusively by the
+      // automated BUSY verification job (server/src/services/
+      // ptpVerificationService.js), never by the client. Until that job
+      // runs, the customer must stay parked with no open recovery task.
+      final customer = mahesh.customers.firstWhere((c) => c.id == 'C4');
+      expect(customer.currentRecoveryState, 'Waiting / Monitoring', reason: 'recording a PTP must park the account and stay parked until BUSY verification, never unlock early');
+      final openRecoveryTasks = mahesh.tasks.where((t) => t.customerId == 'C4' && t.source == 'Recovery' && t.status != TaskStatus.completed);
+      expect(openRecoveryTasks, isEmpty, reason: 'no recovery task must be created for a freshly-recorded, unverified PTP');
     });
   });
 

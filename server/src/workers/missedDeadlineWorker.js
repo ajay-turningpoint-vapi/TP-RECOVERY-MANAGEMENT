@@ -3,7 +3,7 @@ const { connection } = require('../config/redis');
 const env = require('../config/env');
 const { ping: pingDb } = require('../config/db');
 const { QUEUE_NAME } = require('../queues/missedDeadlineQueue');
-const { sweepMissedDeadlines, sweepExpiredFollowUps, sweepNoAnswerCycle, sweepRESlaBreaches } = require('../services/missedDeadlineService');
+const { sweepMissedDeadlines, sweepNoAnswerCycle, sweepRESlaBreaches, sweepRefusedCycle } = require('../services/missedDeadlineService');
 const { beat } = require('../services/heartbeatService');
 const notificationRepository = require('../repositories/notificationRepository');
 const logger = require('../config/logger');
@@ -14,14 +14,12 @@ function createMissedDeadlineWorker() {
     async () => {
       await pingDb();
       const noAnswer = await sweepNoAnswerCycle();
-      // Roll expired "Will Confirm" tasks into a fresh call task BEFORE the
-      // missed-deadline sweep, so that sees the fresh task, not the stale one.
-      const rolled = await sweepExpiredFollowUps();
+      const refused = await sweepRefusedCycle();
       const result = await sweepMissedDeadlines();
       const reSla = await sweepRESlaBreaches();
       await beat('sweeps-2h');
-      logger.info('[missedDeadlineWorker] sweep complete', { ...noAnswer, ...rolled, ...result, ...reSla });
-      return { ...noAnswer, ...rolled, ...result, ...reSla };
+      logger.info('[missedDeadlineWorker] sweep complete', { ...noAnswer, ...refused, ...result, ...reSla });
+      return { ...noAnswer, ...refused, ...result, ...reSla };
     },
     { connection, prefix: env.redis.prefix, concurrency: 1 }
   );

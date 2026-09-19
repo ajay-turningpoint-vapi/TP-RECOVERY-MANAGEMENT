@@ -134,22 +134,27 @@ class _ReTeamTabState extends State<ReTeamTab> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Row(
-                        children: [
-                          CircleAvatar(
-                            backgroundColor: const Color(0xFFE3F2FD),
-                            child: Text(smName.isNotEmpty ? smName[0] : '?', style: const TextStyle(color: Color(0xFF0052CC), fontWeight: FontWeight.bold)),
-                          ),
-                          const SizedBox(width: 12),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(smName,
-                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF1B2B48))),
-                              const Text('Field Agent', style: TextStyle(fontSize: 11, color: Color(0xFF5A6B87))),
-                            ],
-                          ),
-                        ],
+                      Expanded(
+                        child: Row(
+                          children: [
+                            CircleAvatar(
+                              backgroundColor: const Color(0xFFE3F2FD),
+                              child: Text(smName.isNotEmpty ? smName[0] : '?', style: const TextStyle(color: Color(0xFF0052CC), fontWeight: FontWeight.bold)),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(smName,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF1B2B48))),
+                                  const Text('Field Agent', style: TextStyle(fontSize: 11, color: Color(0xFF5A6B87))),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                       if (isHighWorkload)
                         Container(

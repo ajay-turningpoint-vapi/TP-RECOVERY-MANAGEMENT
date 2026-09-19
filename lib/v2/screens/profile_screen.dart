@@ -3,6 +3,47 @@ import 'package:provider/provider.dart';
 import 'package:salesman_mobile/v2/stores/app_store.dart';
 import 'package:salesman_mobile/v2/widgets/recovery_score_breakdown.dart';
 import 'package:salesman_mobile/widgets/app_message.dart';
+import 'package:salesman_mobile/widgets/call_helper.dart';
+
+const String _supportPhoneNumber = '7227909850';
+
+// Real per-user photos, added one at a time as they're provided — keyed by
+// login username (lowercase). Everyone not in this map keeps the existing
+// initials-avatar header; there's no upload/storage feature behind this,
+// just bundled assets swapped in per username. A few names (e.g. Kanaiya,
+// Sagar) are the same real person's photo reused across their multiple
+// branch logins (kanaiya.claart + kanaiya, sagar.claart + sagar) — bare
+// first-name matches only; a username with a phone number baked into the
+// full name (e.g. "NILESH FURIA(...)", "VIRAG(...) -PORSHIVE") is a
+// disambiguated, presumably different person and gets its own entry only.
+const Map<String, String> _profilePhotos = {
+  'gopal': 'assets/images/gopal_profile.jpg',
+  'bharat': 'assets/images/bharat.jpg',
+  'bharat.fpnavsari': 'assets/images/bharat_fpnavsari.jpg',
+  'chandu': 'assets/images/chandu.jpg',
+  'chetan': 'assets/images/chetan.jpg',
+  'dhiraj': 'assets/images/dhiraj.jpg',
+  'durgesh.fpvapi': 'assets/images/durgesh.jpg',
+  'gautam': 'assets/images/gautam.jpg',
+  'jagdish': 'assets/images/jagdish.jpg',
+  'jignesh': 'assets/images/jignesh.jpg',
+  'jitendra': 'assets/images/jitendra.jpg',
+  'kamlesh.fpvapi': 'assets/images/kamlesh.jpg',
+  'kanaiya.claart': 'assets/images/kanaiya.jpg',
+  'kanaiya': 'assets/images/kanaiya.jpg',
+  'mahipal.fpnavsari': 'assets/images/mahipal.jpg',
+  'mangal.fpvapi': 'assets/images/mangal.jpg',
+  'narpat': 'assets/images/narpat.jpg',
+  'nilesh.furia': 'assets/images/nilesh_furia.jpg',
+  'patrakar': 'assets/images/patrakar.jpg',
+  'priyanshu.fpvapi': 'assets/images/priyanshu.jpg',
+  'rakesh.fpvapi': 'assets/images/rakesh.jpg',
+  'ravi': 'assets/images/ravi.jpg',
+  'sagar.claart': 'assets/images/sagar.jpg',
+  'sagar': 'assets/images/sagar.jpg',
+  'sumit.fpvapi': 'assets/images/sumit.jpg',
+  'virag.fpvapi': 'assets/images/virag.jpg',
+};
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
@@ -14,11 +55,19 @@ class ProfileScreen extends StatelessWidget {
     // Real identity from the logged-in session — no fabricated persona.
     // Matches manager_profile_screen.dart's approach.
     final name = store.currentUserFullName;
-    final initials = name.trim().split(RegExp(r'\s+')).map((p) => p.isEmpty ? '' : p[0]).take(2).join().toUpperCase();
+    final initials = name
+        .trim()
+        .split(RegExp(r'\s+'))
+        .map((p) => p.isEmpty ? '' : p[0])
+        .take(2)
+        .join()
+        .toUpperCase();
     final role = isRE ? 'Recovery Executive (RE)' : 'Salesperson';
     final portfolioSize = store.myCustomers.length;
+    final photoAsset = _profilePhotos[store.currentUsername.toLowerCase()];
 
-    final recoveryScore = isRE ? null : store.myRecoveryScoreComponents?['total']?.toInt();
+    final recoveryScore =
+        isRE ? null : store.myRecoveryScoreComponents?['total']?.toInt();
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8F9FB),
@@ -28,77 +77,96 @@ class ProfileScreen extends StatelessWidget {
         centerTitle: false,
         automaticallyImplyLeading: false,
         iconTheme: const IconThemeData(color: Colors.white),
-        title: Text(isRE ? 'RE Profile' : 'My Profile', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 20, color: Colors.white)),
+        title: Text(isRE ? 'RE Profile' : 'My Profile',
+            style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 20,
+                color: Colors.white)),
       ),
       body: CustomScrollView(
         slivers: [
           // ── Header ──────────────────────────────────────────────────────
           SliverToBoxAdapter(
-            child: Container(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [Color(0xFF0052CC), Color(0xFF1E3A8A)],
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                ),
-                borderRadius: BorderRadius.only(
-                  bottomLeft: Radius.circular(32),
-                  bottomRight: Radius.circular(32),
-                ),
-              ),
-              padding: const EdgeInsets.fromLTRB(16, 24, 16, 32),
-              child: Column(
-                children: [
-                  Stack(
-                    alignment: Alignment.bottomRight,
-                    children: [
-                      CircleAvatar(
-                        radius: 46,
-                        backgroundColor: Colors.white,
-                        child: CircleAvatar(
-                          radius: 43,
-                          backgroundColor: const Color(0xFFE3F2FD),
-                          child: Text(initials,
-                              style: const TextStyle(
-                                  fontSize: 30,
-                                  fontWeight: FontWeight.bold,
-                                  color: Color(0xFF0052CC))),
-                        ),
+            child: photoAsset != null
+                ? _PhotoHeader(
+                    photoAsset: photoAsset,
+                    name: name,
+                    role: role,
+                    isRE: isRE,
+                    portfolioSize: portfolioSize,
+                  )
+                : Container(
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [Color(0xFF0052CC), Color(0xFF1E3A8A)],
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
                       ),
-                      Container(
-                        padding: const EdgeInsets.all(4),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF4CAF50),
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 2),
-                        ),
-                        child: const Icon(Icons.check, size: 10, color: Colors.white),
+                      borderRadius: BorderRadius.only(
+                        bottomLeft: Radius.circular(32),
+                        bottomRight: Radius.circular(32),
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 14),
-                  Text(name,
-                      style: const TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white)),
-                  const SizedBox(height: 4),
-                  Text(role,
-                      style: const TextStyle(fontSize: 13, color: Colors.white70)),
-                  const SizedBox(height: 6),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.18),
-                      borderRadius: BorderRadius.circular(20),
                     ),
-                    child: Text(
-                        isRE ? 'Company-wide  ·  $portfolioSize Customers' : '$portfolioSize Customers in portfolio',
-                        style: const TextStyle(fontSize: 11, color: Colors.white)),
+                    padding: const EdgeInsets.fromLTRB(16, 24, 16, 32),
+                    child: Column(
+                      children: [
+                        Stack(
+                          alignment: Alignment.bottomRight,
+                          children: [
+                            CircleAvatar(
+                              radius: 46,
+                              backgroundColor: Colors.white,
+                              child: CircleAvatar(
+                                radius: 43,
+                                backgroundColor: const Color(0xFFE3F2FD),
+                                child: Text(initials,
+                                    style: const TextStyle(
+                                        fontSize: 30,
+                                        fontWeight: FontWeight.bold,
+                                        color: Color(0xFF0052CC))),
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.all(4),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF4CAF50),
+                                shape: BoxShape.circle,
+                                border:
+                                    Border.all(color: Colors.white, width: 2),
+                              ),
+                              child: const Icon(Icons.check,
+                                  size: 10, color: Colors.white),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 14),
+                        Text(name,
+                            style: const TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white)),
+                        const SizedBox(height: 4),
+                        Text(role,
+                            style: const TextStyle(
+                                fontSize: 13, color: Colors.white70)),
+                        const SizedBox(height: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.18),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                              isRE
+                                  ? 'Company-wide  ·  $portfolioSize Customers'
+                                  : '$portfolioSize Customers in portfolio',
+                              style: const TextStyle(
+                                  fontSize: 11, color: Colors.white)),
+                        ),
+                      ],
+                    ),
                   ),
-                ],
-              ),
-            ),
           ),
 
           const SliverToBoxAdapter(child: SizedBox(height: 20)),
@@ -110,7 +178,6 @@ class ProfileScreen extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-
                   // ── Recovery Score (salesperson only) ──────────────────────
                   if (recoveryScore != null) ...[
                     const _SectionTitle(title: 'Recovery Performance'),
@@ -128,21 +195,18 @@ class ProfileScreen extends StatelessWidget {
                   // persona regardless of who actually logged in).
                   const _SectionTitle(title: 'Account Details'),
                   const SizedBox(height: 12),
-                  _InfoTile(icon: Icons.badge_outlined, label: 'Login ID', value: store.currentUsername),
-                  _InfoTile(icon: Icons.work_outline, label: 'Role', value: role),
+                  _InfoTile(
+                      icon: Icons.badge_outlined,
+                      label: 'Login ID',
+                      value: store.currentUsername),
+                  _InfoTile(
+                      icon: Icons.work_outline, label: 'Role', value: role),
 
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 20),
 
                   // ── Actions ───────────────────────────────────────────────
                   const _SectionTitle(title: 'Settings'),
-                  const SizedBox(height: 12),
-                  _ActionTile(
-                    icon: Icons.notifications_outlined,
-                    iconColor: const Color(0xFF0052CC),
-                    iconBg: const Color(0xFFE3F2FD),
-                    label: 'Notification Preferences',
-                    onTap: () => _showComingSoon(context),
-                  ),
+                  const SizedBox(height: 8),
                   _ActionTile(
                     icon: Icons.lock_outline,
                     iconColor: const Color(0xFF8E24AA),
@@ -155,9 +219,9 @@ class ProfileScreen extends StatelessWidget {
                     iconColor: const Color(0xFFF57C00),
                     iconBg: const Color(0xFFFFF3E0),
                     label: 'Help & Support',
-                    onTap: () => _showComingSoon(context),
+                    onTap: () => contactActions(context, _supportPhoneNumber),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 8),
                   _ActionTile(
                     icon: Icons.logout,
                     iconColor: const Color(0xFFE53935),
@@ -166,7 +230,7 @@ class ProfileScreen extends StatelessWidget {
                     labelColor: const Color(0xFFE53935),
                     onTap: () => _confirmLogout(context, store),
                   ),
-                  const SizedBox(height: 40),
+                  const SizedBox(height: 24),
                 ],
               ),
             ),
@@ -174,10 +238,6 @@ class ProfileScreen extends StatelessWidget {
         ],
       ),
     );
-  }
-
-  void _showComingSoon(BuildContext context) {
-    showAppMessage(context, message: 'Coming soon');
   }
 
   void _showChangePassword(BuildContext context, AppStore store) {
@@ -207,12 +267,14 @@ class ProfileScreen extends StatelessWidget {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel', style: TextStyle(color: Color(0xFF5A6B87))),
+            child: const Text('Cancel',
+                style: TextStyle(color: Color(0xFF5A6B87))),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFFE53935),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
             ),
             onPressed: () {
               Navigator.pop(context);
@@ -228,6 +290,112 @@ class ProfileScreen extends StatelessWidget {
 
 // ── Sub-widgets ──────────────────────────────────────────────────────────────
 
+/// Full-bleed cover-photo header for a user in [_profilePhotos] — the
+/// actual photo fills the entire area the plain gradient header used to
+/// occupy, with a bottom scrim so the name/role/chip stay readable over
+/// whatever the photo looks like underneath.
+class _PhotoHeader extends StatelessWidget {
+  final String photoAsset;
+  final String name;
+  final String role;
+  final bool isRE;
+  final int portfolioSize;
+  const _PhotoHeader({
+    required this.photoAsset,
+    required this.name,
+    required this.role,
+    required this.isRE,
+    required this.portfolioSize,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: const BorderRadius.only(
+          bottomLeft: Radius.circular(32), bottomRight: Radius.circular(32)),
+      child: SizedBox(
+        height: 380,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Image.asset(photoAsset,
+                fit: BoxFit.cover, alignment: Alignment.topCenter),
+            const DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.transparent,
+                    Colors.transparent,
+                    Color(0xCC0B1B3A)
+                  ],
+                  stops: [0.0, 0.45, 1.0],
+                ),
+              ),
+            ),
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: 20,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(name,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                                shadows: [
+                                  Shadow(color: Colors.black45, blurRadius: 6)
+                                ])),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.all(3),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF4CAF50),
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 1.5),
+                        ),
+                        child: const Icon(Icons.check,
+                            size: 9, color: Colors.white),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(role,
+                      style:
+                          const TextStyle(fontSize: 13, color: Colors.white70)),
+                  const SizedBox(height: 6),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.22),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                        isRE
+                            ? 'Company-wide  ·  $portfolioSize Customers'
+                            : '$portfolioSize Customers in portfolio',
+                        style:
+                            const TextStyle(fontSize: 11, color: Colors.white)),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _SectionTitle extends StatelessWidget {
   final String title;
   const _SectionTitle({required this.title});
@@ -236,11 +404,11 @@ class _SectionTitle extends StatelessWidget {
   Widget build(BuildContext context) => Text(
         title,
         style: const TextStyle(
-            fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF1B2B48)),
+            fontWeight: FontWeight.bold,
+            fontSize: 16,
+            color: Color(0xFF1B2B48)),
       );
 }
-
-
 
 String _scoreBand(int score) {
   if (score >= 80) return 'Excellent';
@@ -291,23 +459,39 @@ class _RecoveryScoreCard extends StatelessWidget {
               width: 56,
               height: 56,
               alignment: Alignment.center,
-              decoration: BoxDecoration(color: color.withOpacity(0.12), shape: BoxShape.circle),
-              child: Text('$score%', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: color)),
+              decoration: BoxDecoration(
+                  color: color.withOpacity(0.12), shape: BoxShape.circle),
+              child: Text('$score%',
+                  style: TextStyle(
+                      fontSize: 15, fontWeight: FontWeight.w900, color: color)),
             ),
             const SizedBox(width: 14),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Recovery Score', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF1B2B48))),
+                  const Text('Recovery Score',
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                          color: Color(0xFF1B2B48))),
                   const SizedBox(height: 3),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(6)),
-                    child: Text(band, style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: color)),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                        color: color.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(6)),
+                    child: Text(band,
+                        style: TextStyle(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.bold,
+                            color: color)),
                   ),
                   const SizedBox(height: 4),
-                  const Text('Tap to see what makes up your score', style: TextStyle(fontSize: 10.5, color: Color(0xFF5A6B87))),
+                  const Text('Tap to see what makes up your score',
+                      style:
+                          TextStyle(fontSize: 10.5, color: Color(0xFF5A6B87))),
                 ],
               ),
             ),
@@ -324,7 +508,8 @@ class _InfoTile extends StatelessWidget {
   final String label;
   final String value;
 
-  const _InfoTile({required this.icon, required this.label, required this.value});
+  const _InfoTile(
+      {required this.icon, required this.label, required this.value});
 
   @override
   Widget build(BuildContext context) => Container(
@@ -339,11 +524,14 @@ class _InfoTile extends StatelessWidget {
           children: [
             Icon(icon, size: 18, color: const Color(0xFF0052CC)),
             const SizedBox(width: 12),
-            Text('$label: ', style: const TextStyle(fontSize: 12, color: Color(0xFF5A6B87))),
+            Text('$label: ',
+                style: const TextStyle(fontSize: 12, color: Color(0xFF5A6B87))),
             Expanded(
               child: Text(value,
                   style: const TextStyle(
-                      fontSize: 12, color: Color(0xFF1B2B48), fontWeight: FontWeight.w600),
+                      fontSize: 12,
+                      color: Color(0xFF1B2B48),
+                      fontWeight: FontWeight.w600),
                   overflow: TextOverflow.ellipsis),
             ),
           ],
@@ -370,23 +558,29 @@ class _ActionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        margin: const EdgeInsets.only(bottom: 8),
+        margin: const EdgeInsets.only(bottom: 6),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: Colors.grey.withOpacity(0.15)),
         ),
         child: ListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+          dense: true,
+          visualDensity: const VisualDensity(horizontal: 0, vertical: -4),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 14, vertical: 0),
           leading: Container(
-            padding: const EdgeInsets.all(8),
+            padding: const EdgeInsets.all(6),
             decoration: BoxDecoration(color: iconBg, shape: BoxShape.circle),
-            child: Icon(icon, color: iconColor, size: 18),
+            child: Icon(icon, color: iconColor, size: 16),
           ),
           title: Text(label,
               style: TextStyle(
-                  fontWeight: FontWeight.w600, fontSize: 14, color: labelColor)),
-          trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: Color(0xFFA0AEC0)),
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13.5,
+                  color: labelColor)),
+          trailing: const Icon(Icons.arrow_forward_ios,
+              size: 13, color: Color(0xFFA0AEC0)),
           onTap: onTap,
         ),
       );
@@ -446,7 +640,8 @@ class _ChangePasswordSheetState extends State<_ChangePasswordSheet> {
     if (!mounted) return;
     if (result == null) {
       navigator.pop();
-      showAppMessageAfter(navigator, message: 'Your password has been updated.');
+      showAppMessageAfter(navigator,
+          message: 'Your password has been updated.');
       return;
     }
     setState(() {

@@ -68,7 +68,10 @@ class MoreMenuScreen extends StatelessWidget {
                         child: Icon(m.icon, color: m.color, size: 22),
                       ),
                       const SizedBox(height: 8),
-                      Text(m.label, textAlign: TextAlign.center, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _dark)),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: Text(m.label, textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _dark)),
+                      ),
                     ],
                   ),
                   if (m.badge > 0)

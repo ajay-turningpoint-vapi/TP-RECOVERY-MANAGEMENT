@@ -12,6 +12,17 @@ import 'package:salesman_mobile/widgets/app_message.dart';
 final _rupee = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
 String _crore(double v) => '${(v / 10000000).toStringAsFixed(2)} Cr';
 
+// Branch table columns — fixed widths (not Expanded/flex) so a branch name
+// gets real room instead of being squeezed by the currency columns; the
+// table scrolls horizontally when it doesn't fit instead of shrinking
+// everything down to illegible text.
+const double _evaColBranch = 110;
+const double _evaColExpected = 100;
+const double _evaColActual = 100;
+const double _evaColAchv = 70;
+const double _evaColGap = 10;
+const double _evaTableWidth = _evaColBranch + _evaColExpected + _evaColActual + _evaColAchv + _evaColGap * 3;
+
 /// Manager's Expected vs Actual Collection report — company/branch/customer
 /// level comparison of what was promised (PTP-derived expected) against
 /// what was actually collected, all derived live from the real store.
@@ -431,43 +442,63 @@ class _ManagerExpectedVsActualScreenState extends State<ManagerExpectedVsActualS
           ],
         ),
         const SizedBox(height: 12),
-        const Row(
-          children: [
-            Expanded(flex: 3, child: Text('Branch', style: TextStyle(fontSize: 9.5, color: kMuted, fontWeight: FontWeight.bold))),
-            Expanded(flex: 3, child: Text('Expected (₹)', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: kMuted, fontWeight: FontWeight.bold))),
-            Expanded(flex: 3, child: Text('Actual (₹)', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: kMuted, fontWeight: FontWeight.bold))),
-            Expanded(flex: 3, child: Text('Achv %', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: kMuted, fontWeight: FontWeight.bold))),
-          ],
-        ),
-        const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Divider(height: 1, color: kBorder)),
-        ...rows.map((r) => Padding(
-              padding: const EdgeInsets.symmetric(vertical: 7),
-              child: Row(
-                children: [
-                  Expanded(flex: 3, child: Text(r.branch, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: kDark))),
-                  Expanded(flex: 3, child: FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerRight, child: Text(_rupee.format(r.expected), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: kBlue)))),
-                  Expanded(flex: 3, child: FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerRight, child: Text(_rupee.format(r.actual), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: kGreen)))),
-                  Expanded(
-                    flex: 3,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text('${r.achievement.toStringAsFixed(2)}%', style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: kDark)),
-                        ClipRRect(borderRadius: BorderRadius.circular(4), child: SizedBox(width: 60, child: LinearProgressIndicator(value: (r.achievement / 100).clamp(0, 1).toDouble(), minHeight: 4, backgroundColor: kBorder, valueColor: AlwaysStoppedAnimation<Color>(r.achievement >= 60 ? kGreen : (r.achievement >= 35 ? kOrange : kRed))))),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            )),
-        const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Divider(height: 1, color: kBorder)),
-        Row(
-          children: [
-            const Expanded(flex: 3, child: Text('Total', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: kNavy))),
-            Expanded(flex: 3, child: FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerRight, child: Text(_rupee.format(totalExpected), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: kBlue)))),
-            Expanded(flex: 3, child: FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerRight, child: Text(_rupee.format(totalActual), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: kGreen)))),
-            Expanded(flex: 3, child: Text('${totalAchievement.toStringAsFixed(1)}%', textAlign: TextAlign.right, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: kOrange))),
-          ],
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: SizedBox(
+            width: _evaTableWidth,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Row(
+                  children: [
+                    SizedBox(width: _evaColBranch, child: Text('Branch', style: TextStyle(fontSize: 9.5, color: kMuted, fontWeight: FontWeight.bold))),
+                    SizedBox(width: _evaColGap),
+                    SizedBox(width: _evaColExpected, child: Text('Expected (₹)', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: kMuted, fontWeight: FontWeight.bold))),
+                    SizedBox(width: _evaColGap),
+                    SizedBox(width: _evaColActual, child: Text('Actual (₹)', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: kMuted, fontWeight: FontWeight.bold))),
+                    SizedBox(width: _evaColGap),
+                    SizedBox(width: _evaColAchv, child: Text('Achv %', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: kMuted, fontWeight: FontWeight.bold))),
+                  ],
+                ),
+                const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Divider(height: 1, color: kBorder)),
+                ...rows.map((r) => Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 7),
+                      child: Row(
+                        children: [
+                          SizedBox(width: _evaColBranch, child: Text(r.branch, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: kDark))),
+                          const SizedBox(width: _evaColGap),
+                          SizedBox(width: _evaColExpected, child: Text(_rupee.format(r.expected), textAlign: TextAlign.right, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: kBlue))),
+                          const SizedBox(width: _evaColGap),
+                          SizedBox(width: _evaColActual, child: Text(_rupee.format(r.actual), textAlign: TextAlign.right, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: kGreen))),
+                          const SizedBox(width: _evaColGap),
+                          SizedBox(
+                            width: _evaColAchv,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Text('${r.achievement.toStringAsFixed(2)}%', style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: kDark)),
+                                ClipRRect(borderRadius: BorderRadius.circular(4), child: SizedBox(width: 60, child: LinearProgressIndicator(value: (r.achievement / 100).clamp(0, 1).toDouble(), minHeight: 4, backgroundColor: kBorder, valueColor: AlwaysStoppedAnimation<Color>(r.achievement >= 60 ? kGreen : (r.achievement >= 35 ? kOrange : kRed))))),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    )),
+                const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Divider(height: 1, color: kBorder)),
+                Row(
+                  children: [
+                    const SizedBox(width: _evaColBranch, child: Text('Total', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: kNavy))),
+                    const SizedBox(width: _evaColGap),
+                    SizedBox(width: _evaColExpected, child: Text(_rupee.format(totalExpected), textAlign: TextAlign.right, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: kBlue))),
+                    const SizedBox(width: _evaColGap),
+                    SizedBox(width: _evaColActual, child: Text(_rupee.format(totalActual), textAlign: TextAlign.right, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: kGreen))),
+                    const SizedBox(width: _evaColGap),
+                    SizedBox(width: _evaColAchv, child: Text('${totalAchievement.toStringAsFixed(1)}%', textAlign: TextAlign.right, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: kOrange))),
+                  ],
+                ),
+              ],
+            ),
+          ),
         ),
       ],
     );

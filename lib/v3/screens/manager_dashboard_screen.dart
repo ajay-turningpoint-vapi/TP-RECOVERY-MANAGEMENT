@@ -26,6 +26,25 @@ const _purple = Color(0xFF9333EA);
 final _rupee = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
 String _lakh(double v) => '₹${(v / 100000).toStringAsFixed(2)}L';
 
+// Sales Team Performance table columns — fixed widths (not Expanded/flex)
+// so a salesman name gets real room instead of being squeezed by the
+// numeric columns; scrolls horizontally when it doesn't fit instead of
+// shrinking everything down to illegible text.
+const double _perfColName = 120;
+const double _perfColTarget = 90;
+const double _perfColCollected = 90;
+const double _perfColAchv = 55;
+const double _perfColScore = 70;
+const double _perfColGap = 8;
+const double _perfTableWidth = _perfColName + _perfColTarget + _perfColCollected + _perfColAchv + _perfColScore + _perfColGap * 4;
+
+// Top 5 Overdue Customers table columns — same reasoning.
+const double _overdueColName = 150;
+const double _overdueColAmount = 100;
+const double _overdueColDays = 50;
+const double _overdueColGap = 10;
+const double _overdueTableWidth = _overdueColName + _overdueColAmount + _overdueColDays + _overdueColGap * 2;
+
 class ManagerDashboardScreen extends StatefulWidget {
   final void Function(int) onNavigate;
   const ManagerDashboardScreen({super.key, required this.onNavigate});
@@ -167,7 +186,7 @@ class _ManagerDashboardScreenState extends State<ManagerDashboardScreen> {
   // -------------------------------------------------------------------
   Widget _buildStatCards(BuildContext context, AppStore store) {
     final cards = [
-      _StatCardData(Icons.currency_rupee, _blue, 'Total Outstanding', _rupee.format(store.totalOverdueAmount), 'From ${store.totalOverdueCustomerCount} Customers',
+      _StatCardData(Icons.currency_rupee, _blue, 'Total Outstanding', _rupee.format(store.teamTotalOutstanding), 'From ${store.visibleCustomers.length} Customers',
           onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CompanyRecoveryQueueScreen()))),
       _StatCardData(Icons.fact_check_outlined, _green, 'Amount Collected Today', _rupee.format(store.todaysCollectedAmount), 'From ${store.todaysCollectedCustomerCount} Customers',
           onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ManagerDailyRecoverySummaryScreen()))),
@@ -516,17 +535,32 @@ class _ManagerDashboardScreenState extends State<ManagerDashboardScreen> {
           if (all.isEmpty)
             const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Text('No salesmen match this filter.', style: TextStyle(fontSize: 12, color: _muted)))
           else ...[
-            const Row(
-              children: [
-                Expanded(flex: 3, child: Text('Salesman', style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
-                Expanded(flex: 3, child: Text('Target (₹)', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
-                Expanded(flex: 3, child: Text('Collected (₹)', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
-                Expanded(flex: 2, child: Text('Achv %', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
-                Expanded(flex: 2, child: Text('Score', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
-              ],
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: SizedBox(
+                width: _perfTableWidth,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        SizedBox(width: _perfColName, child: Text('Salesman', style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
+                        SizedBox(width: _perfColGap),
+                        SizedBox(width: _perfColTarget, child: Text('Target (₹)', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
+                        SizedBox(width: _perfColGap),
+                        SizedBox(width: _perfColCollected, child: Text('Collected (₹)', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
+                        SizedBox(width: _perfColGap),
+                        SizedBox(width: _perfColAchv, child: Text('Achv %', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
+                        SizedBox(width: _perfColGap),
+                        SizedBox(width: _perfColScore, child: Text('Score', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
+                      ],
+                    ),
+                    const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Divider(height: 1, color: _border)),
+                    ...visible.map((s) => _performanceRow(s)),
+                  ],
+                ),
+              ),
             ),
-            const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Divider(height: 1, color: _border)),
-            ...visible.map((s) => _performanceRow(s)),
             const SizedBox(height: 4),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -557,18 +591,22 @@ class _ManagerDashboardScreenState extends State<ManagerDashboardScreen> {
       padding: const EdgeInsets.symmetric(vertical: 7),
       child: Row(
         children: [
-          Expanded(flex: 3, child: Text(name, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: _dark))),
-          Expanded(flex: 3, child: FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerRight, child: Text(_rupee.format(target), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _dark)))),
-          Expanded(flex: 3, child: FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerRight, child: Text(_rupee.format(collected), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _green)))),
-          Expanded(flex: 2, child: Text('$achieved%', textAlign: TextAlign.right, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _dark))),
-          Expanded(
-            flex: 2,
+          SizedBox(width: _perfColName, child: Text(name, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: _dark))),
+          const SizedBox(width: _perfColGap),
+          SizedBox(width: _perfColTarget, child: Text(_rupee.format(target), textAlign: TextAlign.right, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _dark))),
+          const SizedBox(width: _perfColGap),
+          SizedBox(width: _perfColCollected, child: Text(_rupee.format(collected), textAlign: TextAlign.right, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _green))),
+          const SizedBox(width: _perfColGap),
+          SizedBox(width: _perfColAchv, child: Text('$achieved%', textAlign: TextAlign.right, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _dark))),
+          const SizedBox(width: _perfColGap),
+          SizedBox(
+            width: _perfColScore,
             child: Align(
               alignment: Alignment.centerRight,
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(color: scoreColor.withOpacity(0.12), borderRadius: BorderRadius.circular(20)),
-                child: Text(scoreLabel, style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: scoreColor)),
+                child: Text(scoreLabel, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: scoreColor)),
               ),
             ),
           ),
@@ -589,34 +627,50 @@ class _ManagerDashboardScreenState extends State<ManagerDashboardScreen> {
         children: [
           if (customers.isEmpty)
             const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Text('No overdue customers in this view.', style: TextStyle(fontSize: 12, color: _muted)))
-          else ...[
-            const Row(
-              children: [
-                Expanded(flex: 4, child: Text('Customer', style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
-                Expanded(flex: 3, child: Text('Overdue (₹)', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
-                Expanded(flex: 2, child: Text('Days', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
-              ],
+          else
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: SizedBox(
+                width: _overdueTableWidth,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        SizedBox(width: _overdueColName, child: Text('Customer', style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
+                        SizedBox(width: _overdueColGap),
+                        SizedBox(width: _overdueColAmount, child: Text('Overdue (₹)', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
+                        SizedBox(width: _overdueColGap),
+                        SizedBox(width: _overdueColDays, child: Text('Days', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
+                      ],
+                    ),
+                    const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Divider(height: 1, color: _border)),
+                    ...customers.map((c) => Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          child: Row(
+                            children: [
+                              SizedBox(width: _overdueColName, child: Text(c.name, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: _dark))),
+                              const SizedBox(width: _overdueColGap),
+                              SizedBox(width: _overdueColAmount, child: Text(_rupee.format(c.totalDue), textAlign: TextAlign.right, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _red))),
+                              const SizedBox(width: _overdueColGap),
+                              SizedBox(width: _overdueColDays, child: Text('${c.oldestOverdueDays}d', textAlign: TextAlign.right, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _dark))),
+                            ],
+                          ),
+                        )),
+                    const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Divider(height: 1, color: _border)),
+                    Row(
+                      children: [
+                        const SizedBox(width: _overdueColName, child: Text('Total', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: _dark))),
+                        const SizedBox(width: _overdueColGap),
+                        SizedBox(width: _overdueColAmount, child: Text(_rupee.format(customers.fold(0.0, (s, c) => s + c.totalDue)), textAlign: TextAlign.right, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: _dark))),
+                        const SizedBox(width: _overdueColGap),
+                        const SizedBox(width: _overdueColDays),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
             ),
-            const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Divider(height: 1, color: _border)),
-            ...customers.map((c) => Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 6),
-                  child: Row(
-                    children: [
-                      Expanded(flex: 4, child: Text(c.name, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: _dark))),
-                      Expanded(flex: 3, child: FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerRight, child: Text(_rupee.format(c.totalDue), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _red)))),
-                      Expanded(flex: 2, child: Text('${c.oldestOverdueDays}d', textAlign: TextAlign.right, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _dark))),
-                    ],
-                  ),
-                )),
-            const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Divider(height: 1, color: _border)),
-            Row(
-              children: [
-                const Expanded(flex: 4, child: Text('Total', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: _dark))),
-                Expanded(flex: 3, child: FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerRight, child: Text(_rupee.format(customers.fold(0.0, (s, c) => s + c.totalDue)), style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: _dark)))),
-                const Expanded(flex: 2, child: SizedBox()),
-              ],
-            ),
-          ],
         ],
       ),
     );

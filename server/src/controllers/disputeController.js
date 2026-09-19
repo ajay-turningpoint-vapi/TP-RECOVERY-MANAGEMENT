@@ -15,5 +15,8 @@ const postMessage = asyncHandler(async (req, res) =>
 const resolveByOwner = asyncHandler(async (req, res) =>
   res.json(await disputeService.resolveByOwner(req.params.id, req.user, req.body))
 );
+const rejectByOwner = asyncHandler(async (req, res) =>
+  res.json(await disputeService.rejectByOwner(req.params.id, req.user, req.body))
+);
 
-module.exports = { list, approve, reject, requestInfo, resolve, answerClarification, postMessage, resolveByOwner };
+module.exports = { list, approve, reject, requestInfo, resolve, answerClarification, postMessage, resolveByOwner, rejectByOwner };

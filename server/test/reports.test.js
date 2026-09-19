@@ -4,6 +4,7 @@ const { startTestApp, login, authHeaders } = require('./helpers/app');
 const { resetDb } = require('./helpers/db');
 const { teardownAll } = require('./helpers/teardown');
 const { runSnapshot } = require('../src/workers/snapshotWorker');
+const { promoteDuePtps, finalizeDuePtps } = require('../src/services/ptpVerificationService');
 
 let app;
 
@@ -39,22 +40,27 @@ test('RE/Management see the real company-wide aggregates, ageing buckets, and PT
   assert.equal(data.topOverdueCustomers[0].id, 'C4', 'Metro Motors (₹750000) is the single largest overdue account in the seed');
 });
 
-test('a real action that matures a PTP genuinely moves the dashboard numbers on the next fetch', async () => {
-  const salesperson = await login(app.baseUrl, 'mahesh');
+test('a real BUSY-verified PTP outcome genuinely moves the ptpOverviewStats on the next fetch — but never totalOverdueAmount, which stays BUSY sync\'s job alone', async () => {
   const re = await login(app.baseUrl, 'amit.re');
 
   const before1 = await fetch(`${app.baseUrl}/api/reports/dashboard`, { headers: authHeaders(re) }).then((r) => r.json());
 
-  await fetch(`${app.baseUrl}/api/ptps/P5/mark-outcome`, {
-    method: 'POST',
-    headers: authHeaders(re),
-    body: JSON.stringify({ outcome: 'kept', amountReceived: 60000 }),
-  });
+  // P5 (seed: C5, ₹60,000, due 2026-08-31 — well past due) matures via the
+  // real automated path, not a manual RE mark — there is no manual path
+  // anymore. Mock BUSY reporting the full promised amount received.
+  await promoteDuePtps();
+  // getReceiptTotals is called once per (branch, date-window) — not once
+  // per customer — and returns every customer's receipts in that window;
+  // the caller matches by customerId itself. Always include C5's receipt.
+  await finalizeDuePtps(async () => [{ customerId: 'C5', totalAmount: 60000 }]);
 
   const after1 = await fetch(`${app.baseUrl}/api/reports/dashboard`, { headers: authHeaders(re) }).then((r) => r.json());
-  assert.equal(after1.totalOverdueAmount, before1.totalOverdueAmount - 60000);
-  assert.ok(after1.totalReceivedAllTime >= before1.totalReceivedAllTime + 60000);
-  void salesperson;
+  assert.equal(after1.ptpOverviewStats.keptCount, before1.ptpOverviewStats.keptCount + 1, 'the verified PTP must show up as kept');
+  assert.equal(after1.ptpOverviewStats.keptAmount, before1.ptpOverviewStats.keptAmount + 60000);
+  // Deliberate: PTP verification never moves totalDue itself (moveBalance:
+  // false) — BUSY's own daily sync is the sole source of truth for balance,
+  // so double-counting a receipt already reflected there is impossible.
+  assert.equal(after1.totalOverdueAmount, before1.totalOverdueAmount, 'PTP verification alone must never move totalOverdueAmount — only the BUSY sync does');
 });
 
 test('a salesperson cannot see disputes/salesmen roster data folded into another role\'s dashboard view', async () => {

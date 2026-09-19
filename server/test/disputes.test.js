@@ -42,18 +42,19 @@ test('approving a dispute assigns a resolution owner and creates a real task', a
     method: 'POST',
     headers: authHeaders(token),
     body: JSON.stringify({
-      resolutionOwner: 'ramesh-re',
+      resolutionOwner: 'rahul',
       deadline: new Date(Date.now() + 2 * 86400000).toISOString(),
       description: 'Verify damaged goods claim with warehouse',
+      note: 'Please check with the warehouse team',
     }),
   });
   assert.equal(res.status, 200);
   const dispute = await res.json();
   assert.equal(dispute.status, 'Approved');
-  assert.equal(dispute.resolutionOwner, 'ramesh-re');
+  assert.equal(dispute.resolutionOwner, 'rahul');
 
   const tasks = await fetch(`${app.baseUrl}/api/tasks`, { headers: authHeaders(token) }).then((r) => r.json());
-  assert.ok(tasks.some((t) => t.customerId === 'C5' && t.ownerId === 'ramesh-re' && t.source === 'Dispute Review'));
+  assert.ok(tasks.some((t) => t.customerId === 'C5' && t.ownerId === 'rahul' && t.source === 'Dispute Review'));
 
   // Approving does NOT create a separate call-customer follow-up — only
   // reject does (the resolution owner is already handling it).
@@ -91,7 +92,7 @@ test('rejecting a dispute records the reason and leaves the full amount in recov
 
   // The disputed amount is confirmed still owed — the single
   // `source='Recovery'` call task is (re)created for the full outstanding,
-  // High priority, due 9 PM.
+  // High priority, due same-day 6 PM.
   const tasks = await fetch(`${app.baseUrl}/api/tasks`, { headers: authHeaders(token) }).then((r) => r.json());
   const followUp = tasks.find((t) =>
     t.customerId === 'C5' && t.type === 'customerCall' && t.source === 'Recovery' && t.status !== 'completed');
@@ -99,7 +100,7 @@ test('rejecting a dispute records the reason and leaves the full amount in recov
   assert.equal(followUp.priority, 'High');
   assert.match(followUp.reason, /rejected/, 'task reason names the rejection');
   assert.match(followUp.reason, /Collect ₹/, 'task says exactly what to collect');
-  assert.equal(new Date(followUp.deadline).getHours(), 21, 'due 9 PM (RE-decision default)');
+  assert.equal(new Date(followUp.deadline).getHours(), 18, 'due same-day 6 PM (auto-generated call task default)');
 });
 
 test('a salesperson cannot approve a dispute', async () => {
@@ -182,8 +183,19 @@ test('a dispute cannot be resolved/verified before it is Approved', async () => 
 
 test('resolving an Approved dispute as Resolved genuinely reduces totalDue by the disputed amount — the real second-stage verification', async () => {
   const reToken = await login(app.baseUrl, 'amit.re');
-  // D_001 was already approved by an earlier test in this file — resolve
-  // it directly rather than re-approving.
+  const ownerToken = await login(app.baseUrl, 'rahul');
+  // D_001 was already approved by an earlier test in this file — the
+  // resolution owner (rahul) must first submit it for verification
+  // (Approved → Awaiting Verification) before the RE can verify/resolve;
+  // resolve() no longer accepts a bare "Approved" dispute.
+  const ownerTasks = await fetch(`${app.baseUrl}/api/tasks`, { headers: authHeaders(ownerToken) }).then((r) => r.json());
+  const resolutionTask = ownerTasks.find((t) => t.customerId === 'C5' && t.ownerId === 'rahul' && t.source === 'Dispute Review');
+  await fetch(`${app.baseUrl}/api/disputes/D_001/resolve-by-owner`, {
+    method: 'POST',
+    headers: authHeaders(ownerToken),
+    body: JSON.stringify({ taskId: resolutionTask.id, note: 'Fixed with warehouse' }),
+  });
+
   const before = await fetch(`${app.baseUrl}/api/customers/C5`, { headers: authHeaders(reToken) }).then((r) => r.json());
 
   const res = await fetch(`${app.baseUrl}/api/disputes/D_001/resolve`, {
@@ -223,8 +235,20 @@ test('resolving an Approved dispute as Returned to Recovery leaves totalDue unto
   await fetch(`${app.baseUrl}/api/disputes/${dispute.id}/approve`, {
     method: 'POST',
     headers: authHeaders(reToken),
-    body: JSON.stringify({ resolutionOwner: 'ramesh-re', deadline: new Date(Date.now() + 172800000).toISOString(), description: 'Verify with warehouse' }),
+    body: JSON.stringify({ resolutionOwner: 'rahul', deadline: new Date(Date.now() + 172800000).toISOString(), description: 'Verify with warehouse', note: 'Please check with the warehouse team' }),
   });
+
+  // The owner must submit for verification before the RE can act on it —
+  // resolve() only accepts a dispute that's Awaiting Verification.
+  const ownerToken = await login(app.baseUrl, 'rahul');
+  const ownerTasks = await fetch(`${app.baseUrl}/api/tasks`, { headers: authHeaders(ownerToken) }).then((r) => r.json());
+  const resolutionTask = ownerTasks.find((t) => t.customerId === 'C4' && t.ownerId === 'rahul' && t.source === 'Dispute Review');
+  await fetch(`${app.baseUrl}/api/disputes/${dispute.id}/resolve-by-owner`, {
+    method: 'POST',
+    headers: authHeaders(ownerToken),
+    body: JSON.stringify({ taskId: resolutionTask.id, note: 'Warehouse still shows unpaid' }),
+  });
+
   const before = await fetch(`${app.baseUrl}/api/customers/C4`, { headers: authHeaders(reToken) }).then((r) => r.json());
 
   const res = await fetch(`${app.baseUrl}/api/disputes/${dispute.id}/resolve`, {

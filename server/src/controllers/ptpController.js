@@ -17,8 +17,4 @@ const rejectCorrection = asyncHandler(async (req, res) => {
   res.json(await ptpService.rejectCorrection(req.params.id, req.user, req.body.reason));
 });
 
-const markOutcome = asyncHandler(async (req, res) => {
-  res.json(await ptpService.markOutcome(req.params.id, req.user, req.body));
-});
-
-module.exports = { list, requestCorrection, approveCorrection, rejectCorrection, markOutcome };
+module.exports = { list, requestCorrection, approveCorrection, rejectCorrection };

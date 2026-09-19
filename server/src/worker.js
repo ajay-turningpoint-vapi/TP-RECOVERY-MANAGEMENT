@@ -9,6 +9,7 @@ const { createMissedDeadlineWorker } = require('./workers/missedDeadlineWorker')
 const { scheduleMissedDeadlineSweep } = require('./queues/missedDeadlineQueue');
 const { createPtpVerifyWorker } = require('./workers/ptpVerifyWorker');
 const { schedulePtpVerify } = require('./queues/ptpVerifyQueue');
+const { createFollowUpWorker } = require('./workers/followUpWorker');
 
 /**
  * Separate process from the API server (`server.js`) — run as its own
@@ -40,6 +41,12 @@ async function main() {
   const ptpVerifyWorker = createPtpVerifyWorker();
   await schedulePtpVerify();
 
+  // No schedule to register — jobs are added one-off, with an exact delay,
+  // by customerService.recordOutcome whenever a "Will Confirm" outcome is
+  // recorded. This worker just needs to be running to process them as
+  // they come due.
+  const followUpWorker = createFollowUpWorker();
+
   // The 5 PM control-batch snapshot is PERMANENTLY PAUSED — not scheduled,
   // worker not started. Its task-reopening half (a "no open action"
   // follow-up for every at-risk customer, every day → 500+ unworked tasks,
@@ -48,11 +55,17 @@ async function main() {
   // which runs after the noon BUSY sync and only retargets the single
   // source='Recovery' task. snapshotWorker.runSnapshot now records trend
   // metrics only (no task / state changes) and is invoked on demand, if at all.
-  logger.info('Worker process running — notifications, BUSY sync (+ PTP verify), 2-hourly sweeps. 5 PM control snapshot is permanently paused.');
+  logger.info('Worker process running — notifications, BUSY sync (+ PTP verify), 2-hourly sweeps, exact-time follow-ups. 5 PM control snapshot is permanently paused.');
 
   function shutdown(signal) {
     logger.info(`${signal} received — shutting down worker gracefully...`);
-    Promise.all([notificationWorker.close(), busySyncWorker.close(), missedDeadlineWorker.close(), ptpVerifyWorker.close()])
+    Promise.all([
+      notificationWorker.close(),
+      busySyncWorker.close(),
+      missedDeadlineWorker.close(),
+      ptpVerifyWorker.close(),
+      followUpWorker.close(),
+    ])
       .then(() => db.closePool())
       .then(() => redis.connection.quit())
       .catch((err) => logger.error('Error during worker shutdown', { message: err.message }))

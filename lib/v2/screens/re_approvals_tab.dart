@@ -181,7 +181,7 @@ class _ReApprovalsTabState extends State<ReApprovalsTab> with SingleTickerProvid
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Expanded(child: Text(r.customerName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF1B2B48)))),
+                  Expanded(child: Text(r.customerName, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF1B2B48)))),
                   Text('by ${store.salesmanDisplayName(r.salesmanId)}', style: const TextStyle(fontSize: 11, color: Color(0xFF5A6B87))),
                 ],
               ),
@@ -526,7 +526,14 @@ class _ReApprovalsTabState extends State<ReApprovalsTab> with SingleTickerProvid
   void _showRequestInfoDialog(BuildContext context, AppStore store, Map<String, dynamic> dispute) {
     String selectedSalesman = store.salesmen.isNotEmpty ? store.salesmen.first['name'] as String : '';
     final descController = TextEditingController();
-    DateTime selectedDate = DateTime.now().add(const Duration(days: 1));
+    // A clarification is needed now, so this must land in the salesperson's
+    // Today's Tasks by default — RE can still push it out via the date
+    // picker below. Matches disputeService.js's own defaultCallDeadline()
+    // (today 9 PM, or tomorrow 9 PM if already past that).
+    final now = DateTime.now();
+    DateTime selectedDate = now.hour >= 21
+        ? DateTime(now.year, now.month, now.day + 1, 21)
+        : DateTime(now.year, now.month, now.day, 21);
 
     showDialog(
       context: context,

@@ -336,7 +336,7 @@ class _TasksScreenState extends State<TasksScreen> {
                 children: [
                   Text(l1, style: const TextStyle(color: Color(0xFF5A6B87), fontSize: 11)),
                   const SizedBox(height: 2),
-                  Text(v1, style: TextStyle(color: vColor1 ?? const Color(0xFF1B2B48), fontSize: 13, fontWeight: FontWeight.bold)),
+                  Text(v1, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: vColor1 ?? const Color(0xFF1B2B48), fontSize: 13, fontWeight: FontWeight.bold)),
                 ]
               ),
             ),
@@ -353,7 +353,7 @@ class _TasksScreenState extends State<TasksScreen> {
                 children: [
                   Text(l2, style: const TextStyle(color: Color(0xFF5A6B87), fontSize: 11)),
                   const SizedBox(height: 2),
-                  Text(v2, style: TextStyle(color: vColor2 ?? const Color(0xFF1B2B48), fontSize: 13, fontWeight: FontWeight.bold)),
+                  Text(v2, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: vColor2 ?? const Color(0xFF1B2B48), fontSize: 13, fontWeight: FontWeight.bold)),
                 ]
               ),
             ),

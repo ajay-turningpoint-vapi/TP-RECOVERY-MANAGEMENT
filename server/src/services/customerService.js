@@ -10,7 +10,8 @@ const userRepository = require('../repositories/userRepository');
 const scoringService = require('./scoringService');
 const escalationService = require('./escalationService');
 const recoveryReconcileService = require('./recoveryReconcileService');
-const { driveRecoveryTask } = require('./recoveryTaskService');
+const { driveRecoveryTask, rupees, atHourLocal } = require('./recoveryTaskService');
+const { scheduleFollowUpDue } = require('../queues/followUpQueue');
 const { NotFoundError, ForbiddenError, ValidationError } = require('../errors/AppError');
 
 // Kept in sync with lib/v2/stores/app_store.dart's `noAnswerThreshold`.
@@ -19,10 +20,22 @@ const { NotFoundError, ForbiddenError, ValidationError } = require('../errors/Ap
 // too (the salesman broke the missed-call streak).
 const NO_ANSWER_THRESHOLD = 3;
 
+// Also matches missedDeadlineService.js's VISIT_REASON — same string, two
+// files, so any physical-visit task raised for hitting the non-contact
+// threshold is counted consistently regardless of which path created it.
+const NON_CONTACT_VISIT_REASON = 'Non-response threshold reached';
+
 async function assertVisible(customer, user) {
   if (!customer) throw new NotFoundError('Customer');
   if (user.role === 'SALESPERSON' && customer.assignedSalesmanId !== user.id) {
-    throw new ForbiddenError('This customer is not in your portfolio');
+    // Not their own portfolio customer — but they may still be a dispute
+    // resolution owner for this customer (the RE can assign that to any
+    // salesperson), in which case they legitimately need to see/act on
+    // this customer from their resolution task.
+    const isResolutionOwner = await disputeRepository.isResolutionOwner(customer.id, user.id);
+    if (!isResolutionOwner) {
+      throw new ForbiddenError('This customer is not in your portfolio');
+    }
   }
   return customer;
 }
@@ -54,13 +67,28 @@ async function enrichCustomers(customerList) {
 }
 
 /**
- * A SALESPERSON sees only their own portfolio (real BUSY-sourced
- * customers now that the daily sync upserts straight into `customers`
- * — see customerRepository.upsertFromBusy). RECOVERY_EXECUTIVE/MANAGEMENT
- * see the whole company.
+ * A SALESPERSON sees their own portfolio (real BUSY-sourced customers now
+ * that the daily sync upserts straight into `customers` — see
+ * customerRepository.upsertFromBusy), plus any customer whose dispute they
+ * were assigned as resolution owner — the RE can assign that to any
+ * salesperson, not just the customer's own, and that salesperson still
+ * needs to see the customer's real name (not just the id) from their task.
+ * RECOVERY_EXECUTIVE/MANAGEMENT see the whole company.
  */
 async function listForUser(user) {
-  const raw = user.role === 'SALESPERSON' ? await customerRepository.findBySalesman(user.id) : await customerRepository.findAll();
+  let raw;
+  if (user.role === 'SALESPERSON') {
+    const [own, resolutionOwnerCustomerIds] = await Promise.all([
+      customerRepository.findBySalesman(user.id),
+      disputeRepository.findCustomerIdsByResolutionOwner(user.id),
+    ]);
+    const ownIds = new Set(own.map((c) => c.id));
+    const extraIds = resolutionOwnerCustomerIds.filter((id) => !ownIds.has(id));
+    const extra = extraIds.length ? await customerRepository.findByIds(extraIds) : [];
+    raw = [...own, ...extra];
+  } else {
+    raw = await customerRepository.findAll();
+  }
   const enriched = await enrichCustomers(raw);
   return enriched.sort(scoringService.compareByRecoveryPriority);
 }
@@ -92,6 +120,45 @@ async function getDetail(id, user) {
   };
 }
 
+const AUDIT_PAGE_DEFAULT_LIMIT = 20;
+const AUDIT_PAGE_MAX_LIMIT = 100;
+
+/**
+ * Server-side keyset pagination for a customer's audit history — a
+ * long-tenured customer can accumulate hundreds of events (every outcome,
+ * RE decision, and system-generated task writes one), and `getDetail`'s
+ * `auditHistory` stays the full unbounded list (other consumers — activity
+ * counts, task detail screens — depend on that), so this is a separate,
+ * dedicated endpoint the customer 360 screen's history tab pages through
+ * instead of downloading everything up front.
+ *
+ * `cursor` is the opaque `"<epochMillis>_<id>"` of the last row the caller
+ * already has (from a previous page's `nextCursor`); omit it for page one.
+ */
+async function getAuditHistoryPage(id, user, { cursor, limit } = {}) {
+  const customer = await customerRepository.findById(id);
+  await assertVisible(customer, user);
+
+  const pageSize = Math.min(Math.max(Number(limit) || AUDIT_PAGE_DEFAULT_LIMIT, 1), AUDIT_PAGE_MAX_LIMIT);
+  let after = null;
+  if (cursor) {
+    const [rawTime, rawId] = String(cursor).split('_');
+    const occurredAt = new Date(Number(rawTime));
+    if (!rawId || Number.isNaN(occurredAt.getTime())) {
+      throw new ValidationError('Invalid cursor');
+    }
+    after = { occurredAt, id: rawId };
+  }
+
+  const rows = await auditRepository.listForCustomerPage(id, { after, limit: pageSize });
+  const hasMore = rows.length > pageSize;
+  const items = hasMore ? rows.slice(0, pageSize) : rows;
+  const last = items[items.length - 1];
+  const nextCursor = hasMore && last ? `${new Date(last.occurredAt).getTime()}_${last.id}` : null;
+
+  return { items, nextCursor };
+}
+
 /**
  * Record what happened on a call/visit — the single most important write
  * path in the app. Always: closes out every other open task for this
@@ -111,7 +178,7 @@ async function getDetail(id, user) {
  * not the approving RE, when called from an approved edit request — every
  * task this creates must stay owned by them).
  */
-async function applyOutcome(conn, customer, user, { nextAction, reason, details, followUpAt, ptpAmountValue, ptpDate, ptpMode, attachmentPath, replacingNoAnswer }) {
+async function applyOutcome(conn, customer, user, { nextAction, reason, details, ptpAmountValue, ptpDate, ptpMode, attachmentPath, replacingNoAnswer, followUpAt }) {
   const customerId = customer.id;
 
   // `replacingNoAnswer` is now only used by the RE-approved stale-edit
@@ -120,6 +187,21 @@ async function applyOutcome(conn, customer, user, { nextAction, reason, details,
   // moved on to a different recorded outcome (a stale client, a replay).
   if (replacingNoAnswer && !(customer.primaryNextAction === 'Call Customer' && customer.reasonForAction === 'No Answer')) {
     throw new ValidationError('No recorded No Answer outcome to replace for this customer');
+  }
+
+  // A Physical Visit is a real in-person visit — while one is open, Record
+  // Outcome is locked for this customer, full stop, no exceptions (not
+  // even another No Answer): the salesperson must go close the visit out
+  // WITH a photo (taskService.completeTask) before anything else can be
+  // recorded here. Checked before the supersede below so a missing photo
+  // blocks the whole write.
+  if (user.role === 'SALESPERSON' && !attachmentPath) {
+    const openVisit = (await taskRepository.findByCustomer(customerId, conn)).find(
+      (t) => t.type === 'physicalVisit' && t.ownerId === user.id && !['completed', 'closed', 'cancelled'].includes(t.status)
+    );
+    if (openVisit) {
+      throw new ValidationError('A photo from the Physical Visit is required before you can record any other outcome for this customer.');
+    }
   }
 
   await taskRepository.supersedeOpenTasks(customerId, `Resolved via outcome: ${nextAction}`, conn);
@@ -136,17 +218,15 @@ async function applyOutcome(conn, customer, user, { nextAction, reason, details,
   // Answer still counts correctly toward NO_ANSWER_THRESHOLD.
   const baselineNoAnswerAttempts = replacingNoAnswer ? Math.max(0, customer.noAnswerAttempts - 1) : customer.noAnswerAttempts;
 
-  // A No Answer is a non-contact and "Will Confirm / Follow-up" is a
-  // pending touch — neither resolves the account, so it stays actionable
-  // (the customer stays in Today's Recovery) and the salesman records the
-  // real outcome once the customer calls back via "New Record Outcome".
-  // Every resolving outcome still parks the account.
+  // A No Answer is a non-contact — it stays actionable (the customer stays
+  // in Today's Recovery) and the salesman records the real outcome once
+  // the customer calls back via "New Record Outcome". Every resolving
+  // outcome still parks the account. "Will Confirm / Follow-up" now parks
+  // too (see below) — it's genuinely quiet, not actionable, until the
+  // promised confirm time actually passes (followUpQueue.scheduleFollowUpDue).
   const isNoAnswerOutcome = nextAction === 'Call Customer' && reason === 'No Answer';
 
-  const nonResolving =
-    isNoAnswerOutcome ||
-    nextAction === 'Follow-up' ||
-    nextAction === 'Follow-up Scheduled';
+  const nonResolving = isNoAnswerOutcome;
 
   await customerRepository.update(
     customerId,
@@ -194,14 +274,40 @@ async function applyOutcome(conn, customer, user, { nextAction, reason, details,
       conn
     );
   } else if (nextAction === 'Follow-up' || nextAction === 'Follow-up Scheduled') {
+    // No task here, deliberately — a "Will Confirm" is a promise about a
+    // future TIME, not something an RE/BUSY needs to verify, but it still
+    // must stay fully quiet (no task, Record Outcome locked) until that
+    // time genuinely passes. recordOutcome schedules a one-off delayed job
+    // (followUpQueue.scheduleFollowUpDue) for exactly `followUpAt` after
+    // this transaction commits — that job is the only thing that creates
+    // the call task and re-opens Record Outcome.
+  } else if (reason === 'Customer Refused') {
+    // A refusal gets ONE recurring call task on a growing cadence — 2 days,
+    // then 3, then 4, then every 5 days forever after — via
+    // missedDeadlineService.sweepRefusedCycle, not the same-day-6PM
+    // default every other auto-generated task uses. Reopening never stops
+    // on its own; it only stops when the salesperson records something
+    // new here (supersedeOpenTasks above already closed the prior one) or
+    // when the RE resolves the L2 escalation this always raises
+    // (maybeEscalateCustomerRefused, below) — escalationService.resolve
+    // closes this task and hands back a single ordinary Recovery task
+    // instead.
+    const refusedDeadline = followUpAt ? new Date(followUpAt) : addDays(new Date(), 2);
     await taskRepository.insert(
-      { type: 'customerCall', customerId, ownerId: user.id, deadline: followUpAt || addDays(new Date(), 1), priority: 'Normal', reason: details, source: 'Record Outcome' },
+      {
+        type: 'customerCall',
+        customerId,
+        ownerId: user.id,
+        deadline: refusedDeadline,
+        priority: 'Normal',
+        reason: `Customer refused to commit — call again. ${details || ''}`.trim(),
+        source: 'Customer Refused',
+      },
       conn
     );
-  } else if (reason === 'Customer Refused') {
-    // No bespoke task here — recordOutcome drives the single
-    // `source='Recovery'` call task on a 2-day cadence that self-renews
-    // (via the missed-deadline sweep) until the balance is cleared.
+    // A deliberate re-record of Customer Refused (not an automatic sweep
+    // reopen) is a fresh refusal — reset the growing cadence to stage 1.
+    await customerRepository.update(customerId, { refusedReopenCount: 0 }, conn);
   } else if (reason === 'Dispute Raised') {
     const amountMatch = /Amt:\s*₹?\s*([\d,.]+)/.exec(details);
     const reasonMatch = /Reason:\s*(.*?),\s*Amt:/.exec(details);
@@ -215,28 +321,97 @@ async function applyOutcome(conn, customer, user, { nextAction, reason, details,
     const amount = amountMatch ? Number(amountMatch[1].replace(/,/g, '')) : 0;
     await paymentClaimRepository.insert({ customerId, amount, claimDate: new Date(), reference: `Claimed by ${user.fullName} — no reference given`, status: 'Awaiting Verification', attachmentPath }, conn);
   } else if (nextAction === 'Call Customer' && reason === 'No Answer') {
-    // A No Answer keeps ONE recurring call task (bumped every 2h by the
-    // `no-answer-cycle` job). If the whole day passes with nothing
-    // recorded, that job swaps it for a Physical Visit (6 PM) and removes
-    // the call task; two visit cycles → auto L2.
-    await customerRepository.update(customerId, { noAnswerAttempts: baselineNoAnswerAttempts + 1 }, conn);
+    // A No Answer keeps ONE recurring call task, re-due every 2 hours —
+    // deliberately its own faster cadence, not the same-day-6PM default
+    // every other auto-generated call task uses. On the NO_ANSWER_THRESHOLD
+    // (3rd) unanswered attempt, stop nagging by phone: close the call task
+    // and raise a real Physical Visit instead, due tomorrow 6 PM — Record
+    // Outcome for this customer is then locked (see assertVisible's sibling
+    // check in applyOutcome above) until that visit is completed WITH a
+    // photo. The counter resets so a fresh cycle starts once the visit is
+    // done. If this is the SECOND such cycle for this customer (a visit
+    // was already raised once before), don't raise a second one — instead
+    // escalate straight to L2 (see the returned `nonContactEscalate` flag,
+    // handled by recordOutcome post-commit) and let the salesperson keep
+    // working the same 2-hourly No Answer cycle under RE supervision.
+    const attempts = baselineNoAnswerAttempts + 1;
     const open = (await taskRepository.findByCustomer(customerId, conn)).filter(
       (t) => t.source === 'No Answer' && !['completed', 'closed', 'cancelled'].includes(t.status)
     );
-    const deadline = addHours(new Date(), 2);
-    const noAnswerReason = `Call ${customer.name || 'the customer'} — no answer on the last attempt. Try again, or record what happened.`;
-    if (open.length > 0) {
-      await taskRepository.update(open[0].id, { deadline, reason: noAnswerReason }, conn);
-      for (const dup of open.slice(1)) {
-        await taskRepository.update(dup.id, { status: 'completed', completedAt: new Date(), outcome: 'Superseded — single No Answer task kept.' }, conn);
+
+    if (attempts >= NO_ANSWER_THRESHOLD) {
+      const priorVisitCycles = (await taskRepository.findByCustomer(customerId, conn)).filter(
+        (t) => t.type === 'physicalVisit' && t.reason === NON_CONTACT_VISIT_REASON
+      ).length;
+
+      for (const t of open) {
+        await taskRepository.update(
+          t.id,
+          { status: 'completed', completedAt: new Date(), outcome: `No answer ${NO_ANSWER_THRESHOLD} times in a row.` },
+          conn
+        );
+      }
+      await customerRepository.update(customerId, { noAnswerAttempts: 0 }, conn);
+
+      if (priorVisitCycles === 0) {
+        await taskRepository.insert(
+          {
+            type: 'physicalVisit',
+            customerId,
+            ownerId: user.id,
+            deadline: atHourLocal(18, addDays(new Date(), 1)),
+            priority: 'High',
+            reason: NON_CONTACT_VISIT_REASON,
+            source: 'No Answer',
+          },
+          conn
+        );
+        await auditRepository.record(
+          customerId,
+          {
+            type: 'NO_ANSWER_PHYSICAL_VISIT',
+            description: `${NO_ANSWER_THRESHOLD} unanswered attempts in a row — a Physical Visit task was auto-created (due tomorrow 6 PM). Record Outcome is locked until it's completed with a photo.`,
+            actor: 'System',
+            source: 'No Answer',
+          },
+          conn
+        );
+      } else {
+        // Second cycle: no second visit — straight to L2, real message,
+        // salesperson keeps calling on the normal 2-hourly cycle below.
+        const deadline = addHours(new Date(), 2);
+        await taskRepository.insert(
+          {
+            type: 'customerCall',
+            customerId,
+            ownerId: user.id,
+            deadline,
+            priority: 'Normal',
+            reason: `Call ${customer.name || 'the customer'} — no answer on the last attempt. Try again, or record what happened.`,
+            source: 'No Answer',
+          },
+          conn
+        );
+        return { nonContactEscalate: true };
       }
     } else {
-      await taskRepository.insert(
-        { type: 'customerCall', customerId, ownerId: user.id, deadline, priority: 'Normal', reason: noAnswerReason, source: 'No Answer' },
-        conn
-      );
+      await customerRepository.update(customerId, { noAnswerAttempts: attempts }, conn);
+      const deadline = addHours(new Date(), 2);
+      const noAnswerReason = `Call ${customer.name || 'the customer'} — no answer on the last attempt. Try again, or record what happened.`;
+      if (open.length > 0) {
+        await taskRepository.update(open[0].id, { deadline, reason: noAnswerReason }, conn);
+        for (const dup of open.slice(1)) {
+          await taskRepository.update(dup.id, { status: 'completed', completedAt: new Date(), outcome: 'Superseded — single No Answer task kept.' }, conn);
+        }
+      } else {
+        await taskRepository.insert(
+          { type: 'customerCall', customerId, ownerId: user.id, deadline, priority: 'Normal', reason: noAnswerReason, source: 'No Answer' },
+          conn
+        );
+      }
     }
   }
+  return { nonContactEscalate: false };
 }
 
 /**
@@ -270,26 +445,25 @@ async function maybeEscalateCustomerRefused(customerId, user, { reason, details 
 }
 
 /**
- * Non-contact loop floor. Every time the customer hits NO_ANSWER_THRESHOLD
- * unanswered attempts, a "Non-response threshold reached" physical-visit
- * task is raised and the counter resets — without this the salesman could
- * loop No Answer → visit → No Answer forever. Once TWO such cycles have
- * happened the customer is genuinely unreachable: escalate to L2 so the RE
- * takes over, with the real attempt history as the reason. Post-commit and
+ * Non-contact loop floor. The FIRST time the customer hits
+ * NO_ANSWER_THRESHOLD unanswered attempts, applyOutcome raises a real
+ * Physical Visit task and resets the counter. The SECOND time it happens
+ * (a visit was already raised once, and 3 more unanswered attempts pass
+ * with the account back on the phone-call cycle), the customer is
+ * genuinely unreachable — applyOutcome doesn't raise a second visit; it
+ * signals here (`nonContactEscalate`, set precisely on that 2nd threshold
+ * hit, never on the 1st or on ordinary later No Answer calls) so this
+ * escalates straight to L2 instead, with the real attempt history as the
+ * reason. The salesperson keeps working the same 2-hourly No Answer cycle
+ * under RE supervision until a real outcome is recorded. Post-commit and
  * best-effort — same pattern as maybeEscalateCustomerRefused.
  */
-async function maybeEscalateNonContact(customerId, user, { nextAction, reason }) {
-  if (!(nextAction === 'Call Customer' && reason === 'No Answer')) return;
+async function maybeEscalateNonContact(customerId, user, nonContactEscalate) {
+  if (!nonContactEscalate) return;
   const customer = await customerRepository.findById(customerId);
   if (!customer) return;
   // Only raise the floor once — never downgrade a customer already at L2+.
   if (!['none', 'L1'].includes(customer.escalationLevel)) return;
-
-  const tasks = await taskRepository.findByCustomer(customerId);
-  const nonContactCycles = tasks.filter(
-    (t) => t.type === 'physicalVisit' && t.reason === 'Non-response threshold reached'
-  ).length;
-  if (nonContactCycles < 2) return;
 
   const alreadyOpen = await escalationRepository.findOpenByCustomer(customerId);
   if (alreadyOpen.length > 0) return;
@@ -297,9 +471,9 @@ async function maybeEscalateNonContact(customerId, user, { nextAction, reason })
   await escalationService.raise(customerId, user, {
     level: 'L2',
     reason:
-      `Customer unreachable — ${nonContactCycles} full non-response cycles ` +
-      `(${nonContactCycles * NO_ANSWER_THRESHOLD}+ unanswered call attempts, ` +
-      `${nonContactCycles} physical-visit escalations already raised with no contact made).`,
+      `Customer unreachable — a second full non-response cycle ` +
+      `(${NO_ANSWER_THRESHOLD}+ unanswered call attempts, a Physical Visit already raised once with no contact made, ` +
+      `then ${NO_ANSWER_THRESHOLD}+ more unanswered attempts since).`,
     plan:
       'Salesperson continues field follow-up under RE supervision. RE to review the ' +
       'contact numbers on file and pursue alternate channels (GST address, references, site visit).',
@@ -310,51 +484,89 @@ async function maybeEscalateNonContact(customerId, user, { nextAction, reason })
 }
 
 async function recordOutcome(customerId, user, body) {
+  let outcomeResult;
   await withTransaction(async (conn) => {
     const customer = await customerRepository.findById(customerId);
     await assertVisible(customer, user);
-    await applyOutcome(conn, customer, user, body);
+    outcomeResult = await applyOutcome(conn, customer, user, body);
   });
 
   await maybeEscalateCustomerRefused(customerId, user, body);
-  await maybeEscalateNonContact(customerId, user, body);
+  await maybeEscalateNonContact(customerId, user, outcomeResult && outcomeResult.nonContactEscalate);
 
   // Retarget the salesperson's single recovery task to whatever slice of
-  // the overdue is NOT under a PTP / dispute / payment claim. A partial
-  // PTP no longer parks the whole customer — the salesperson keeps a task
-  // for the remainder; when every rupee is covered the task closes and
-  // the customer parks. Never creates a second task (see
-  // recoveryReconcileService).
-  await recoveryReconcileService.reconcileState(customerId, { trigger: 'record.outcome' });
+  // the overdue is NOT under a dispute. Three outcomes are deliberately
+  // excluded — a fresh PTP, a fresh "Payment Already Made" claim, and a
+  // fresh "Will Confirm" — and must NOT immediately un-park the customer
+  // or reopen a task for the uncovered remainder. All three stay fully
+  // quiet (task-wise AND Record Outcome stays locked) until a real
+  // decision/trigger resolves them: ptpVerificationService.finalizeDuePtps
+  // for a PTP (kept/partiallyKept/broken against BUSY), paymentClaimService
+  // .verify for a claim (RE confirms or rejects it), followUpQueue's
+  // scheduled job for a Will Confirm (the promised callback TIME actually
+  // passing). reconcileState would otherwise un-park the uncovered slice
+  // right away since it only checks whether `actionable > 0`, regardless
+  // of any of these being resolved yet — so skip it specifically for these
+  // three outcomes. Every other outcome (dispute, refusal, ...) keeps this
+  // call exactly as before.
+  if (!['PTP Scheduled', 'Verification Pending', 'Follow-up', 'Follow-up Scheduled'].includes(body.nextAction)) {
+    await recoveryReconcileService.reconcileState(customerId, { trigger: 'record.outcome' });
+  }
 
-  // Immediately (re)point the single `source='Recovery'` call task at the
-  // still-actionable slice of the overdue — the part NOT under the PTP /
-  // dispute / payment claim this outcome just created. Without this a
-  // partial PTP (or any covering outcome) leaves the salesperson with no
-  // task until the next nightly reconcile (~24h). No Answer and Follow-up
-  // own their own recurring task, so they're skipped here.
+  // Only re-point the salesperson's task immediately when the outcome is
+  // something the salesperson still owns outright (a straight refusal —
+  // no PTP, no RE dependency). Anything that now depends on verification
+  // (a fresh PTP) or on the RE (a dispute, a payment claim, an internal
+  // action) must NOT get a new/reopened task here — the task stays quiet
+  // until the system verifies the PTP (ptpVerificationService.
+  // finalizeDuePtps) or the RE actually decides (paymentClaimService /
+  // disputeService / internalActionService), each of which already
+  // re-drives the recovery task on its own decision path.
   {
+    // Customer Refused's task (honoring followUpAt if the salesperson
+    // picked one) is created in applyOutcome, in-transaction, not here.
     const { nextAction, reason, details } = body;
-    if (reason === 'Customer Refused') {
+    if (reason === 'Dispute Raised') {
+      // Raising a dispute is itself an instrument that covers its amount
+      // (recoveryReconcileService.coverageFor already counts 'Pending
+      // Approval' disputes) — retarget the ONE recovery task down to the
+      // remainder right now instead of waiting for the nightly sweep, so a
+      // salesperson who raises a second dispute (or gets a refusal) on the
+      // rest of the balance is always working the correct number. No
+      // `collectAmount` override — driveRecoveryTask pulls the fresh
+      // actionable figure itself, so it's correct however many other
+      // disputes/PTPs/claims are already open on this customer.
+      const amountMatch = /Amt:\s*₹?\s*([\d,.]+)/.exec(details || '');
+      const amount = amountMatch ? Number(amountMatch[1].replace(/,/g, '')) : 0;
       await driveRecoveryTask(customerId, {
-        headline: `Customer refused to commit — call again. ${details || ''}`.trim(),
+        headline: `Dispute of ${rupees(amount)} raised — RE reviewing.`,
         priority: 'Normal',
-        deadlineOverride: addDays(new Date(), 2),
+        deadlineHour: 18,
       });
-    } else if (reason === 'Dispute Raised') {
-      await driveRecoveryTask(customerId, {
-        headline: 'Dispute raised — the RE is reviewing it. Keep working the uncovered balance.',
-        priority: 'Normal',
-        deadlineHour: 21,
-      });
-    } else if (['PTP Scheduled', 'Verification Pending', 'Internal Action', 'Action Required'].includes(nextAction)) {
+    } else if (['Internal Action', 'Action Required'].includes(nextAction)) {
+      // Without this an internal-action leaves the salesperson with no
+      // task until the next nightly reconcile (~24h) — retarget it now to
+      // whatever slice of the balance this outcome did NOT cover.
+      // ('PTP Scheduled' and 'Verification Pending' deliberately excluded
+      // — see the reconcileState skip above; both must stay fully quiet
+      // until their real RE-side verification decides them.)
       const headline = {
-        'PTP Scheduled': 'PTP recorded — keep working the part of the balance it does not cover.',
-        'Verification Pending': 'Payment claim submitted — the RE is verifying it. Keep working the uncovered balance.',
         'Internal Action': 'Internal action logged — the RE is reviewing it. Keep working the uncovered balance.',
         'Action Required': 'Keep working the balance.',
       }[nextAction];
-      await driveRecoveryTask(customerId, { headline, priority: 'Normal', deadlineHour: 21 });
+      await driveRecoveryTask(customerId, { headline, priority: 'Normal', deadlineHour: 18 });
+    } else if (nextAction === 'Follow-up' || nextAction === 'Follow-up Scheduled') {
+      // Schedule the one-off job that fires at exactly the promised confirm
+      // time — it (not this call) creates the call task and re-opens
+      // Record Outcome. No task/retarget happens here; see the applyOutcome
+      // branch and reconcileState skip above.
+      // followUpAt is the salesperson's own picked confirm time — honor it.
+      // The fallback (no date picked) is the system default: same-day 6PM.
+      await scheduleFollowUpDue({
+        customerId,
+        ownerId: user.id,
+        dueAt: followUpAt || atHourLocal(18),
+      });
     }
   }
 
@@ -504,6 +716,7 @@ module.exports = {
   listForUser,
   getNext,
   getDetail,
+  getAuditHistoryPage,
   recordOutcome,
   applyOutcome,
   maybeEscalateCustomerRefused,

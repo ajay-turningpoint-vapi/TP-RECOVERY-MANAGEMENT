@@ -56,10 +56,33 @@ async function listForCustomer(customerId) {
   return rows.map(mapAuditEvent);
 }
 
+/**
+ * Keyset-paginated page of a customer's history, newest first. Uses the
+ * existing (customer_id, occurred_at) index; the compound
+ * (occurred_at, id) cursor avoids skipping/duplicating rows that share the
+ * same second-precision timestamp. `after` is the last row of the
+ * previous page (or null for the first page). Fetches `limit + 1` rows so
+ * the caller can tell whether another page exists without a second query.
+ */
+async function listForCustomerPage(customerId, { after, limit }) {
+  const params = { customerId, limit: limit + 1 };
+  let cursorClause = '';
+  if (after) {
+    cursorClause = 'AND (occurred_at < :afterTime OR (occurred_at = :afterTime AND id < :afterId))';
+    params.afterTime = after.occurredAt;
+    params.afterId = after.id;
+  }
+  const rows = await query(
+    `SELECT * FROM audit_events WHERE customer_id = :customerId ${cursorClause} ORDER BY occurred_at DESC, id DESC LIMIT :limit`,
+    params
+  );
+  return rows.map(mapAuditEvent);
+}
+
 /** Every audit event, for batch server-side computations (e.g. scoringService's "days since last follow-up") that would otherwise be N+1 per-customer queries. */
 async function listAll() {
   const rows = await query('SELECT * FROM audit_events ORDER BY occurred_at DESC');
   return rows.map(mapAuditEvent);
 }
 
-module.exports = { record, listForCustomer, listAll, deleteLatestOfType, mapAuditEvent };
+module.exports = { record, listForCustomer, listForCustomerPage, listAll, deleteLatestOfType, mapAuditEvent };

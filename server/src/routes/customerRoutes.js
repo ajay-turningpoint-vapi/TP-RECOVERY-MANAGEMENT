@@ -48,6 +48,7 @@ const instructionSchema = z.object({
 router.get('/', controller.list);
 router.get('/next', controller.getNext);
 router.get('/:id', controller.getOne);
+router.get('/:id/audit-history', controller.getAuditHistory);
 router.post('/:id/record-outcome', validate(recordOutcomeSchema), controller.recordOutcome);
 router.post('/:id/take-control', authorize('RECOVERY_EXECUTIVE'), controller.takeControl);
 router.post('/:id/release-control', authorize('RECOVERY_EXECUTIVE'), controller.releaseControl);

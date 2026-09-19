@@ -59,6 +59,7 @@ class _ControlDashboardScreenState extends State<ControlDashboardScreen> {
   // RE screen, card and count moves with this one dropdown.
   String get _branchFilter => context.read<AppStore>().branchFilter;
   int _visibleSalesmen = 5;
+  String _salesmanSearch = '';
 
   @override
   Widget build(BuildContext context) {
@@ -68,6 +69,10 @@ class _ControlDashboardScreenState extends State<ControlDashboardScreen> {
     // Overdue row is noise on this "who needs chasing" list.
     final salesmen = store.visibleSalesmen
         .where((s) => ((s['totalOverdue'] as num?) ?? 0) > 0)
+        .where((s) => _salesmanSearch.isEmpty ||
+            ((s['fullName'] as String?) ?? (s['name'] as String? ?? ''))
+                .toLowerCase()
+                .contains(_salesmanSearch.toLowerCase()))
         .toList();
     final visible = salesmen.take(_visibleSalesmen).toList();
 
@@ -286,12 +291,9 @@ class _ControlDashboardScreenState extends State<ControlDashboardScreen> {
     // now — what's left on the dashboard's attention row is the RE-owned
     // escalation ladder, its critical-approvals shortcut, and ownerless
     // accounts (no salesman assigned, so the RE works these directly).
-    final ownerless = store.ownerMappingRequiredCustomers;
     final tiles = [
       _AttentionTileData(Icons.warning_amber_rounded, const Color(0xFFDC2626), '${store.criticalApprovalsCount}', 'Critical\nApprovals', 'High priority',
           onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ApprovalsListScreen(onlyCritical: true)))),
-      _AttentionTileData(Icons.person_off_outlined, const Color(0xFFDB2777), '${ownerless.length}', 'Ownerless\nAccounts', _rupee.format(store.ownerlessExposure),
-          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NeedsAttentionScreen(initialTab: 13)))),
       _AttentionTileData(Icons.priority_high, const Color(0xFF9333EA), '${store.openEscalationCases.length}', 'Escalations', 'L2 / L3 / L4',
           onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const EscalationsScreen()))),
     ];
@@ -380,6 +382,28 @@ class _ControlDashboardScreenState extends State<ControlDashboardScreen> {
                   child: const Text('View All  ›', style: TextStyle(color: Color(0xFF2563EB), fontSize: 12, fontWeight: FontWeight.bold)),
                 ),
             ],
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 34,
+            child: TextField(
+              onChanged: (v) => setState(() {
+                _salesmanSearch = v;
+                _visibleSalesmen = 5;
+              }),
+              decoration: InputDecoration(
+                isDense: true,
+                hintText: 'Search salesman...',
+                hintStyle: const TextStyle(fontSize: 12, color: _muted),
+                prefixIcon: const Icon(Icons.search, size: 16, color: _muted),
+                prefixIconConstraints: const BoxConstraints(minWidth: 30, minHeight: 16),
+                contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                filled: true,
+                fillColor: _bg,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+              ),
+              style: const TextStyle(fontSize: 12, color: _dark),
+            ),
           ),
           const SizedBox(height: 14),
           SingleChildScrollView(

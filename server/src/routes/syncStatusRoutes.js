@@ -89,19 +89,36 @@ function summariseLastSync(batch) {
     };
   }
 
-  const failedRun = failed.find((r) => CONNECTION_ERROR.test(r.errorMessage || '')) || failed[0] || stalled[0];
-  const isConnection = !!failedRun && failed.length > 0 && CONNECTION_ERROR.test(failedRun.errorMessage || '');
-  const branchList = failedBranches.join(', ');
-  const RETRY_NOTE = 'It runs again automatically — no action needed.';
+  // Each failed branch keeps its OWN reason — a prior version picked one
+  // representative error for the whole batch, so "FP-VAPI timed out but
+  // Turning Point had a real data error" would misreport Turning Point as
+  // a connection issue too. Group instead: branches whose error looks like
+  // a lost connection vs. branches that failed for some other reason vs.
+  // branches whose row got stuck 'running' (killed mid-sync) each get
+  // their own clause, so the message always names the real branch(es) and
+  // the real reason — e.g. "Turning Point branch sync failed — connection
+  // lost." — never a vague "some branches failed".
+  const connectionBranches = failed.filter((r) => CONNECTION_ERROR.test(r.errorMessage || '')).map((r) => r.branch).filter(Boolean);
+  const otherFailedBranches = failed.filter((r) => !CONNECTION_ERROR.test(r.errorMessage || '')).map((r) => r.branch).filter(Boolean);
+  const stalledBranches = stalled.map((r) => r.branch).filter(Boolean);
 
-  let message;
-  if (stalled.length > 0 && failed.length === 0) {
-    message = `A BUSY sync (${branchList}) was interrupted before it finished, so customer data may be out of date. ${RETRY_NOTE}`;
-  } else if (isConnection) {
-    message = `Couldn't reach BUSY (${branchList}) — the connection failed. Customer balances, PTPs and tasks for that branch may be out of date. ${RETRY_NOTE}`;
-  } else {
-    message = `The last BUSY sync didn't finish for: ${branchList}. Customer data for that branch may be out of date. ${RETRY_NOTE}`;
+  const branchWord = (list) => (list.length === 1 ? 'branch' : 'branches');
+  const clauses = [];
+  if (connectionBranches.length > 0) {
+    clauses.push(`${connectionBranches.join(', ')} ${branchWord(connectionBranches)} sync failed — connection lost`);
   }
+  if (otherFailedBranches.length > 0) {
+    clauses.push(`${otherFailedBranches.join(', ')} ${branchWord(otherFailedBranches)} sync failed — didn't finish`);
+  }
+  if (stalledBranches.length > 0) {
+    clauses.push(`${stalledBranches.join(', ')} ${branchWord(stalledBranches)} sync was interrupted before it finished`);
+  }
+
+  const isConnection = connectionBranches.length > 0 && otherFailedBranches.length === 0 && stalledBranches.length === 0;
+  const RETRY_NOTE = 'It runs again automatically — no action needed.';
+  const message = `${clauses.join('; ')}, so that data may be out of date. ${RETRY_NOTE}`;
+
+  const failedRun = failed.find((r) => CONNECTION_ERROR.test(r.errorMessage || '')) || failed[0] || stalled[0];
 
   return {
     status: stalled.length > 0 && failed.length === 0 ? 'stalled' : 'failed',

@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Salesman Mobile</string>
+	<string>Clock-TMS</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -13,7 +13,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>salesman_mobile</string>
+	<string>Clock-TMS</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -45,5 +45,13 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Used for voice dictation on the dispute reason and notes fields.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Used to convert your spoken Hindi into text for the dispute reason and notes fields.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Used to take photo evidence for outcomes, disputes, and physical visit confirmations.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Used to attach existing photos as evidence for outcomes and disputes.</string>
 </dict>
 </plist>

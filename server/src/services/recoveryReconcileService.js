@@ -134,7 +134,7 @@ async function reconcileAll() {
       await driveRecoveryTask(c.id, {
         headline: 'Overdue still open — keep calling the customer.',
         priority: 'Normal',
-        deadlineHour: 21,
+        deadlineHour: 18,
         refreshOnly: true,
       });
       changed += 1;

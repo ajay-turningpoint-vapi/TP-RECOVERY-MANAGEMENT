@@ -18,9 +18,14 @@ async function withMessages(disputes) {
 async function listForUser(user) {
   const all = await disputeRepository.findAll();
   if (user.role === 'SALESPERSON') {
+    // Visible to a salesperson: disputes on their own portfolio, plus any
+    // dispute they were assigned as resolution owner (the RE can assign
+    // that to any salesperson, not just the customer's own) — otherwise
+    // a resolution-owner's dispute/thread silently disappears from their
+    // view even though their resolution task still points at it.
     const customers = await customerRepository.findBySalesman(user.id);
     const ids = new Set(customers.map((c) => c.id));
-    return withMessages(all.filter((d) => ids.has(d.customerId)));
+    return withMessages(all.filter((d) => ids.has(d.customerId) || d.resolutionOwner === user.id));
   }
   return withMessages(all);
 }
@@ -31,12 +36,20 @@ async function getOrThrow(id) {
   return dispute;
 }
 
-async function approve(disputeId, user, { resolutionOwner, deadline, description, note, attachmentPath }) {
+async function approve(disputeId, user, { resolutionOwner, deadline, description, note, attachmentPath, department }) {
   const dispute = await getOrThrow(disputeId);
   const evidencePath = attachmentPath || dispute.attachmentPath;
 
   await withTransaction(async (conn) => {
-    await disputeRepository.update(disputeId, { status: 'Approved', statusDetail: 'Approved – Resolution In Progress', resolutionOwner }, conn);
+    // deadline/department were previously only ever used to build the
+    // resolution task below and then discarded — never persisted on the
+    // dispute itself, so the dispute detail screen's own "Resolution Plan
+    // Deadline"/"Internal Department" fields always read as unset.
+    await disputeRepository.update(
+      disputeId,
+      { status: 'Approved', statusDetail: 'Approved – Resolution In Progress', resolutionOwner, resolutionDeadline: deadline || null, department: department || null },
+      conn
+    );
 
     // The resolution-owner task — worked from the task itself (chat +
     // resolve), never via Record Outcome. dispute_id links it back.
@@ -78,14 +91,23 @@ async function approve(disputeId, user, { resolutionOwner, deadline, description
 
   // The disputed slice stays with the RE (resolution owner) — the
   // salesperson chases the rest of the overdue now. One `source='Recovery'`
-  // task, due 9 PM, which also re-enables Record Outcome in the app.
-  const cust = await customerRepository.findById(dispute.customerId);
-  const remaining = Math.max(0, (Number(cust && cust.totalDue) || 0) - dispute.amount);
+  // task, due 6 PM, which also re-enables Record Outcome in the app.
+  //
+  // Deliberately NO `collectAmount` override here (unlike an earlier
+  // version of this function) — that used to do its own naive
+  // `totalDue - dispute.amount` subtraction, which ignored any OTHER
+  // instrument concurrently covering part of the balance (a PTP the
+  // salesperson recorded while this dispute was still pending, a payment
+  // claim, another dispute, ...). Omitting collectAmount lets
+  // driveRecoveryTask fall back to its own coverageFor()-based
+  // calculation — the same live, all-instruments-considered figure every
+  // other dispute decision (reject/resolve/resolveByOwner) already uses
+  // correctly. This is what makes a concurrent PTP-kept + dispute outcome
+  // combine correctly instead of one silently overwriting the other.
   await driveRecoveryTask(dispute.customerId, {
     headline: `Dispute of ${rupees(dispute.amount)} approved — the RE is resolving it.`,
     priority: 'Normal',
-    deadlineHour: 21,
-    collectAmount: remaining,
+    deadlineHour: 18,
   });
   return disputeRepository.findById(disputeId);
 }
@@ -124,7 +146,7 @@ async function reject(disputeId, user, reason) {
   await driveRecoveryTask(dispute.customerId, {
     headline: `Dispute of ${rupees(dispute.amount)} rejected — the full amount stands. Reason: "${reason}".`,
     priority: 'High',
-    deadlineHour: 21,
+    deadlineHour: 18,
   });
   return disputeRepository.findById(disputeId);
 }
@@ -146,8 +168,12 @@ async function reject(disputeId, user, reason) {
  */
 async function resolve(disputeId, user, { outcome, note }) {
   const dispute = await getOrThrow(disputeId);
-  if (dispute.status !== 'Approved') {
-    throw new ValidationError(`This dispute is "${dispute.status}" — only an Approved dispute can be verified/resolved`);
+  // This is the RE's final verification step — it only fires once the
+  // resolution owner has actually claimed the work is done (Awaiting
+  // Verification). Gating it here, not at "Approved", is what stops the
+  // RE from verifying/closing a dispute before the owner has even acted.
+  if (dispute.status !== 'Awaiting Verification') {
+    throw new ValidationError(`This dispute is "${dispute.status}" — only a dispute awaiting verification can be verified/resolved`);
   }
 
   await withTransaction(async (conn) => {
@@ -201,7 +227,7 @@ async function resolve(disputeId, user, { outcome, note }) {
         ? `Dispute of ${rupees(dispute.amount)} settled — work the remaining balance.`
         : `Dispute of ${rupees(dispute.amount)} returned to recovery — the full amount is back in play.`,
     priority: outcome === 'Resolved' ? 'Normal' : 'High',
-    deadlineHour: 21,
+    deadlineHour: 18,
   });
   return disputeRepository.findById(disputeId);
 }
@@ -264,6 +290,8 @@ async function answerClarification(disputeId, user, { taskId, body }) {
     throw new ValidationError('You can only answer your own clarification task');
   }
 
+  const priorMessages = await disputeMessageRepository.listForDispute(disputeId);
+
   await withTransaction(async (conn) => {
     await disputeMessageRepository.add(
       { disputeId, authorId: user.id, authorName: user.fullName, authorRole: user.role, kind: 'answer', body },
@@ -293,6 +321,24 @@ async function answerClarification(disputeId, user, { taskId, body }) {
     );
   });
 
+  // Notify whoever on the RE/Manager side asked the clarification question
+  // (and anyone else who's posted in the thread) that the answer is in.
+  const recipients = new Set();
+  priorMessages.forEach((m) => {
+    if (m.authorId !== user.id && m.authorRole !== 'SALESPERSON') recipients.add(m.authorId);
+  });
+  await Promise.all(
+    [...recipients].map((userId) =>
+      enqueueNotification({
+        userId,
+        severity: 'info',
+        title: `Clarification answered — ₹${dispute.amount.toFixed(0)} dispute`,
+        body,
+        customerId: dispute.customerId,
+      })
+    )
+  );
+
   return disputeRepository.findById(disputeId);
 }
 
@@ -303,6 +349,7 @@ async function answerClarification(disputeId, user, { taskId, body }) {
  */
 async function postMessage(disputeId, user, { body, attachmentPath }) {
   const dispute = await getOrThrow(disputeId);
+  const priorMessages = await disputeMessageRepository.listForDispute(disputeId);
   await disputeMessageRepository.add({
     disputeId,
     authorId: user.id,
@@ -312,40 +359,62 @@ async function postMessage(disputeId, user, { body, attachmentPath }) {
     body,
     attachmentPath: attachmentPath || null,
   });
+
+  // Notify everyone else already in this thread, plus the resolution owner
+  // and the customer's own salesman (either may not have posted yet).
+  const recipients = new Set();
+  priorMessages.forEach((m) => {
+    if (m.authorId !== user.id) recipients.add(m.authorId);
+  });
+  if (dispute.resolutionOwner && dispute.resolutionOwner !== user.id) recipients.add(dispute.resolutionOwner);
+  const raiserId = await salesmanForCustomer(dispute.customerId);
+  if (raiserId && raiserId !== user.id) recipients.add(raiserId);
+
+  await Promise.all(
+    [...recipients].map((userId) =>
+      enqueueNotification({
+        userId,
+        severity: 'info',
+        title: `New message on dispute — ₹${dispute.amount.toFixed(0)}`,
+        body,
+        customerId: dispute.customerId,
+      })
+    )
+  );
+
   return disputeRepository.findById(disputeId);
 }
 
 /**
- * The resolution-owner salesman marks the dispute resolved from their
- * resolution task. Same money effect as the RE's `resolve('Resolved')`
- * (disputed amount confirmed received → exposure reduced), closes the
- * resolution task, and hands a follow-up task to the salesman who
- * originally raised the dispute.
+ * The resolution-owner salesman claims their work is done and submits the
+ * dispute for RE verification (Approved → Awaiting Verification). No money
+ * moves and the raiser's task is untouched here — only the RE's own
+ * `resolve()` (Verify & Resolve / Still Unpaid → Recovery) can finalize it.
  */
 async function resolveByOwner(disputeId, user, { taskId, note }) {
   const dispute = await getOrThrow(disputeId);
   if (dispute.status !== 'Approved') {
-    throw new ValidationError(`This dispute is "${dispute.status}" — only an in-progress (Approved) dispute can be resolved`);
+    throw new ValidationError(`This dispute is "${dispute.status}" — only an in-progress (Approved) dispute can be submitted for verification`);
   }
   if (dispute.resolutionOwner !== user.id) {
-    throw new ValidationError('Only the assigned resolution owner can resolve this dispute');
+    throw new ValidationError('Only the assigned resolution owner can act on this dispute');
   }
   const task = taskId ? await taskRepository.findById(taskId) : null;
   if (!task || task.disputeId !== disputeId || task.ownerId !== user.id) {
     throw new ValidationError('This task is not your resolution task for this dispute');
   }
 
-  const customer = await customerRepository.findById(dispute.customerId);
-  const raiserId = customer ? customer.assignedSalesmanId : null;
-
+  // This is the OWNER's claim that the work is done — not a resolution.
+  // No money moves and the raiser's task is left untouched here: the RE
+  // must independently verify against BUSY (disputeService.resolve, via
+  // the "Verify & Resolve" / "Still Unpaid → Recovery" buttons) before
+  // anything is written off or handed back. This closes a real gap where
+  // the owner's own claim used to resolve the dispute and reduce totalDue
+  // outright, with no RE check in between.
   await withTransaction(async (conn) => {
-    await disputeRepository.update(disputeId, { status: 'Resolved', statusDetail: 'Resolved by resolution owner' }, conn);
+    await disputeRepository.update(disputeId, { status: 'Awaiting Verification', statusDetail: 'Resolution claimed — awaiting RE verification' }, conn);
 
-    const newTotalDue = Math.max(0, (customer?.totalDue || 0) - dispute.amount);
-    const newTotalOutstanding = Math.max(0, (customer?.totalOutstanding || 0) - dispute.amount);
-    await customerRepository.update(dispute.customerId, { totalDue: newTotalDue, totalOutstanding: newTotalOutstanding }, conn);
-
-    await taskRepository.update(taskId, { status: 'completed', outcome: 'Dispute resolved', completedAt: new Date() }, conn);
+    await taskRepository.update(taskId, { status: 'completed', outcome: 'Submitted for RE verification', completedAt: new Date() }, conn);
 
     if (note) {
       await disputeMessageRepository.add(
@@ -357,45 +426,73 @@ async function resolveByOwner(disputeId, user, { taskId, note }) {
     await auditRepository.record(
       dispute.customerId,
       {
-        type: 'DISPUTE_RESOLVED_BY_OWNER',
-        description: `${user.fullName} (resolution owner) resolved the ₹${dispute.amount.toFixed(0)} dispute. Financial exposure reduced by the same amount.${note ? ` Note: "${note}".` : ''}`,
+        type: 'DISPUTE_SUBMITTED_FOR_VERIFICATION',
+        description: `${user.fullName} (resolution owner) marked the ₹${dispute.amount.toFixed(0)} dispute resolved and submitted it for RE verification — no exposure change yet.${note ? ` Note: "${note}".` : ''}`,
         actor: user.fullName,
-        previousState: `₹${(customer?.totalDue || 0).toFixed(0)} due`,
-        newState: `₹${newTotalDue.toFixed(0)} due`,
         source: 'Dispute Review',
       },
       conn
     );
-
-    // Follow-up for the salesman who originally raised the dispute.
-    if (raiserId) {
-      await taskRepository.insert(
-        {
-          type: 'customerCall',
-          customerId: dispute.customerId,
-          ownerId: raiserId,
-          deadline: taskService.defaultCallDeadline(),
-          priority: 'Normal',
-          reason: `DISPUTE RESOLVED — confirm with customer & close: ${dispute.reason}`,
-          source: 'Dispute Review',
-          note: `The ₹${dispute.amount.toFixed(0)} dispute you raised has been resolved by ${user.fullName}. Confirm with the customer and continue recovery on the remaining balance.`,
-        },
-        conn
-      );
-      await customerRepository.update(dispute.customerId, { currentRecoveryState: 'Action Required', primaryNextAction: 'CALL CUSTOMER' }, conn);
-    }
   });
 
-  // The raiser already has a specific "confirm & close" call task from the
-  // block above; driveRecoveryTask sees it and won't stack a second — it
-  // just keeps the single-task invariant and re-points the figure if that
-  // task is ever cleared without an outcome.
-  await driveRecoveryTask(dispute.customerId, {
-    headline: `Dispute of ${rupees(dispute.amount)} resolved — work the remaining balance.`,
-    priority: 'Normal',
-    deadlineHour: 21,
-  });
+  // The generic post-write hook already tells every RE/Manager client the
+  // dispute changed (it will now show up under "Awaiting Verification" on
+  // the Disputes tab); no separate task or notification is created for
+  // the raiser until the RE actually verifies it.
   return disputeRepository.findById(disputeId);
 }
 
-module.exports = { listForUser, approve, reject, requestInfo, resolve, answerClarification, postMessage, resolveByOwner };
+/**
+ * The resolution owner declines the assignment (e.g. RE picked the wrong
+ * person) instead of working it. Closes their task, hands the dispute back
+ * to the RE with a reason — no money moves, the raiser is untouched. The
+ * dispute stays "Approved" but with resolutionOwner cleared so the RE's
+ * Disputes tab and "Approve & Assign" bar both recognize it needs a new
+ * owner (dispute_details_view.dart gates that bar on resolutionOwner==null).
+ */
+async function rejectByOwner(disputeId, user, { taskId, reason }) {
+  const dispute = await getOrThrow(disputeId);
+  if (dispute.status !== 'Approved') {
+    throw new ValidationError(`This dispute is "${dispute.status}" — only an in-progress (Approved) dispute can be declined`);
+  }
+  if (dispute.resolutionOwner !== user.id) {
+    throw new ValidationError('Only the assigned resolution owner can act on this dispute');
+  }
+  const task = taskId ? await taskRepository.findById(taskId) : null;
+  if (!task || task.disputeId !== disputeId || task.ownerId !== user.id) {
+    throw new ValidationError('This task is not your resolution task for this dispute');
+  }
+
+  await withTransaction(async (conn) => {
+    await disputeRepository.update(
+      disputeId,
+      { status: 'Approved', statusDetail: 'Resolution owner declined — needs reassignment', resolutionOwner: null },
+      conn
+    );
+
+    await taskRepository.update(taskId, { status: 'completed', outcome: `Declined: ${reason}`, completedAt: new Date() }, conn);
+
+    await disputeMessageRepository.add(
+      { disputeId, authorId: user.id, authorName: user.fullName, authorRole: user.role, kind: 'note', body: `Declined this assignment: ${reason}` },
+      conn
+    );
+
+    await auditRepository.record(
+      dispute.customerId,
+      {
+        type: 'DISPUTE_OWNER_REJECTED',
+        description: `${user.fullName} declined the resolution assignment for the ₹${dispute.amount.toFixed(0)} dispute — reason: "${reason}". Needs reassignment by the RE.`,
+        actor: user.fullName,
+        source: 'Dispute Review',
+      },
+      conn
+    );
+  });
+
+  // No single RE "owns" a dispute (RE/Manager both see the whole book via
+  // listForUser) — the generic post-write hook already tells every
+  // RE/Manager client the dispute changed, same as resolveByOwner above.
+  return disputeRepository.findById(disputeId);
+}
+
+module.exports = { listForUser, approve, reject, requestInfo, resolve, answerClarification, postMessage, resolveByOwner, rejectByOwner };

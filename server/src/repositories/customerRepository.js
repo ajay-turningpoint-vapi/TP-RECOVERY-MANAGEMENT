@@ -23,6 +23,7 @@ function mapCustomer(row) {
     creditHealthScore: row.credit_health_score,
     disputedAmount: Number(row.disputed_amount),
     noAnswerAttempts: row.no_answer_attempts,
+    refusedReopenCount: row.refused_reopen_count,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     // Real "when was this customer's financial data last refreshed from
@@ -81,6 +82,12 @@ async function findById(id) {
   return mapCustomer(rows[0]);
 }
 
+async function findByIds(ids) {
+  if (!ids || ids.length === 0) return [];
+  const rows = await query(`SELECT * FROM customers WHERE id IN (:ids) AND ${ACTIVE_FILTER} ORDER BY name`, { ids });
+  return rows.map(mapCustomer);
+}
+
 function mapInvoice(raw) {
   return {
     id: raw.ref_code,
@@ -128,6 +135,7 @@ const COLUMN_MAP = {
   creditHealthScore: 'credit_health_score',
   disputedAmount: 'disputed_amount',
   noAnswerAttempts: 'no_answer_attempts',
+  refusedReopenCount: 'refused_reopen_count',
 };
 
 async function update(id, fields, connection) {
@@ -238,4 +246,4 @@ async function upsertFromBusy(rows, syncStartedAt, branch = { label: 'Turning Po
   });
 }
 
-module.exports = { mapCustomer, mapInvoice, findAll, findBySalesman, findById, findInvoices, update, upsertFromBusy };
+module.exports = { mapCustomer, mapInvoice, findAll, findBySalesman, findById, findByIds, findInvoices, update, upsertFromBusy };

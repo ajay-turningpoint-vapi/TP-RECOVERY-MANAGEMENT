@@ -9,6 +9,7 @@ const logger = require('../config/logger');
 const { closePool } = require('../config/db');
 const { runCustomerAgeingSync } = require('./sync/customerAgeingSync');
 const { runCustomerInvoiceSync } = require('./sync/customerInvoiceSync');
+const recoveryReconcileService = require('../services/recoveryReconcileService');
 const { publish, emitChange } = require('../realtime/eventBus');
 
 async function main() {
@@ -21,6 +22,18 @@ async function main() {
     const resultInvoice = await runCustomerInvoiceSync();
     if (!resultInvoice.ran) {
       logger.warn('[sync:busy] Skipped invoice — a sync run was already in progress.');
+    }
+
+    // Mirrors busySyncWorker.js's post-sync step — without this, a customer
+    // whose balance/coverage changed never gets un-parked from "Waiting /
+    // Monitoring" or re-pointed to their real overdue when this CLI path is
+    // used instead of the BullMQ worker (e.g. local/manual resyncs), and
+    // "Start Recovery" silently runs dry even though real money is overdue.
+    try {
+      const resultReconcile = await recoveryReconcileService.reconcileAll();
+      logger.info('[sync:busy] recovery reconcile sweep completed.', resultReconcile);
+    } catch (reconcileErr) {
+      logger.error('[sync:busy] recovery reconcile sweep failed', { message: reconcileErr.message });
     }
     process.exitCode = 0;
   } catch (err) {

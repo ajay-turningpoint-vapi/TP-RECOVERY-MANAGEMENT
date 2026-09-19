@@ -393,8 +393,8 @@ class _DailyRecoverySummaryReportState extends State<DailyRecoverySummaryReport>
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5, color: kDark)),
-                          Text('Target ${_rupee.format(target)} · Collected ${_rupee.format(achieved)}', style: const TextStyle(fontSize: 10, color: kMuted)),
+                          Text(name, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5, color: kDark)),
+                          Text('Target ${_rupee.format(target)} · Collected ${_rupee.format(achieved)}', overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10, color: kMuted)),
                         ],
                       ),
                     ),
@@ -747,7 +747,7 @@ class _SalesmanPerformanceReportState extends State<SalesmanPerformanceReport> {
                 children: [
                   SizedBox(width: 24, child: Text(medal, style: const TextStyle(fontSize: 14))),
                   const SizedBox(width: 8),
-                  Expanded(child: Text((s['fullName'] as String?) ?? s['name'] as String, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: kDark))),
+                  Expanded(child: Text((s['fullName'] as String?) ?? s['name'] as String, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: kDark))),
                   Text('${s['recoveryScore']}%', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: _performanceBandColor(_performanceBand(s['recoveryScore'] as int)))),
                   const SizedBox(width: 4),
                   const Icon(Icons.chevron_right, size: 15, color: kMuted),
@@ -1459,7 +1459,7 @@ class _PtpReportState extends State<PtpReport> {
               children: [
                 SizedBox(width: 24, child: Text(medal, style: const TextStyle(fontSize: 14))),
                 const SizedBox(width: 8),
-                Expanded(child: Text(r['name'] as String, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: kDark))),
+                Expanded(child: Text(r['name'] as String, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: kDark))),
                 Text('${((r['keptPct'] as num).toDouble()).toStringAsFixed(1)}%', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: _ptpBandColor(_ptpBand((r['keptPct'] as num).toDouble())))),
               ],
             ),
@@ -1847,7 +1847,7 @@ class _BrokenPtpReportState extends State<BrokenPtpReport> {
               children: [
                 SizedBox(width: 24, child: Text(medal, style: const TextStyle(fontSize: 14))),
                 const SizedBox(width: 8),
-                Expanded(child: Text(r['name'] as String, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: kDark))),
+                Expanded(child: Text(r['name'] as String, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: kDark))),
                 Text(_rupee.format(r['brokenAmount']), style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: kRed)),
               ],
             ),
@@ -2806,7 +2806,7 @@ class _ExpectedVsActualCollectionReportState extends State<ExpectedVsActualColle
               children: [
                 SizedBox(width: 24, child: Text(medal, style: const TextStyle(fontSize: 14))),
                 const SizedBox(width: 8),
-                Expanded(child: Text(r['name'] as String, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: kDark))),
+                Expanded(child: Text(r['name'] as String, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: kDark))),
                 Text('${((r['efficiency'] as num).toDouble()).toStringAsFixed(1)}%', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: _efficiencyBandColor(_efficiencyBand((r['efficiency'] as num).toDouble())))),
               ],
             ),
@@ -2849,7 +2849,7 @@ class _ExpectedVsActualCollectionReportState extends State<ExpectedVsActualColle
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(c.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: kDark)),
+                        Text(c.name, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: kDark)),
                         Text('${store.salesmanDisplayName(c.assignedSalesmanId)} · Promised ${DateFormat('dd MMM yyyy').format(p.promiseDate)}', style: const TextStyle(fontSize: 10, color: kMuted)),
                       ],
                     ),
@@ -3098,7 +3098,7 @@ class _NoFollowUpAccountsReportState extends State<NoFollowUpAccountsReport> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(c.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: kDark)),
+                        Text(c.name, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: kDark)),
                         Text('${store.salesmanDisplayName(c.assignedSalesmanId)} · $days Days Since Last Follow-Up', style: const TextStyle(fontSize: 10, color: kMuted)),
                       ],
                     ),
@@ -3139,7 +3139,7 @@ class _NoFollowUpAccountsReportState extends State<NoFollowUpAccountsReport> {
                   children: [
                     CircleAvatar(radius: 14, backgroundColor: avatarColorFor(name).withOpacity(0.15), child: Text(initialsFor(name), style: TextStyle(color: avatarColorFor(name), fontSize: 10, fontWeight: FontWeight.bold))),
                     const SizedBox(width: 10),
-                    Expanded(child: Text(name, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: kDark))),
+                    Expanded(child: Text(name, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: kDark))),
                     Text('${accounts.length} accounts', style: const TextStyle(fontSize: 11.5, color: kMuted, fontWeight: FontWeight.w600)),
                     const SizedBox(width: 4),
                     const Icon(Icons.chevron_right, size: 16, color: kMuted),

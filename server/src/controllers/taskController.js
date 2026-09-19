@@ -7,7 +7,7 @@ const list = asyncHandler(async (req, res) => {
 });
 
 const complete = asyncHandler(async (req, res) => {
-  res.json(await taskService.completeTask(req.params.id, req.user));
+  res.json(await taskService.completeTask(req.params.id, req.user, req.body));
 });
 
 const requestExtension = asyncHandler(async (req, res) => {

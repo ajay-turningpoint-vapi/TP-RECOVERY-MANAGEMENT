@@ -238,6 +238,11 @@ class ApiClient {
   // ---- Customers ----
   Future<List<dynamic>> getCustomers() async => await _get('/api/customers') as List<dynamic>;
   Future<Map<String, dynamic>> getCustomerDetail(String id) async => await _get('/api/customers/$id') as Map<String, dynamic>;
+  Future<Map<String, dynamic>> getCustomerAuditHistoryPage(String id, {String? cursor, int limit = 20}) async {
+    final query = <String, String>{'limit': '$limit', if (cursor != null) 'cursor': cursor};
+    final qs = Uri(queryParameters: query).query;
+    return await _get('/api/customers/$id/audit-history?$qs') as Map<String, dynamic>;
+  }
   Future<Map<String, dynamic>> recordOutcome(String customerId, Map<String, dynamic> body) async =>
       await _post('/api/customers/$customerId/record-outcome', body) as Map<String, dynamic>;
   Future<Map<String, dynamic>> takeControl(String customerId) async => await _post('/api/customers/$customerId/take-control') as Map<String, dynamic>;
@@ -249,7 +254,8 @@ class ApiClient {
 
   // ---- Tasks ----
   Future<List<dynamic>> getTasks() async => await _get('/api/tasks') as List<dynamic>;
-  Future<Map<String, dynamic>> completeTask(String taskId) async => await _post('/api/tasks/$taskId/complete') as Map<String, dynamic>;
+  Future<Map<String, dynamic>> completeTask(String taskId, {String? attachmentPath}) async =>
+      await _post('/api/tasks/$taskId/complete', {if (attachmentPath != null) 'attachmentPath': attachmentPath}) as Map<String, dynamic>;
   Future<Map<String, dynamic>> requestTaskExtension(String taskId, Map<String, dynamic> body) async =>
       await _post('/api/tasks/$taskId/request-extension', body) as Map<String, dynamic>;
   Future<Map<String, dynamic>> approveTaskEdit(String taskId) async => await _post('/api/tasks/$taskId/approve-edit') as Map<String, dynamic>;
@@ -271,8 +277,6 @@ class ApiClient {
   Future<Map<String, dynamic>> approvePtpCorrection(String ptpId) async => await _post('/api/ptps/$ptpId/approve-correction') as Map<String, dynamic>;
   Future<Map<String, dynamic>> rejectPtpCorrection(String ptpId, Map<String, dynamic> body) async =>
       await _post('/api/ptps/$ptpId/reject-correction', body) as Map<String, dynamic>;
-  Future<Map<String, dynamic>> markPtpOutcome(String ptpId, Map<String, dynamic> body) async =>
-      await _post('/api/ptps/$ptpId/mark-outcome', body) as Map<String, dynamic>;
 
   // ---- Disputes ----
   Future<List<dynamic>> getDisputes() async => await _get('/api/disputes') as List<dynamic>;
@@ -290,6 +294,8 @@ class ApiClient {
       await _post('/api/disputes/$disputeId/message', body) as Map<String, dynamic>;
   Future<Map<String, dynamic>> resolveDisputeByOwner(String disputeId, Map<String, dynamic> body) async =>
       await _post('/api/disputes/$disputeId/resolve-by-owner', body) as Map<String, dynamic>;
+  Future<Map<String, dynamic>> rejectDisputeByOwner(String disputeId, Map<String, dynamic> body) async =>
+      await _post('/api/disputes/$disputeId/reject-by-owner', body) as Map<String, dynamic>;
 
   // ---- Outcome correction requests ----
   Future<List<dynamic>> getOutcomeCorrections() async => await _get('/api/outcome-corrections') as List<dynamic>;
@@ -348,6 +354,15 @@ class ApiClient {
   /// Uploads image [bytes] and returns the server-assigned filename (a
   /// fresh uuid — never the original name) to pass as `attachmentPath`
   /// when recording the outcome this is evidence for.
+  ///
+  /// Mirrors [_authedSend]'s 401-refresh-and-retry: unlike a JSON call, a
+  /// sent [http.MultipartRequest] can't be resent, so on a 401 this rebuilds
+  /// the multipart request from scratch (same bytes, fresh access token)
+  /// rather than reusing the original. Without this, filling out a form that
+  /// takes longer than the access token's lifetime (e.g. picking a deadline
+  /// date/time before attaching a PDF) would fail the upload with "Invalid
+  /// or expired token" even though every other request on the same screen
+  /// silently refreshes.
   Future<String> uploadAttachment(List<int> bytes, {required String filename, required String contentType}) async {
     final uri = Uri.parse('$baseUrl/api/attachments');
     // The filename MUST be non-empty: a multipart file part with an empty
@@ -358,16 +373,27 @@ class ApiClient {
     final ext = contentType == 'application/pdf' ? '.pdf' : '.jpg';
     var safeName = filename.trim();
     if (safeName.isEmpty) safeName = 'attachment$ext';
-    // Only the auth header — never _headers, whose 'Content-Type:
-    // application/json' would fight the multipart boundary content-type.
-    final request = http.MultipartRequest('POST', uri)
-      ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: safeName, contentType: MediaType.parse(contentType)));
-    if (_accessToken != null) {
-      request.headers['Authorization'] = 'Bearer $_accessToken';
-    }
-    try {
+
+    Future<http.Response> send() async {
+      // Only the auth header — never _headers, whose 'Content-Type:
+      // application/json' would fight the multipart boundary content-type.
+      final request = http.MultipartRequest('POST', uri)
+        ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: safeName, contentType: MediaType.parse(contentType)));
+      if (_accessToken != null) {
+        request.headers['Authorization'] = 'Bearer $_accessToken';
+      }
       final streamed = await request.send().timeout(_requestTimeout);
-      final res = await http.Response.fromStream(streamed);
+      return http.Response.fromStream(streamed);
+    }
+
+    try {
+      var res = await send();
+      if (res.statusCode == 401 && _refreshToken != null) {
+        final refreshed = await _tryRefresh();
+        if (refreshed) {
+          res = await send();
+        }
+      }
       final body = await _handle(res) as Map<String, dynamic>;
       return body['path'] as String;
     } on TimeoutException {

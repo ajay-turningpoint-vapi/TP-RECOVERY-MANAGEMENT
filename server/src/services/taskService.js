@@ -5,7 +5,7 @@ const ptpRepository = require('../repositories/ptpRepository');
 const auditRepository = require('../repositories/auditRepository');
 const userRepository = require('../repositories/userRepository');
 const { notifyDecision } = require('./decisionNotify');
-const { NotFoundError, ForbiddenError } = require('../errors/AppError');
+const { NotFoundError, ForbiddenError, ValidationError } = require('../errors/AppError');
 
 async function listForUser(user) {
   if (user.role === 'SALESPERSON') {
@@ -95,10 +95,19 @@ async function ensureFollowUpIfNeeded(
   return true;
 }
 
-async function completeTask(taskId, user) {
+async function completeTask(taskId, user, { attachmentPath } = {}) {
   const task = await getOrThrow(taskId);
   if (user.role === 'SALESPERSON' && task.ownerId !== user.id) {
     throw new ForbiddenError('You can only complete your own tasks');
+  }
+  // A Physical Visit is a real in-person visit — a bare "Mark Done" with no
+  // proof it happened isn't an acceptable close, for either the dedicated
+  // Record Outcome flow (see customerService.applyOutcome's physicalVisit
+  // check) or this generic completion path. Photo evidence must be
+  // genuinely on file, not just claimed, so it's real (not optional)
+  // history for the customer.
+  if (user.role === 'SALESPERSON' && task.type === 'physicalVisit' && !attachmentPath) {
+    throw new ValidationError('A photo from the visit is required to complete a Physical Visit task.');
   }
 
   await withTransaction(async (conn) => {
@@ -107,7 +116,8 @@ async function completeTask(taskId, user) {
     // ensureFollowUpIfNeeded's guard actually reopened recovery, so a
     // completed task with nothing else to do left no trace at all in
     // Customer History. Every single thing that happens to a customer
-    // must show up in their unified timeline.
+    // must show up in their unified timeline. attachmentPath (the visit
+    // photo, when present) rides along so it's preserved in history too.
     await auditRepository.record(
       task.customerId,
       {
@@ -117,6 +127,7 @@ async function completeTask(taskId, user) {
         previousState: task.status,
         newState: 'completed',
         source: 'Task Completion',
+        attachmentPath: attachmentPath || null,
       },
       conn
     );
@@ -141,9 +152,11 @@ async function completeTask(taskId, user) {
     if (task.source === 'No Answer' && customer && Number(customer.totalDue) > 0 && !reController) {
       // You don't "complete" a No-Answer task, you record an outcome.
       // A bare completion = "still nothing to record" — put the single
-      // No-Answer task straight back so `sweepNoAnswerCycle` keeps owning
-      // the customer (2-hourly nag → all-day → physical visit → L2). A
-      // generic Recovery task here would bypass that escalation counter.
+      // No-Answer task straight back, re-due 2 hours out (its own faster
+      // cadence, not the same-day-6PM default), so `sweepNoAnswerCycle`
+      // keeps owning the customer (2-hourly → all-day → physical visit →
+      // L2). A generic Recovery task here would bypass that escalation
+      // counter.
       const stillOpen = (await taskRepository.findByCustomer(task.customerId)).some(
         (t) => t.source === 'No Answer' && !['completed', 'closed', 'cancelled'].includes(t.status)
       );
@@ -169,7 +182,7 @@ async function completeTask(taskId, user) {
       await driveRecoveryTask(task.customerId, {
         headline: 'Previous task closed with no outcome — call the customer again.',
         priority: 'Normal',
-        deadlineHour: 21,
+        deadlineHour: 18,
       });
     }
   }

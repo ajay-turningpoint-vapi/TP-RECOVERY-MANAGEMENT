@@ -16,6 +16,15 @@ import 'package:salesman_mobile/services/realtime_client.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
 
+/// One server-paginated page of a customer's audit history — see
+/// AppStore.fetchAuditHistoryPage. `nextCursor` is null once there's
+/// nothing more to fetch.
+class AuditHistoryPage {
+  final List<AuditEvent> items;
+  final String? nextCursor;
+  AuditHistoryPage({required this.items, required this.nextCursor});
+}
+
 class AppStore extends ChangeNotifier {
   // Empty until a real login response sets these (see the 'fullName' read
   // below) — isLoggedIn starts false, so LoginScreen always renders first
@@ -1196,6 +1205,8 @@ class AppStore extends ChangeNotifier {
             .toList(),
         'raisedDate': DateTime.parse(d['raisedDate'] as String).toLocal(),
         'lastUpdated': DateTime.parse(d['lastUpdated'] as String).toLocal(),
+        'deadline': d['resolutionDeadline'] != null ? DateTime.parse(d['resolutionDeadline'] as String).toLocal() : null,
+        'department': d['department'],
       };
     }).toList();
   }
@@ -1251,7 +1262,12 @@ class AppStore extends ChangeNotifier {
     }
     final previousIds = notifications.map((n) => n.id).toSet();
     for (final n in fresh.where((n) => !n.read && !previousIds.contains(n.id))) {
-      NotificationService.instance.show(id: n.id.hashCode & 0x7fffffff, title: n.title, body: n.body);
+      NotificationService.instance.show(
+        id: n.id.hashCode & 0x7fffffff,
+        title: n.title,
+        body: n.body,
+        icon: NotificationService.iconFor(n.title, n.body),
+      );
     }
   }
 
@@ -1282,6 +1298,19 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// One page of a customer's audit history, newest first — server-side
+  /// keyset pagination (GET /api/customers/:id/audit-history) so a
+  /// long-tenured customer's full history (potentially hundreds of rows)
+  /// is never downloaded up front. Pass the previous page's `nextCursor`
+  /// to fetch the next one; omit it for page one.
+  Future<AuditHistoryPage> fetchAuditHistoryPage(String customerId, {String? cursor, int limit = 20}) async {
+    final json = await apiClient.getCustomerAuditHistoryPage(customerId, cursor: cursor, limit: limit);
+    final items = ((json['items'] as List?) ?? const [])
+        .map((e) => AuditEvent.fromJson(e as Map<String, dynamic>))
+        .toList();
+    return AuditHistoryPage(items: items, nextCursor: json['nextCursor'] as String?);
+  }
+
   /// Revokes the refresh token server-side (via [ApiClient.logout]) so this
   /// is a real session invalidation, not just discarding a local token —
   /// the same refresh token could otherwise still be replayed until its
@@ -1308,7 +1337,7 @@ class AppStore extends ChangeNotifier {
   }
 
   Future<void> approveDispute(String id, String resolutionOwner, DateTime deadline, String description,
-      {String? note, String? attachmentPath}) async {
+      {String? note, String? attachmentPath, String? department}) async {
     final dispute = disputes.firstWhere((d) => d['id'] == id);
     // The server requires a non-empty note for the resolution owner; older
     // callers only supply `description` (the resolution instruction) — use
@@ -1316,10 +1345,14 @@ class AppStore extends ChangeNotifier {
     final effectiveNote = (note != null && note.trim().isNotEmpty) ? note.trim() : description;
     await apiClient.approveDispute(id, {
       'resolutionOwner': resolutionOwner,
-      'deadline': deadline.toIso8601String(),
+      // .toUtc() first — a naive local-time string here gets misread by the
+      // server as UTC (z.coerce.date()), shifting evening IST deadlines
+      // into the next calendar day.
+      'deadline': deadline.toUtc().toIso8601String(),
       'description': description,
       'note': effectiveNote,
       if (attachmentPath != null && attachmentPath.isNotEmpty) 'attachmentPath': attachmentPath,
+      if (department != null && department.isNotEmpty) 'department': department,
     });
     await _refreshDisputesFromApi();
     await _refreshTasksFromApi();
@@ -1350,6 +1383,15 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> rejectDisputeByOwner(String disputeId, String taskId, String reason) async {
+    final dispute = disputes.firstWhere((d) => d['id'] == disputeId);
+    await apiClient.rejectDisputeByOwner(disputeId, {'taskId': taskId, 'reason': reason});
+    await _refreshDisputesFromApi();
+    await _refreshTasksFromApi();
+    await _refreshOneCustomerFromApi(dispute['customerCode'] as String);
+    notifyListeners();
+  }
+
   Future<void> rejectDispute(String id, String reason) async {
     final dispute = disputes.firstWhere((d) => d['id'] == id);
     await apiClient.rejectDispute(id, {'reason': reason});
@@ -1367,7 +1409,7 @@ class AppStore extends ChangeNotifier {
     await apiClient.requestDisputeInfo(id, {
       'salesmanId': salesmanId,
       'desc': desc,
-      'deadline': deadline.toIso8601String(),
+      'deadline': deadline.toUtc().toIso8601String(),
     });
     await _refreshDisputesFromApi();
     await _refreshTasksFromApi();
@@ -1503,9 +1545,9 @@ class AppStore extends ChangeNotifier {
       'nextAction': nextAction,
       'reason': reason,
       'details': details,
-      if (followUpAt != null) 'followUpAt': followUpAt.toIso8601String(),
+      if (followUpAt != null) 'followUpAt': followUpAt.toUtc().toIso8601String(),
       if (ptpAmountValue != null) 'ptpAmountValue': ptpAmountValue,
-      if (ptpDate != null) 'ptpDate': ptpDate.toIso8601String(),
+      if (ptpDate != null) 'ptpDate': ptpDate.toUtc().toIso8601String(),
       if (ptpMode != null) 'ptpMode': ptpMode,
       if (attachmentPath != null) 'attachmentPath': attachmentPath,
       // Salesman is replacing a misrecorded No Answer via "Edit Recorded
@@ -1561,9 +1603,9 @@ class AppStore extends ChangeNotifier {
         'nextAction': nextAction,
         'reason': reason,
         'details': details,
-        if (followUpAt != null) 'followUpAt': followUpAt.toIso8601String(),
+        if (followUpAt != null) 'followUpAt': followUpAt.toUtc().toIso8601String(),
         if (ptpAmountValue != null) 'ptpAmountValue': ptpAmountValue,
-        if (ptpDate != null) 'ptpDate': ptpDate.toIso8601String(),
+        if (ptpDate != null) 'ptpDate': ptpDate.toUtc().toIso8601String(),
         if (ptpMode != null) 'ptpMode': ptpMode,
         if (attachmentPath != null) 'attachmentPath': attachmentPath,
       },
@@ -1574,9 +1616,17 @@ class AppStore extends ChangeNotifier {
   /// Server-authoritative: completion, the "money still due, nothing else
   /// open" reopen guard, and the resulting audit entry are all computed by
   /// taskService.completeTask on the server — see server/README.md. This
-  /// client just calls it and refreshes.
-  Future<void> completeTask(String taskId) async {
-    await apiClient.completeTask(taskId);
+  /// client just calls it and refreshes. `visitPhoto` is required by the
+  /// server (and rejected with a real error if omitted) when this is a
+  /// Physical Visit task — real proof the visit happened, preserved in the
+  /// customer's history alongside the completion.
+  Future<void> completeTask(String taskId, {XFile? visitPhoto}) async {
+    String? attachmentPath;
+    if (visitPhoto != null) {
+      final bytes = await visitPhoto.readAsBytes();
+      attachmentPath = await apiClient.uploadAttachment(bytes, filename: visitPhoto.name, contentType: visitPhoto.mimeType ?? 'image/jpeg');
+    }
+    await apiClient.completeTask(taskId, attachmentPath: attachmentPath);
     tasksCompleted++;
     await _refreshTasksFromApi();
     final task = tasks.firstWhere((t) => t.id == taskId, orElse: () => tasks.first);
@@ -1607,7 +1657,7 @@ class AppStore extends ChangeNotifier {
   /// removed from My Tasks; these RE-side review methods remain in case
   /// any legacy pending requests still exist.
   Future<void> rescheduleTask(String taskId, String reason, DateTime newDeadline) async {
-    await apiClient.rescheduleTask(taskId, {'reason': reason, 'newDeadline': newDeadline.toIso8601String()});
+    await apiClient.rescheduleTask(taskId, {'reason': reason, 'newDeadline': newDeadline.toUtc().toIso8601String()});
     await _refreshTasksFromApi();
     final task = tasks.firstWhere((t) => t.id == taskId, orElse: () => tasks.first);
     await _refreshOneCustomerFromApi(task.customerId);
@@ -1650,7 +1700,7 @@ class AppStore extends ChangeNotifier {
     await apiClient.assignManagementInstruction(customerId, {
       'salesmanId': salesmanId,
       'desc': desc,
-      'deadline': deadline.toIso8601String(),
+      'deadline': deadline.toUtc().toIso8601String(),
       'priority': priority,
       'taskType': taskType,
       if (note != null && note.isNotEmpty) 'note': note,
@@ -1702,40 +1752,22 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Real manual reconciliation of a Scheduled PTP — RE records whether the
-  /// customer actually paid (kept/partiallyKept, with the real amount) or
-  /// didn't (broken, with a reason), after genuinely checking with
-  /// accounts/BUSY. There is no live payment-gateway integration to
-  /// auto-detect this, so this is a real, evidence-backed RE action, not an
-  /// automatic simulation. A broken outcome may re-evaluate the broken-PTP
-  /// escalation ladder server-side (2 broken reaches L2, 3+ reaches L3).
-  Future<void> markPtpOutcome(String ptpId, String outcome, {double? amountReceived, String? brokenReason}) async {
-    final ptp = ptps.firstWhere((p) => p.id == ptpId);
-    await apiClient.markPtpOutcome(ptpId, {
-      'outcome': outcome,
-      if (amountReceived != null) 'amountReceived': amountReceived,
-      if (brokenReason != null) 'brokenReason': brokenReason,
-    });
-    await _refreshPtpsFromApi();
-    await _refreshOneCustomerFromApi(ptp.customerId);
-    await _refreshEscalationsFromApi();
-    notifyListeners();
-  }
-
   // ---------------------------------------------------------------------
   // Escalation (spec §22-§25)
   // ---------------------------------------------------------------------
   /// A real, manual RE escalation via the API. Broken-PTP auto-escalation
   /// is computed server-side (see ptpService.evaluateBrokenPtpEscalation)
-  /// as part of markPtpOutcome — there is no client-side escalation engine
-  /// anymore.
+  /// once ptpVerificationService verifies a PTP as broken against BUSY —
+  /// there is no client-side escalation engine, and no manual "mark PTP
+  /// outcome" path either: a PTP's kept/partiallyKept/broken outcome is
+  /// decided exclusively by that automated BUSY verification.
   Future<void> escalateCustomer(String customerId, String level, String reason, String plan, String ownerId, DateTime deadline) async {
     await apiClient.raiseEscalation(customerId, {
       'level': level,
       'reason': reason,
       'plan': plan,
       'ownerId': ownerId,
-      'deadline': deadline.toIso8601String(),
+      'deadline': deadline.toUtc().toIso8601String(),
       'moneyAtRisk': customers.firstWhere((c) => c.id == customerId).totalDue,
     });
     await _refreshEscalationsFromApi();

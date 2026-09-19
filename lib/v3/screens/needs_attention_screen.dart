@@ -345,10 +345,10 @@ class _NeedsAttentionScreenState extends State<NeedsAttentionScreen> {
             child: Text(title, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: color, letterSpacing: 0.3)),
           ),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+            decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(20)),
             constraints: const BoxConstraints(minWidth: 20),
-            child: Text('$count', textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+            child: Text('$count', textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold, height: 1)),
           ),
           const Spacer(),
           GestureDetector(

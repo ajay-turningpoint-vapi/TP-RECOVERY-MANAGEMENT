@@ -259,7 +259,7 @@ async function finalizeDuePtps(getReceiptTotals = receiptTotalsRepository.getRec
     }
   }
 
-  // Post-commit, same as the manual mark-outcome path.
+  // Post-commit, after every PTP in this run has been decided.
   for (const customerId of brokenCustomerIds) {
     try {
       await evaluateBrokenPtpEscalation(customerId);
