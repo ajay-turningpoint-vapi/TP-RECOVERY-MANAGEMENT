@@ -5,6 +5,7 @@ import 'package:salesman_mobile/v2/stores/app_store.dart';
 import 'package:salesman_mobile/v3/screens/request_detail_scaffold.dart';
 import 'package:salesman_mobile/v3/screens/report_detail_screens.dart';
 import 'package:salesman_mobile/v3/screens/more_menu_screen.dart';
+import 'package:salesman_mobile/widgets/data_loading.dart' show DataLoadingBar;
 
 const _navy = Color(0xFF1B2B48);
 
@@ -48,6 +49,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
         child: ListView(
           padding: const EdgeInsets.all(14),
           children: [
+            const DataLoadingBar(),
             Row(
               children: [
                 IconButton(icon: const Icon(Icons.menu, color: _navy), onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MoreMenuScreen()))),

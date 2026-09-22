@@ -1,0 +1,7 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- Flavor overlay merged onto src/main/AndroidManifest.xml — only the
+         home-screen label differs for the admin build; everything else
+         (permissions, activity, network security config) is inherited. -->
+    <application android:label="TP-RMS Admin" tools:replace="android:label" />
+</manifest>

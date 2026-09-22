@@ -8,9 +8,11 @@ import 'package:salesman_mobile/v2/models/escalation_case.dart';
 import 'package:salesman_mobile/v2/models/task.dart';
 import 'package:salesman_mobile/v2/models/ptp.dart';
 import 'package:salesman_mobile/v2/screens/outcome_forms.dart';
+import 'package:salesman_mobile/services/attachment_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:salesman_mobile/widgets/app_message.dart';
 import 'package:salesman_mobile/widgets/call_helper.dart';
+import 'package:salesman_mobile/widgets/loading_button.dart';
 
 // Indian digit grouping (₹1,23,456, not ₹123,456) — several money labels
 // on this screen used plain toStringAsFixed string interpolation, which
@@ -69,6 +71,12 @@ class Customer360Screen extends StatefulWidget {
 
 class _Customer360ScreenState extends State<Customer360Screen> {
   String? _selectedOutcome;
+  // Set by _showOutcomeBottomSheet when an open Physical Visit task requires
+  // photo proof up front — none of the individual outcome forms (PTP, Will
+  // Confirm, Unable/Refused) collect their own attachment, so without this
+  // a physical visit could be recorded with no evidence at all. Falls back
+  // into _finish() for whichever outcome the salesman ends up picking.
+  XFile? _pendingVisitPhoto;
   bool _isLoading = true;
   // History tab infinite scroll — a long-tenured customer can accumulate
   // hundreds of audit events (every outcome, RE decision, and
@@ -826,15 +834,15 @@ class _Customer360ScreenState extends State<Customer360Screen> {
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: const Color(0xFFFCA5A5), width: 1.6),
       ),
-      child: Column(
+      child: const Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(Icons.error_outline, color: Color(0xFFDC2626), size: 20),
-              const SizedBox(width: 10),
-              const Expanded(
+              Icon(Icons.error_outline, color: Color(0xFFDC2626), size: 20),
+              SizedBox(width: 10),
+              Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -946,7 +954,12 @@ class _Customer360ScreenState extends State<Customer360Screen> {
               d != null &&
               d['customer'] == c.name &&
               d['status'] != 'Resolved' &&
-              d['status'] != 'Rejected',
+              d['status'] != 'Rejected' &&
+              // A dispute the RE has finished verifying and found the
+              // money was never actually received — a concluded outcome,
+              // same as Resolved/Rejected, not something still "open" and
+              // worth showing the salesperson as if it were in progress.
+              d['status'] != 'Returned to Recovery',
           orElse: () => null,
         );
     final reTasks = store.tasks
@@ -956,8 +969,9 @@ class _Customer360ScreenState extends State<Customer360Screen> {
             t.status != TaskStatus.completed)
         .toList();
 
-    if (openDispute == null && c.escalationLevel == 'none' && reTasks.isEmpty)
+    if (openDispute == null && c.escalationLevel == 'none' && reTasks.isEmpty) {
       return null;
+    }
 
     Color statusColor(String status) {
       switch (status) {
@@ -969,6 +983,26 @@ class _Customer360ScreenState extends State<Customer360Screen> {
           return const Color(0xFF0052CC);
         default:
           return const Color(0xFF5A6B87);
+      }
+    }
+
+    // The raw backend status is precise for an RE (who knows the state
+    // machine) but reads wrong to the salesperson who raised it — e.g.
+    // "Approved" on its own sounds like their claim was granted/settled,
+    // when it actually just means the RE accepted it for processing and
+    // handed it to a resolution owner; nothing has been confirmed or
+    // written off yet. This maps the same status to a label that says
+    // what's actually happening from the raiser's side.
+    String raiserStatusLabel(String status) {
+      switch (status) {
+        case 'Approved':
+          return 'In Progress — With Resolution Owner';
+        case 'Awaiting Verification':
+          return 'Resolution Submitted — RE Verifying';
+        case 'In Resolution':
+          return 'In Progress';
+        default:
+          return status;
       }
     }
 
@@ -1007,7 +1041,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                 decoration: BoxDecoration(
                     color: statusColor(openDispute['status']).withOpacity(0.12),
                     borderRadius: BorderRadius.circular(6)),
-                child: Text(openDispute['status'],
+                child: Text(raiserStatusLabel(openDispute['status'] as String),
                     style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.bold,
@@ -1162,7 +1196,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                 const SizedBox(height: 18),
                 SizedBox(
                   width: double.infinity,
-                  child: ElevatedButton(
+                  child: LoadingElevatedButton(
                     style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF0052CC),
                         foregroundColor: Colors.white,
@@ -2765,7 +2799,28 @@ class _Customer360ScreenState extends State<Customer360Screen> {
     );
   }
 
-  void _showOutcomeBottomSheet() {
+  Future<void> _showOutcomeBottomSheet() async {
+    final store = context.read<AppStore>();
+    final c = store.customers.firstWhere((x) => x.id == widget.customer.id, orElse: () => widget.customer);
+    final hasOpenPhysicalVisit = store.tasks.any((t) =>
+        t.customerId == c.id &&
+        t.type == TaskType.physicalVisit &&
+        t.status != TaskStatus.completed);
+
+    // A Physical Visit needs photo proof regardless of what the customer
+    // said — ask for it before showing any outcome option, since PTP / Will
+    // Confirm / Unable-Refused don't collect their own attachment at all
+    // (see _finish, which falls back to this for whichever outcome gets
+    // picked). Cancelling the picker cancels recording the outcome too.
+    if (hasOpenPhysicalVisit) {
+      final photo = await pickEvidenceFile(context);
+      if (photo == null) return;
+      if (!mounted) return;
+      _pendingVisitPhoto = photo;
+    } else {
+      _pendingVisitPhoto = null;
+    }
+
     final outcomes = [
       {
         'title': 'Promise to Pay (PTP)',
@@ -2861,6 +2916,25 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                           ],
                         ),
                       ),
+                      if (_pendingVisitPhoto != null)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFDCFCE7),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.check_circle, size: 16, color: Color(0xFF16A34A)),
+                                SizedBox(width: 8),
+                                Text('Visit photo attached', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: Color(0xFF15803D))),
+                              ],
+                            ),
+                          ),
+                        ),
                       if (_selectedOutcome == null)
                         Padding(
                           padding: const EdgeInsets.all(16.0),
@@ -3023,7 +3097,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
               ? DateTime(pickedDate.year, pickedDate.month, pickedDate.day,
                   pickedTime.hour, pickedTime.minute)
               : null;
-          _finish(
+          return _finish(
             context,
             'PTP Scheduled',
             'PTP of ₹$amt via $mode. Contact: $contact',
@@ -3037,7 +3111,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
         return WillConfirmForm(onSubmit: (date, time) {
           final followUpAt =
               DateTime(date.year, date.month, date.day, time.hour, time.minute);
-          _finish(context, 'Follow-up Scheduled', 'Customer will confirm',
+          return _finish(context, 'Follow-up Scheduled', 'Customer will confirm',
               'Date: ${DateFormat('yyyy-MM-dd').format(date)} Time: ${time.format(context)}',
               followUpAt: followUpAt);
         });
@@ -3094,14 +3168,30 @@ class _Customer360ScreenState extends State<Customer360Screen> {
       XFile? screenshot}) async {
     final store = context.read<AppStore>();
     final navigator = Navigator.of(context);
+    var queuedForSync = false;
+    // The chosen outcome form's own attachment (e.g. Payment Already Made's
+    // payment screenshot) takes priority when there is one; otherwise fall
+    // back to the visit photo collected up front in _showOutcomeBottomSheet
+    // — outcomes like PTP / Will Confirm / Unable-Refused never collect
+    // their own, so without this a Physical Visit could go through with no
+    // evidence attached at all.
+    final effectiveScreenshot = screenshot ?? _pendingVisitPhoto;
 
     try {
-      await store.recordOutcome(widget.customer.id, nextAction, reason, details,
-          followUpAt: followUpAt,
-          ptpAmountValue: ptpAmountValue,
-          ptpDate: ptpDate,
-          ptpMode: ptpMode,
-          screenshot: screenshot);
+      try {
+        await store.recordOutcome(widget.customer.id, nextAction, reason, details,
+            followUpAt: followUpAt,
+            ptpAmountValue: ptpAmountValue,
+            ptpDate: ptpDate,
+            ptpMode: ptpMode,
+            screenshot: effectiveScreenshot);
+      } on QueuedForSyncException {
+        // No network right now — the outcome is saved locally and will
+        // sync automatically once signal returns (see AppStore's offline
+        // write queue). Treat this the same as a successful submission for
+        // navigation purposes; only the message differs below.
+        queuedForSync = true;
+      }
 
       if (widget.recoveryQueue) {
         final visited = <String>{
@@ -3123,18 +3213,23 @@ class _Customer360ScreenState extends State<Customer360Screen> {
             (route) => route.isFirst,
           );
           showAppMessageAfter(navigator,
-              message: 'Outcome recorded: $nextAction — next customer');
+              message: queuedForSync
+                  ? 'Saved — will sync once you\'re back online. Next customer.'
+                  : 'Outcome recorded: $nextAction — next customer');
           return;
         }
         navigator.popUntil((route) => route.isFirst);
         showAppMessageAfter(navigator,
-            message:
-                'Outcome recorded: $nextAction. All customers processed — great work!');
+            message: queuedForSync
+                ? 'Saved — will sync once you\'re back online. All customers processed — great work!'
+                : 'Outcome recorded: $nextAction. All customers processed — great work!');
         return;
       }
 
       navigator.pop();
-      showAppMessageAfter(navigator, message: 'Outcome recorded: $nextAction', type: AppMessageType.success);
+      showAppMessageAfter(navigator,
+          message: queuedForSync ? 'Saved — will sync once you\'re back online' : 'Outcome recorded: $nextAction',
+          type: AppMessageType.success);
     } catch (e) {
       showAppMessageAfter(navigator,
           message: 'Could not record outcome: $e', type: AppMessageType.error);
@@ -3315,8 +3410,9 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                                 firstDate: DateTime.now(),
                                 lastDate: DateTime.now()
                                     .add(const Duration(days: 30)));
-                            if (picked != null)
+                            if (picked != null) {
                               setState(() => selectedDate = picked);
+                            }
                           },
                           child: Container(
                             padding: const EdgeInsets.symmetric(
@@ -3345,7 +3441,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                 const SizedBox(height: 22),
                 SizedBox(
                   width: double.infinity,
-                  child: ElevatedButton(
+                  child: LoadingElevatedButton(
                     style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF0052CC),
                         foregroundColor: Colors.white,
@@ -3358,7 +3454,6 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                         return;
                       }
                       final navigator = Navigator.of(context);
-                      Navigator.pop(sheetCtx);
                       try {
                         await store.assignManagementInstruction(
                             customer.id,
@@ -3367,6 +3462,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                             selectedDate,
                             priority: priority,
                             taskType: taskType);
+                        if (sheetCtx.mounted) Navigator.pop(sheetCtx);
                         showAppMessageAfter(navigator,
                             message: 'Task assigned to agent.');
                       } catch (e) {

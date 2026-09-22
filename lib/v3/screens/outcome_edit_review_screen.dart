@@ -5,6 +5,7 @@ import 'package:salesman_mobile/v2/stores/app_store.dart';
 import 'package:salesman_mobile/v2/screens/customer_360_screen.dart';
 import 'package:salesman_mobile/v3/screens/request_detail_scaffold.dart';
 import 'package:salesman_mobile/widgets/app_message.dart';
+import 'package:salesman_mobile/widgets/loading_button.dart';
 
 const _pink = Color(0xFFDB2777);
 
@@ -28,12 +29,12 @@ class OutcomeEditReviewScreen extends StatelessWidget {
       bannerIcon: Icons.edit_note,
       actions: isPending
           ? [
-              OutlinedButton(
+              LoadingOutlinedButton(
                 style: OutlinedButton.styleFrom(side: const BorderSide(color: kRed), foregroundColor: kRed, padding: const EdgeInsets.symmetric(vertical: 13), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-                onPressed: () => _reject(context, store, r.id),
+                onPressed: () async => _reject(context, store, r.id),
                 child: const Text('Reject', style: TextStyle(fontWeight: FontWeight.bold)),
               ),
-              ElevatedButton(
+              LoadingElevatedButton(
                 style: ElevatedButton.styleFrom(backgroundColor: kGreen, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 13), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
                 onPressed: () async {
                   final navigator = Navigator.of(context);
@@ -98,15 +99,14 @@ class OutcomeEditReviewScreen extends StatelessWidget {
         content: TextField(controller: reasonController, decoration: const InputDecoration(hintText: 'Reason', border: OutlineInputBorder())),
         actions: [
           TextButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('Cancel')),
-          ElevatedButton(
+          LoadingElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: kRed),
             onPressed: () async {
               if (reasonController.text.trim().isEmpty) return;
-              final dialogNavigator = Navigator.of(dialogCtx);
               final screenNavigator = Navigator.of(context);
               try {
                 await store.rejectOutcomeCorrection(id, reasonController.text.trim());
-                dialogNavigator.pop();
+                if (dialogCtx.mounted) Navigator.pop(dialogCtx);
                 screenNavigator.pop();
                 showAppMessageAfter(screenNavigator, message: 'Outcome correction rejected.');
               } catch (e) {

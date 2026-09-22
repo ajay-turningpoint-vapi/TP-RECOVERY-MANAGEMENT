@@ -1,7 +1,7 @@
 // Mirrors the enums used throughout the Flutter app (lib/v2/models) so the
 // API surface stays a drop-in match for the existing client logic.
 
-const ROLES = ['SALESPERSON', 'RECOVERY_EXECUTIVE', 'MANAGEMENT'];
+const ROLES = ['SALESPERSON', 'RECOVERY_EXECUTIVE', 'MANAGEMENT', 'ADMIN'];
 
 const TASK_STATUS = ['pending', 'inProgress', 'completed', 'completedAwaitingVerification', 'closed'];
 

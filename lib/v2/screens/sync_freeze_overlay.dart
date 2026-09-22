@@ -3,7 +3,9 @@ import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:salesman_mobile/v2/screens/maintenance_screen.dart';
 import 'package:salesman_mobile/v2/stores/app_store.dart';
+import 'package:salesman_mobile/v3/screens/pending_sync_screen.dart';
 
 /// Wraps the whole app (see v3/main_v3.dart's MaterialApp.builder) and, for
 /// as long as AppStore.isSyncing is true, blocks every screen behind a
@@ -19,6 +21,26 @@ class SyncFreezeOverlay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
+    // The admin-only kill switch — server-enforced (see
+    // server/src/middleware/auth.js). Two conditions both matter here:
+    // ADMIN is never actually rejected (this now blocks MANAGEMENT too —
+    // the switch moved to ADMIN-only), so this never blocks an admin's own
+    // screen the instant they flip it on (which would strand them with no
+    // way back in to turn it off); and it must only ever apply to the
+    // already-logged-in app shell, never the login screen itself —
+    // checkMaintenanceStatus() runs before anyone's logged in too
+    // (userRole is '' then), and blocking the login FORM would trap an
+    // admin who force-closed the app during an active maintenance window
+    // with no way to sign back in at all. A non-admin's login attempt
+    // still gets rejected with a clear message (see authService.js)
+    // without needing a blocking screen here.
+    final blockedByMaintenance = store.isLoggedIn && store.maintenanceMode && store.userRole != 'ADMIN';
+    if (blockedByMaintenance) {
+      // A genuine full screen, not a popup/curtain over the blurred app —
+      // same widget LoginScreen shows pre-login, so there is exactly one
+      // maintenance UI anywhere in the app.
+      return const MaintenanceScreen();
+    }
     return Stack(
       children: [
         child,
@@ -45,7 +67,135 @@ class SyncFreezeOverlay extends StatelessWidget {
             at: store.syncFailedAt,
             onDismiss: store.dismissSyncFailure,
           ),
+        // Device itself has no signal (not a BUSY-sync failure — see
+        // AppStore._loadFromCache) and the screen is showing the last
+        // locally-cached snapshot instead of a live one. Bottom-anchored so
+        // it never collides with the top sync-failure banner above, and
+        // non-dismissible — it clears itself the instant a live refresh
+        // succeeds (AppStore._refreshAllFromApi clears dataAsOf).
+        if (!store.showSyncCurtain && store.isShowingCachedData)
+          _CachedDataBanner(asOf: store.dataAsOf!, liftedBy: store.pendingActionCount > 0 ? 44 : 0),
+        // A queued offline action is waiting to sync — see AppStore's
+        // pending_action_queue.dart. Tappable to the full list; stacks
+        // above the cached-data banner when both apply.
+        if (!store.showSyncCurtain && store.pendingActionCount > 0) _PendingSyncBanner(count: store.pendingActionCount),
       ],
+    );
+  }
+}
+
+class _PendingSyncBanner extends StatelessWidget {
+  final int count;
+  const _PendingSyncBanner({required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.of(context).padding.bottom;
+    return Positioned(
+      left: 0,
+      right: 0,
+      bottom: 0,
+      child: Padding(
+        padding: EdgeInsets.only(bottom: bottomInset + 8, left: 10, right: 10),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 460),
+            child: Material(
+              type: MaterialType.transparency,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PendingSyncScreen())),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0F766E),
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(color: Colors.black.withOpacity(0.22), blurRadius: 14, offset: const Offset(0, 4)),
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.sync_rounded, color: Colors.white, size: 16),
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: Text(
+                          '$count action${count == 1 ? '' : 's'} waiting to sync',
+                          style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      const Icon(Icons.chevron_right_rounded, color: Colors.white70, size: 16),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CachedDataBanner extends StatelessWidget {
+  final DateTime asOf;
+  // Extra bottom padding so this banner stacks above the pending-sync one
+  // when both are showing at once, instead of overlapping it.
+  final double liftedBy;
+  const _CachedDataBanner({required this.asOf, this.liftedBy = 0});
+
+  String _timeLabel() {
+    final h = asOf.hour % 12 == 0 ? 12 : asOf.hour % 12;
+    final m = asOf.minute.toString().padLeft(2, '0');
+    final ampm = asOf.hour < 12 ? 'AM' : 'PM';
+    return '$h:$m $ampm';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.of(context).padding.bottom;
+    return Positioned(
+      left: 0,
+      right: 0,
+      bottom: 0,
+      child: Padding(
+        padding: EdgeInsets.only(bottom: bottomInset + 8 + liftedBy, left: 10, right: 10),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 460),
+            child: Material(
+              type: MaterialType.transparency,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E293B),
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(color: Colors.black.withOpacity(0.22), blurRadius: 14, offset: const Offset(0, 4)),
+                  ],
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.cloud_off_rounded, color: Colors.white, size: 16),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        'Offline — showing data from ${_timeLabel()}',
+                        style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

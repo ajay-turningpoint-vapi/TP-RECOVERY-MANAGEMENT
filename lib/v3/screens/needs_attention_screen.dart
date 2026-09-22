@@ -6,6 +6,7 @@ import 'package:salesman_mobile/v2/models/customer.dart';
 import 'package:salesman_mobile/v2/models/escalation_case.dart';
 import 'package:salesman_mobile/v2/screens/customer_360_screen.dart';
 import 'package:salesman_mobile/v3/screens/escalations_screen.dart';
+import 'package:salesman_mobile/widgets/data_loading.dart' show LoadingAppBarStrip;
 
 const _dark = Color(0xFF0F172A);
 const _navy = Color(0xFF1B2B48);
@@ -129,6 +130,7 @@ class _NeedsAttentionScreenState extends State<NeedsAttentionScreen> {
             label: const Text('Filter', style: TextStyle(color: Color(0xFF2563EB), fontWeight: FontWeight.bold, fontSize: 12)),
           ),
         ],
+        bottom: const LoadingAppBarStrip(color: Color(0xFF2563EB)),
       ),
       body: Column(
         children: [

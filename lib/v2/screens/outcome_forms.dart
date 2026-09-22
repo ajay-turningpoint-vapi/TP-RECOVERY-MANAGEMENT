@@ -28,8 +28,12 @@ class BaseOutcomeForm extends StatefulWidget {
   // Returns true if validation passed and the outcome was actually
   // submitted upstream; false if validation failed (field errors were set
   // via setState) — the swipe button uses this to decide whether to lock
-  // in as confirmed or snap back with a vibration.
-  final bool Function() onSave;
+  // in as confirmed or snap back with a vibration. Awaited by the swipe
+  // button, which holds a spinner at the end of the track until the real
+  // submit (network or local SQLite write) actually finishes — otherwise
+  // "SAVED" would appear before the write is done, hiding a slow
+  // connection or a later failure behind a false success state.
+  final Future<bool> Function() onSave;
   final String saveText;
 
   const BaseOutcomeForm({
@@ -107,7 +111,7 @@ class _BaseOutcomeFormState extends State<BaseOutcomeForm> with SingleTickerProv
 /// "SAVED" for an outcome that was actually rejected.
 class SwipeToConfirmButton extends StatefulWidget {
   final String label;
-  final bool Function() onConfirmed;
+  final Future<bool> Function() onConfirmed;
   final double height;
 
   const SwipeToConfirmButton({
@@ -135,6 +139,10 @@ class _SwipeToConfirmButtonState extends State<SwipeToConfirmButton> with Ticker
   double _maxDrag = 0; // set from LayoutBuilder each build
   bool _confirmed = false;
   bool _dragging = false;
+  // True from the moment the swipe gesture commits until onConfirmed's
+  // Future actually resolves — the thumb is locked at the end of the
+  // track showing a spinner, not yet "SAVED".
+  bool _pending = false;
 
   static const double _thumbSize = 46;
   static const Color _trackColor = Color(0xFF0052CC);
@@ -164,14 +172,14 @@ class _SwipeToConfirmButtonState extends State<SwipeToConfirmButton> with Ticker
     _snapCtrl.forward(from: 0).whenCompleteOrCancel(() => anim.removeListener(tick));
   }
 
-  void _snapToEnd() {
+  // Locks the thumb at the end of the track without marking the action
+  // confirmed — used both while the real submit is still pending (spinner
+  // shown at the end position) and, separately, once it actually succeeds.
+  void _animateToEnd() {
     final anim = Tween<double>(begin: _dragX, end: _maxDrag).animate(CurvedAnimation(parent: _snapCtrl, curve: Curves.easeOut));
     void tick() => setState(() => _dragX = anim.value);
     anim.addListener(tick);
-    _snapCtrl.forward(from: 0).whenCompleteOrCancel(() {
-      anim.removeListener(tick);
-      if (mounted) setState(() => _confirmed = true);
-    });
+    _snapCtrl.forward(from: 0).whenCompleteOrCancel(() => anim.removeListener(tick));
   }
 
   /// Validation failed — buzz the device and shake the whole track red
@@ -186,17 +194,29 @@ class _SwipeToConfirmButtonState extends State<SwipeToConfirmButton> with Ticker
     _shakeCtrl.forward(from: 0);
   }
 
-  void _handleDragEnd(DragEndDetails details) {
+  Future<void> _handleDragEnd(DragEndDetails details) async {
     setState(() => _dragging = false);
     if (_maxDrag <= 0 || _dragX < _maxDrag * 0.82) {
       _snapBack();
       return;
     }
     // Validation runs the instant the user commits the swipe — never after
-    // the thumb has already visually locked in.
-    final passed = widget.onConfirmed();
+    // the thumb has already visually locked in. Once validation passes,
+    // the thumb locks at the end showing a spinner (not yet "SAVED") until
+    // the real submit — network call or local SQLite write — actually
+    // finishes, so a slow connection never looks like a completed save.
+    setState(() => _pending = true);
+    _animateToEnd();
+    bool passed;
+    try {
+      passed = await widget.onConfirmed();
+    } catch (_) {
+      passed = false;
+    }
+    if (!mounted) return;
+    setState(() => _pending = false);
     if (passed) {
-      _snapToEnd();
+      setState(() => _confirmed = true);
     } else {
       _rejectWithShake();
     }
@@ -220,8 +240,8 @@ class _SwipeToConfirmButtonState extends State<SwipeToConfirmButton> with Ticker
             final shaking = _shakeCtrl.isAnimating;
             final trackColorNow = shaking ? Color.lerp(trackColor, _errorColor, (1 - shakeT).clamp(0.0, 1.0))! : trackColor;
             // Idle hint: the arrow gently nudges right and back, only when
-            // untouched, not confirmed, and not mid-shake.
-            final hintNudge = (!_dragging && !_confirmed && !shaking) ? _hintCtrl.value * 8 : 0.0;
+            // untouched, not confirmed, not pending, and not mid-shake.
+            final hintNudge = (!_dragging && !_confirmed && !_pending && !shaking) ? _hintCtrl.value * 8 : 0.0;
 
             return Transform.translate(
               offset: Offset(shaking ? shakeOffset : 0, 0),
@@ -243,9 +263,9 @@ class _SwipeToConfirmButtonState extends State<SwipeToConfirmButton> with Ticker
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Text(_confirmed ? 'SAVED' : widget.label,
+                            Text(_confirmed ? 'SAVED' : (_pending ? 'SAVING…' : widget.label),
                                 style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15, letterSpacing: 1.0)),
-                            if (!_confirmed) ...[
+                            if (!_confirmed && !_pending) ...[
                               const SizedBox(width: 6),
                               const Icon(Icons.double_arrow_rounded, color: Colors.white70, size: 18),
                             ],
@@ -267,13 +287,15 @@ class _SwipeToConfirmButtonState extends State<SwipeToConfirmButton> with Ticker
                         left: 3 + _dragX + hintNudge,
                         top: 3,
                         child: GestureDetector(
-                          onHorizontalDragStart: (_) => setState(() => _dragging = true),
-                          onHorizontalDragUpdate: (details) {
-                            setState(() {
-                              _dragX = (_dragX + details.delta.dx).clamp(0.0, _maxDrag);
-                            });
-                          },
-                          onHorizontalDragEnd: _handleDragEnd,
+                          onHorizontalDragStart: _pending ? null : (_) => setState(() => _dragging = true),
+                          onHorizontalDragUpdate: _pending
+                              ? null
+                              : (details) {
+                                  setState(() {
+                                    _dragX = (_dragX + details.delta.dx).clamp(0.0, _maxDrag);
+                                  });
+                                },
+                          onHorizontalDragEnd: _pending ? null : _handleDragEnd,
                           child: Container(
                             width: _thumbSize,
                             height: _thumbSize,
@@ -282,11 +304,16 @@ class _SwipeToConfirmButtonState extends State<SwipeToConfirmButton> with Ticker
                               shape: BoxShape.circle,
                               boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 2))],
                             ),
-                            child: Icon(
-                              Icons.arrow_forward_rounded,
-                              color: trackColorNow,
-                              size: 22,
-                            ),
+                            child: _pending
+                                ? Padding(
+                                    padding: const EdgeInsets.all(13),
+                                    child: CircularProgressIndicator(strokeWidth: 2.2, color: trackColorNow),
+                                  )
+                                : Icon(
+                                    Icons.arrow_forward_rounded,
+                                    color: trackColorNow,
+                                    size: 22,
+                                  ),
                           ),
                         ),
                       ),
@@ -358,7 +385,7 @@ Future<XFile?> _pickImage(BuildContext context) async {
 
 // 1. PTP
 class PtpOutcomeForm extends StatefulWidget {
-  final Function(Map<String, dynamic>) onSubmit;
+  final Future<void> Function(Map<String, dynamic>) onSubmit;
   final double maxOutstanding;
 
   /// Pre-fills "Person Spoken To" (e.g. the contact from this customer's
@@ -409,14 +436,14 @@ class _PtpOutcomeFormState extends State<PtpOutcomeForm> {
 
     return BaseOutcomeForm(
       title: 'PTP Details',
-      onSave: () {
+      onSave: () async {
         setState(() {
           _amountError = null;
           _personError = null;
           _dateTimeError = null;
         });
         bool hasError = false;
-        
+
         if (_selectedDate == null || _selectedTime == null) {
           setState(() => _dateTimeError = 'Please select both Date and Time');
           hasError = true;
@@ -436,7 +463,7 @@ class _PtpOutcomeFormState extends State<PtpOutcomeForm> {
 
         if (hasError) return false;
 
-        widget.onSubmit({
+        await widget.onSubmit({
           'amount': amt,
           'person': _personCtrl.text.trim(),
           'mode': _mode,
@@ -536,7 +563,7 @@ class _PtpOutcomeFormState extends State<PtpOutcomeForm> {
 
 // 2. Will Confirm
 class WillConfirmForm extends StatefulWidget {
-  final Function(DateTime, TimeOfDay) onSubmit;
+  final Future<void> Function(DateTime, TimeOfDay) onSubmit;
   const WillConfirmForm({super.key, required this.onSubmit});
   @override
   State<WillConfirmForm> createState() => _WillConfirmFormState();
@@ -554,13 +581,13 @@ class _WillConfirmFormState extends State<WillConfirmForm> {
 
     return BaseOutcomeForm(
       title: 'Will Confirm',
-      onSave: () {
+      onSave: () async {
         setState(() => _dateTimeError = null);
         if (_selectedDate == null || _selectedTime == null) {
           setState(() => _dateTimeError = 'Please select Date and Time');
           return false;
         }
-        widget.onSubmit(_selectedDate!, _selectedTime!);
+        await widget.onSubmit(_selectedDate!, _selectedTime!);
         return true;
       },
       child: Column(
@@ -594,7 +621,7 @@ class _WillConfirmFormState extends State<WillConfirmForm> {
 
 // 3. Payment Already Made
 class PaymentAlreadyMadeForm extends StatefulWidget {
-  final Function(double, XFile?) onSubmit;
+  final Future<void> Function(double, XFile?) onSubmit;
   final double maxOutstanding;
   const PaymentAlreadyMadeForm({super.key, required this.onSubmit, this.maxOutstanding = 0});
   @override
@@ -611,7 +638,7 @@ class _PaymentAlreadyMadeFormState extends State<PaymentAlreadyMadeForm> {
   Widget build(BuildContext context) {
     return BaseOutcomeForm(
       title: 'Payment Already Made',
-      onSave: () {
+      onSave: () async {
         setState(() {
           _amountError = null;
           _imageError = null;
@@ -632,7 +659,7 @@ class _PaymentAlreadyMadeFormState extends State<PaymentAlreadyMadeForm> {
         }
 
         if (hasError) return false;
-        widget.onSubmit(amt, _imageFile);
+        await widget.onSubmit(amt, _imageFile);
         return true;
       },
       child: Column(
@@ -668,7 +695,7 @@ class _PaymentAlreadyMadeFormState extends State<PaymentAlreadyMadeForm> {
 
 // 4. Dispute
 class DisputeForm extends StatefulWidget {
-  final Function(double, String, XFile?) onSubmit;
+  final Future<void> Function(double, String, XFile?) onSubmit;
   final double maxOutstanding;
   const DisputeForm({super.key, required this.onSubmit, this.maxOutstanding = 0});
   @override
@@ -686,7 +713,7 @@ class _DisputeFormState extends State<DisputeForm> {
   Widget build(BuildContext context) {
     return BaseOutcomeForm(
       title: 'Dispute / Issue',
-      onSave: () {
+      onSave: () async {
         setState(() {
           _amountError = null;
           _reasonError = null;
@@ -707,7 +734,7 @@ class _DisputeFormState extends State<DisputeForm> {
         }
 
         if (hasError) return false;
-        widget.onSubmit(amt, _reasonCtrl.text.trim(), _imageFile);
+        await widget.onSubmit(amt, _reasonCtrl.text.trim(), _imageFile);
         return true;
       },
       child: Column(
@@ -742,7 +769,7 @@ class _DisputeFormState extends State<DisputeForm> {
 
 // 5. Internal Action
 class InternalActionForm extends StatefulWidget {
-  final Function(String, XFile?) onSubmit;
+  final Future<void> Function(String, XFile?) onSubmit;
   const InternalActionForm({super.key, required this.onSubmit});
   @override
   State<InternalActionForm> createState() => _InternalActionFormState();
@@ -758,13 +785,13 @@ class _InternalActionFormState extends State<InternalActionForm> {
   Widget build(BuildContext context) {
     return BaseOutcomeForm(
       title: 'Internal Action Required',
-      onSave: () {
+      onSave: () async {
         setState(() => _otherError = null);
         if (_dependency == 'Other' && _otherCtrl.text.trim().isEmpty) {
           setState(() => _otherError = 'Please enter the dependency');
           return false;
         }
-        widget.onSubmit(_dependency == 'Other' ? _otherCtrl.text.trim() : _dependency, _attachment);
+        await widget.onSubmit(_dependency == 'Other' ? _otherCtrl.text.trim() : _dependency, _attachment);
         return true;
       },
       child: Column(
@@ -923,7 +950,7 @@ class _AttachmentPreview extends StatelessWidget {
 
 // 6. No Answer
 class NoAnswerForm extends StatefulWidget {
-  final Function(XFile?) onSubmit;
+  final Future<void> Function(XFile?) onSubmit;
   final int attemptNumber;
   const NoAnswerForm({super.key, required this.onSubmit, required this.attemptNumber});
   @override
@@ -944,7 +971,7 @@ class _NoAnswerFormState extends State<NoAnswerForm> {
   Widget build(BuildContext context) {
     return BaseOutcomeForm(
       title: 'No Answer',
-      onSave: () {
+      onSave: () async {
         setState(() => _imageError = null);
         if (_imageFile == null) {
           setState(() => _imageError = 'Screenshot evidence is required');
@@ -955,7 +982,7 @@ class _NoAnswerFormState extends State<NoAnswerForm> {
         // never stored, never visible anywhere. Now actually threaded
         // through to record-outcome (see AppStore.recordOutcome's
         // screenshot param) so it lands in Customer History for real.
-        widget.onSubmit(_imageFile);
+        await widget.onSubmit(_imageFile);
         return true;
       },
       child: Column(
@@ -1003,7 +1030,7 @@ class _NoAnswerFormState extends State<NoAnswerForm> {
 // branch + missedDeadlineService.sweepRefusedCycle's growing 2/3/4/5-day
 // cadence), not the salesperson.
 class UnableToCommitForm extends StatefulWidget {
-  final Function(String, String) onSubmit;
+  final Future<void> Function(String, String) onSubmit;
   const UnableToCommitForm({super.key, required this.onSubmit});
   @override
   State<UnableToCommitForm> createState() => _UnableToCommitFormState();
@@ -1018,13 +1045,13 @@ class _UnableToCommitFormState extends State<UnableToCommitForm> {
   Widget build(BuildContext context) {
     return BaseOutcomeForm(
       title: 'Unable To Commit',
-      onSave: () {
+      onSave: () async {
         setState(() => _notesError = null);
         if (_reason == 'Other' && _notesCtrl.text.trim().isEmpty) {
           setState(() => _notesError = 'Notes required for "Other" reason');
           return false;
         }
-        widget.onSubmit(_reason, _notesCtrl.text.trim());
+        await widget.onSubmit(_reason, _notesCtrl.text.trim());
         return true;
       },
       child: Column(

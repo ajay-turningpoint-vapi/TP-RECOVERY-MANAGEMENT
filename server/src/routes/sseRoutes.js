@@ -10,6 +10,7 @@
 const { Router } = require('express');
 const { authenticate } = require('../middleware/auth');
 const syncLockService = require('../services/syncLockService');
+const maintenanceService = require('../services/maintenanceService');
 const sseHub = require('../realtime/sseHub');
 const logger = require('../config/logger');
 
@@ -38,6 +39,15 @@ router.get('/', async (req, res) => {
     if (since) sseHub.write(res, 'sync', { type: 'sync', phase: 'started', since });
   } catch (err) {
     logger.warn('[sse] initial sync-state read failed', { message: err.message });
+  }
+
+  // Only a MANAGEMENT connection can even reach here while maintenance is
+  // on (authenticate rejects everyone else before the handler runs) — this
+  // just keeps a manager's own reconnect in sync without waiting for the
+  // next toggle broadcast.
+  const mStatus = maintenanceService.status();
+  if (mStatus.enabled) {
+    sseHub.write(res, 'maintenance', { type: 'maintenance', enabled: true, since: mStatus.since });
   }
 
   const heartbeat = setInterval(() => {

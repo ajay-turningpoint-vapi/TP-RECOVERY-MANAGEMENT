@@ -7,6 +7,8 @@ import 'package:salesman_mobile/v3/screens/ptp_correction_review_screen.dart';
 import 'package:salesman_mobile/v3/screens/outcome_edit_detail_screen.dart';
 import 'package:salesman_mobile/v3/screens/outcome_edit_review_screen.dart';
 import 'package:salesman_mobile/widgets/app_message.dart';
+import 'package:salesman_mobile/widgets/loading_button.dart';
+import 'package:salesman_mobile/widgets/data_loading.dart' show LoadingAppBarStrip;
 
 const _bg = Color(0xFFF8FAFC);
 const _dark = Color(0xFF0F172A);
@@ -44,36 +46,42 @@ void _verifyClaimSheet(BuildContext context, AppStore store, Map<String, dynamic
               const Text('Reconcile this claimed payment against BUSY.',
                   style: TextStyle(fontSize: 12.5, color: _muted)),
               const SizedBox(height: 18),
-              ElevatedButton.icon(
+              LoadingElevatedButton(
                 style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF16A34A), foregroundColor: Colors.white),
-                icon: const Icon(Icons.check_circle_outline, size: 18),
-                label: const Text('Verify Deposit'),
                 onPressed: () async {
                   final rootNav = Navigator.of(context);
-                  Navigator.of(sheetCtx).pop();
                   try {
                     await store.verifyPaymentClaim(claim['id'] as String, true);
+                    if (sheetCtx.mounted) Navigator.of(sheetCtx).pop();
                     showAppMessageAfter(rootNav, message: 'Payment verified — balance reduced.');
                   } catch (e) {
                     showAppMessageAfter(rootNav, message: 'Could not verify: $e', isError: true);
                   }
                 },
+                child: const Row(mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.center, children: [
+                  Icon(Icons.check_circle_outline, size: 18),
+                  SizedBox(width: 8),
+                  Text('Verify Deposit'),
+                ]),
               ),
               const SizedBox(height: 10),
-              OutlinedButton.icon(
+              LoadingOutlinedButton(
                 style: OutlinedButton.styleFrom(foregroundColor: const Color(0xFFDC2626), side: const BorderSide(color: Color(0xFFDC2626))),
-                icon: const Icon(Icons.cancel_outlined, size: 18),
-                label: const Text('Fail Verification'),
                 onPressed: () async {
                   final rootNav = Navigator.of(context);
-                  Navigator.of(sheetCtx).pop();
                   try {
                     await store.verifyPaymentClaim(claim['id'] as String, false);
+                    if (sheetCtx.mounted) Navigator.of(sheetCtx).pop();
                     showAppMessageAfter(rootNav, message: 'Claim failed — customer returned to recovery.');
                   } catch (e) {
                     showAppMessageAfter(rootNav, message: 'Could not verify: $e', isError: true);
                   }
                 },
+                child: const Row(mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.center, children: [
+                  Icon(Icons.cancel_outlined, size: 18),
+                  SizedBox(width: 8),
+                  Text('Fail Verification'),
+                ]),
               ),
             ],
           ),
@@ -107,7 +115,7 @@ class ApprovalsListScreen extends StatelessWidget {
     final items = <_ApprovalItem>[];
 
     for (final d in store.visibleDisputes) {
-      if (d['status'] != 'Pending Approval') continue;
+      if (!AppStore.disputeNeedsReActionStatuses.contains(d['status'])) continue;
       final priority = (d['priority'] as String?) ?? 'Medium';
       items.add(_ApprovalItem(
         type: 'DISPUTE',
@@ -179,6 +187,7 @@ class ApprovalsListScreen extends StatelessWidget {
         elevation: 0,
         foregroundColor: _dark,
         title: Text(onlyCritical ? 'Critical Approvals' : 'Pending Approvals', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: _dark)),
+        bottom: const LoadingAppBarStrip(color: Color(0xFF2563EB)),
       ),
       body: SafeArea(
         child: Column(

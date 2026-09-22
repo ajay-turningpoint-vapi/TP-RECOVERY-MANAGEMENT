@@ -1,7 +1,7 @@
 /**
  * BUSY sync system status/controls — merged from the standalone backend1/
  * admin dashboard. Authenticates via the same /api/auth/login as
- * everyone else (no separate admin login); gated to MANAGEMENT.
+ * everyone else (no separate admin login); gated to MANAGEMENT and ADMIN.
  */
 const { Router } = require('express');
 const asyncHandler = require('../middleware/asyncHandler');
@@ -17,7 +17,7 @@ const { compareCustomerReports } = require('../busySync/validation/customerRepor
 const { BRANCHES } = require('../busySync/config/branches');
 
 const router = Router();
-router.use(authenticate, authorize('MANAGEMENT'));
+router.use(authenticate, authorize('MANAGEMENT', 'ADMIN'));
 
 router.get(
   '/sync/status',
@@ -66,12 +66,19 @@ router.get(
 router.post(
   '/sync/trigger',
   asyncHandler(async (req, res) => {
-    const { started } = await startCustomerAgeingSyncInBackground();
+    // Optional — omitted syncs every branch (unchanged); present, narrows
+    // to just that one (see the admin dashboard's per-branch Sync button).
+    const branch = typeof req.body?.branch === 'string' ? req.body.branch : undefined;
+    if (branch && !BRANCHES.some((b) => b.label === branch)) {
+      res.status(400).json({ message: `Unknown branch: ${branch}` });
+      return;
+    }
+    const { started } = await startCustomerAgeingSyncInBackground(branch);
     if (!started) {
       res.status(409).json({ message: 'A sync run is already in progress.' });
       return;
     }
-    res.status(202).json({ message: 'Sync started.' });
+    res.status(202).json({ message: branch ? `Sync started for ${branch}.` : 'Sync started.' });
   })
 );
 

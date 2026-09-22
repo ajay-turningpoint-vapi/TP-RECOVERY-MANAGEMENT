@@ -5,6 +5,8 @@ import 'package:salesman_mobile/v2/stores/app_store.dart';
 import 'package:salesman_mobile/v2/models/escalation_case.dart';
 import 'package:salesman_mobile/v2/screens/customer_360_screen.dart';
 import 'package:salesman_mobile/widgets/app_message.dart';
+import 'package:salesman_mobile/widgets/loading_button.dart';
+import 'package:salesman_mobile/widgets/data_loading.dart' show DataLoadingBar;
 
 const _bg = Color(0xFFF8FAFC);
 const _dark = Color(0xFF0F172A);
@@ -67,13 +69,20 @@ class _EscalationsScreenState extends State<EscalationsScreen> with SingleTicker
           ],
         ),
       ),
-      body: TabBarView(
-        controller: _tab,
+      body: Column(
         children: [
-          _caseList(context, l2, store),
-          _caseList(context, l3, store),
-          _caseList(context, l4, store),
-          _caseList(context, resolved, store),
+          const DataLoadingBar(),
+          Expanded(
+            child: TabBarView(
+              controller: _tab,
+              children: [
+                _caseList(context, l2, store),
+                _caseList(context, l3, store),
+                _caseList(context, l4, store),
+                _caseList(context, resolved, store),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -222,7 +231,7 @@ class _EscalationsScreenState extends State<EscalationsScreen> with SingleTicker
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('Cancel')),
-            ElevatedButton(
+            LoadingElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: levelColor(nextLevel)),
               onPressed: () async {
                 if (planController.text.trim().isEmpty) {
@@ -230,9 +239,9 @@ class _EscalationsScreenState extends State<EscalationsScreen> with SingleTicker
                   return;
                 }
                 final navigator = Navigator.of(context);
-                Navigator.pop(dialogCtx);
                 try {
                   await store.escalateCustomer(e.customerId, nextLevel, e.reason, planController.text.trim(), e.ownerId, deadline);
+                  if (dialogCtx.mounted) Navigator.pop(dialogCtx);
                   showAppMessageAfter(navigator, message: 'Escalated to $nextLevel.');
                 } catch (err) {
                   showAppMessageAfter(navigator, message: 'Could not escalate: $err', isError: true);
@@ -256,14 +265,14 @@ class _EscalationsScreenState extends State<EscalationsScreen> with SingleTicker
         content: TextField(controller: noteController, decoration: const InputDecoration(hintText: 'Resolution note', border: OutlineInputBorder())),
         actions: [
           TextButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('Cancel')),
-          ElevatedButton(
+          LoadingElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF059669)),
             onPressed: () async {
               if (noteController.text.trim().isEmpty) return;
               final navigator = Navigator.of(context);
-              Navigator.pop(dialogCtx);
               try {
                 await store.resolveEscalation(e.id, noteController.text.trim());
+                if (dialogCtx.mounted) Navigator.pop(dialogCtx);
                 showAppMessageAfter(navigator, message: 'Escalation resolved.');
               } catch (err) {
                 showAppMessageAfter(navigator, message: 'Could not resolve: $err', isError: true);

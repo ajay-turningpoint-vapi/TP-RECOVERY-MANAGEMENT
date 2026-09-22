@@ -6,6 +6,7 @@ import 'package:salesman_mobile/v2/models/escalation_case.dart';
 import 'package:salesman_mobile/v2/models/customer.dart';
 import 'package:salesman_mobile/v3/screens/request_detail_scaffold.dart';
 import 'package:salesman_mobile/widgets/app_message.dart';
+import 'package:salesman_mobile/widgets/loading_button.dart';
 
 final _rupee = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
 
@@ -317,7 +318,7 @@ class _ManagerManagementAttentionScreenState extends State<ManagerManagementAtte
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('Cancel', style: TextStyle(color: kMuted))),
-            ElevatedButton(
+            LoadingElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: kPurple, foregroundColor: Colors.white),
               onPressed: () async {
                 if (descController.text.trim().isEmpty) {
@@ -325,9 +326,9 @@ class _ManagerManagementAttentionScreenState extends State<ManagerManagementAtte
                   return;
                 }
                 final navigator = Navigator.of(context);
-                Navigator.pop(dialogCtx);
                 try {
                   await store.assignManagementInstruction(c.customerId, owner, descController.text.trim(), deadline, priority: priority);
+                  if (dialogCtx.mounted) Navigator.pop(dialogCtx);
                   showAppMessageAfter(navigator, message: 'Management Instruction issued to $owner — due ${DateFormat('dd MMM yyyy').format(deadline)}.');
                 } catch (e) {
                   showAppMessageAfter(navigator, message: 'Could not issue instruction: $e', isError: true);

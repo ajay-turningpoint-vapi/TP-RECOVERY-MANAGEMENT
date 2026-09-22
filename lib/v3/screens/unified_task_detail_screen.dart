@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
@@ -11,6 +12,7 @@ import 'package:salesman_mobile/v2/screens/customer_360_screen.dart';
 import 'package:salesman_mobile/v3/screens/request_detail_scaffold.dart';
 import 'package:salesman_mobile/widgets/app_message.dart';
 import 'package:salesman_mobile/widgets/call_helper.dart';
+import 'package:salesman_mobile/widgets/loading_button.dart';
 import 'package:salesman_mobile/services/attachment_picker.dart';
 
 final _rupee = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
@@ -171,14 +173,14 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('Cancel')),
-            ElevatedButton(
+            LoadingElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: kNavy),
               onPressed: () async {
                 if (reasonController.text.trim().isEmpty) return;
                 final navigator = Navigator.of(context);
-                Navigator.pop(dialogCtx);
                 try {
                   await store.assignManagementInstruction(target.id, s['name'], reasonController.text.trim(), deadline);
+                  if (dialogCtx.mounted) Navigator.pop(dialogCtx);
                   showAppMessageAfter(navigator, message: 'Task assigned to ${(s['fullName'] as String?) ?? s['name']}.');
                 } catch (e) {
                   showAppMessageAfter(navigator, message: 'Could not assign: $e', isError: true);
@@ -219,7 +221,7 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
         color = priority == 'HIGH' ? kRed : (priority == 'MEDIUM' ? kOrange : kBlue);
         bannerIcon = taskTypeIcon(task.type);
         bannerText = task.isOverdue ? 'This task is overdue — action is required.' : 'Due ${DateFormat('dd MMM, hh:mm a').format(task.deadline)}.';
-        description = task.reason;
+        description = friendlyTaskReason(task.reason);
         if (task.type == TaskType.paymentVerification) {
           final claim = store.paymentClaims.cast<Map<String, dynamic>?>().firstWhere((p) => p != null && p['customer'] == customer.name, orElse: () => null);
           actionOptions = claim == null
@@ -273,7 +275,7 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
         color = kPurple;
         bannerIcon = Icons.location_on_outlined;
         bannerText = 'The salesman closed this physical visit without recording an outcome.';
-        description = task.reason;
+        description = friendlyTaskReason(task.reason);
         actionOptions = [
           _ActionOption(Icons.call_outlined, kBlue, 'Call Salesman', 'Ask them what happened on the visit.', () => contactActions(context, store.salesmanPhone(customer.assignedSalesmanId.isNotEmpty ? customer.assignedSalesmanId : task!.ownerId))),
           _ActionOption(Icons.add_task, kNavy, 'Create Task — Call Customer', 'Adds a call-customer task to the salesman\'s list for tomorrow, 9 PM.', () => _createVisitFollowUp(context, store, task!, customer)),
@@ -681,14 +683,14 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('Cancel')),
-            ElevatedButton(
+            LoadingElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: kBlue),
               onPressed: () async {
                 if (reasonController.text.trim().isEmpty) return;
                 final navigator = Navigator.of(context);
-                Navigator.pop(dialogCtx);
                 try {
                   await store.rescheduleTask(t.id, reasonController.text.trim(), newDeadline);
+                  if (dialogCtx.mounted) Navigator.pop(dialogCtx);
                   showAppMessageAfter(navigator, message: 'Task rescheduled.');
                 } catch (e) {
                   showAppMessageAfter(navigator, message: 'Could not reschedule: $e', isError: true);
@@ -782,7 +784,7 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('Cancel')),
-          ElevatedButton(
+          LoadingElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: kBlue),
             onPressed: () async {
               final navigator = Navigator.of(context);
@@ -792,9 +794,9 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
                 alternateContactNumber: altController.text.trim(),
                 branch: branchController.text.trim(),
               );
-              Navigator.pop(dialogCtx);
               try {
                 await store.completeTask(t.id);
+                if (dialogCtx.mounted) Navigator.pop(dialogCtx);
                 navigator.pop();
                 showAppMessageAfter(navigator, message: 'Customer details updated and task closed.');
               } catch (e) {
@@ -846,14 +848,14 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('Cancel')),
-            ElevatedButton(
+            LoadingElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: kGreen),
               onPressed: () async {
                 if (descController.text.trim().isEmpty) return;
                 final navigator = Navigator.of(context);
-                Navigator.pop(dialogCtx);
                 try {
                   await store.approveDispute(d['id'], selectedSalesman, deadline, descController.text.trim());
+                  if (dialogCtx.mounted) Navigator.pop(dialogCtx);
                   navigator.pop();
                   showAppMessageAfter(navigator, message: 'Dispute approved and assigned.');
                 } catch (e) {
@@ -961,14 +963,14 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('Cancel')),
-            ElevatedButton(
+            LoadingElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: kOrange),
               onPressed: () async {
                 if (descController.text.trim().isEmpty) return;
                 final navigator = Navigator.of(context);
-                Navigator.pop(dialogCtx);
                 try {
                   await store.requestDisputeInfo(d['id'], selectedSalesman, descController.text.trim(), deadline);
+                  if (dialogCtx.mounted) Navigator.pop(dialogCtx);
                   navigator.pop();
                   showAppMessageAfter(navigator, message: 'Clarification requested.');
                 } catch (e) {
@@ -1014,14 +1016,14 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('Cancel')),
-            ElevatedButton(
+            LoadingElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: kRed),
               onPressed: () async {
                 if (planController.text.trim().isEmpty) return;
                 final navigator = Navigator.of(context);
-                Navigator.pop(dialogCtx);
                 try {
                   await store.escalateCustomer(customer.id, nextLevel, 'Broken PTP', planController.text.trim(), store.currentSalesmanId, deadline);
+                  if (dialogCtx.mounted) Navigator.pop(dialogCtx);
                   navigator.pop();
                   showAppMessageAfter(navigator, message: 'Escalated to $nextLevel.');
                 } catch (e) {
@@ -1062,32 +1064,44 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
   // Every task action is now a real button pinned to the bottom bar (see
   // RequestDetailScaffold.actions) — a destructive action (red) is an
   // outlined button, everything else is filled in its accent colour.
+  // Wrapped in Loading*Button so the button itself holds a spinner for the
+  // whole of o.onTap() — including, for the approve/reject flows, the gap
+  // between the evidence form closing and the real network call finishing,
+  // which previously had no visible feedback at all.
   Widget _actionButton(_ActionOption o) {
-    final label = Text(o.title,
-        textAlign: TextAlign.center,
-        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5));
+    final child = Row(
+      mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(o.icon, size: 17),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Text(o.title,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5)),
+        ),
+      ],
+    );
     if (o.color == kRed || o.outlined) {
-      return OutlinedButton.icon(
+      return LoadingOutlinedButton(
         style: OutlinedButton.styleFrom(
           foregroundColor: o.color,
           side: BorderSide(color: o.color, width: 1.4),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         ),
-        onPressed: o.onTap,
-        icon: Icon(o.icon, size: 17),
-        label: label,
+        onPressed: () async => await o.onTap(),
+        child: child,
       );
     }
-    return ElevatedButton.icon(
+    return LoadingElevatedButton(
       style: ElevatedButton.styleFrom(
         backgroundColor: o.color,
         foregroundColor: Colors.white,
         elevation: 0,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
-      onPressed: o.onTap,
-      icon: Icon(o.icon, size: 17),
-      label: label,
+      onPressed: () async => await o.onTap(),
+      child: child,
     );
   }
 
@@ -1234,7 +1248,11 @@ class _ActionOption {
   final Color color;
   final String title;
   final String description;
-  final VoidCallback onTap;
+  // FutureOr, not VoidCallback — most of these ultimately trigger a real
+  // network/SQLite write (directly, or via a dialog's own submit), and the
+  // shared _actionButton awaits this to hold a spinner on the button for
+  // its whole duration instead of the button looking dead mid-request.
+  final FutureOr<void> Function() onTap;
   // Secondary/informational actions (navigate, contact) render outlined so
   // only the one real primary action (e.g. Mark Complete) stands out as a
   // solid button — matching the rest of the app's CTA hierarchy instead of

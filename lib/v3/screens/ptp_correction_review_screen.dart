@@ -5,6 +5,7 @@ import 'package:salesman_mobile/v2/stores/app_store.dart';
 import 'package:salesman_mobile/v2/screens/customer_360_screen.dart';
 import 'package:salesman_mobile/v3/screens/request_detail_scaffold.dart';
 import 'package:salesman_mobile/widgets/app_message.dart';
+import 'package:salesman_mobile/widgets/loading_button.dart';
 
 final _rupee = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
 const _teal = Color(0xFF0D9488);
@@ -29,13 +30,16 @@ class PtpCorrectionReviewScreen extends StatelessWidget {
       bannerIcon: Icons.swap_horiz,
       actions: isPending
           ? [
-              OutlinedButton.icon(
+              LoadingOutlinedButton(
                 style: OutlinedButton.styleFrom(side: const BorderSide(color: kRed, width: 1.4), foregroundColor: kRed, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-                onPressed: () => _reject(context, store, p.id),
-                icon: const Icon(Icons.cancel_outlined, size: 17),
-                label: const Text('Reject', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5)),
+                onPressed: () async => _reject(context, store, p.id),
+                child: const Row(mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.center, children: [
+                  Icon(Icons.cancel_outlined, size: 17),
+                  SizedBox(width: 8),
+                  Text('Reject', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5)),
+                ]),
               ),
-              ElevatedButton.icon(
+              LoadingElevatedButton(
                 style: ElevatedButton.styleFrom(backgroundColor: kGreen, foregroundColor: Colors.white, elevation: 0, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
                 onPressed: () async {
                   final navigator = Navigator.of(context);
@@ -47,8 +51,11 @@ class PtpCorrectionReviewScreen extends StatelessWidget {
                     showAppMessageAfter(navigator, message: 'Could not approve: $e', isError: true);
                   }
                 },
-                icon: const Icon(Icons.check_circle_outline, size: 17),
-                label: const Text('Approve', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5)),
+                child: const Row(mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.center, children: [
+                  Icon(Icons.check_circle_outline, size: 17),
+                  SizedBox(width: 8),
+                  Text('Approve', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5)),
+                ]),
               ),
             ]
           : [],
@@ -104,14 +111,14 @@ class PtpCorrectionReviewScreen extends StatelessWidget {
         content: TextField(controller: reasonController, decoration: const InputDecoration(hintText: 'Reason', border: OutlineInputBorder())),
         actions: [
           TextButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('Cancel')),
-          ElevatedButton(
+          LoadingElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: kRed),
             onPressed: () async {
               if (reasonController.text.trim().isEmpty) return;
               final navigator = Navigator.of(context);
-              Navigator.pop(dialogCtx);
               try {
                 await store.rejectPtpCorrection(id, reasonController.text.trim());
+                if (dialogCtx.mounted) Navigator.pop(dialogCtx);
                 navigator.pop();
                 showAppMessageAfter(navigator, message: 'PTP correction rejected.');
               } catch (e) {

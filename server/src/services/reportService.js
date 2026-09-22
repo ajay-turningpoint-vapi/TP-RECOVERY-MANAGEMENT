@@ -12,6 +12,14 @@ const scoringService = require('./scoringService');
 const metricsRepository = require('../repositories/metricsRepository');
 
 const MATURED_STATUSES = ['kept', 'partiallyKept', 'broken'];
+// Every dispute status where an RE/Management action is genuinely needed
+// right now — a fresh claim to approve/reject, or a resolution owner's
+// claim to verify. Distinct from DISPUTE_BUCKETS below (a 4-way status
+// overview for the manager's report screen, where 'Awaiting Verification'
+// is correctly grouped under "In Progress" instead) — this one drives the
+// actionable "needs your attention" badges, which must not drop a dispute
+// the moment it moves from Pending Approval to Awaiting Verification.
+const DISPUTES_NEEDING_RE_ACTION = ['Pending Approval', 'Awaiting Verification'];
 const DISPUTE_BUCKETS = {
   'Awaiting Review': ['Pending Approval'],
   'In Progress': ['In Resolution', 'Awaiting Verification', 'Approved', 'Need More Information'],
@@ -100,7 +108,7 @@ async function getDashboard(user) {
   const scopedOpenEscalations = user.role === 'SALESPERSON' ? openEscalations.filter((e) => customerIds.has(e.customerId)) : openEscalations;
 
   const physicalVisitsPendingReview = allTasks.filter((t) => t.type === 'physicalVisit' && t.status === 'completed' && !t.reviewedByRE);
-  const disputesAwaitingReviewCount = allDisputes.filter((d) => DISPUTE_BUCKETS['Awaiting Review'].includes(d.status)).length;
+  const disputesAwaitingReviewCount = allDisputes.filter((d) => DISPUTES_NEEDING_RE_ACTION.includes(d.status)).length;
   const pendingTaskExtensionCount = allTasks.filter((t) => t.approvalStatus === 'Pending').length;
   const ptpCorrectionRequestsCount = ptps.filter((p) => p.correctionStatus === 'Pending').length;
   const pendingOutcomeCorrectionCount = allOutcomeCorrections.filter((r) => r.status === 'Pending').length;
@@ -250,7 +258,7 @@ async function getRePerformance() {
   const res = users.filter((u) => u.role === 'RECOVERY_EXECUTIVE');
 
   // ---- Pending queue (waiting on the RE right now) ----
-  const disputesPending = disputes.filter((d) => d.status === 'Pending Approval');
+  const disputesPending = disputes.filter((d) => DISPUTES_NEEDING_RE_ACTION.includes(d.status));
   const claimsPending = claims.filter((c) => ['Awaiting Verification', 'Sync Pending'].includes(c.status));
   const ptpCorrectionsPending = allPtps.filter((p) => p.correctionStatus === 'Pending');
   const internalActionsPending = allTasks.filter(

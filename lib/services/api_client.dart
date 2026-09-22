@@ -37,12 +37,16 @@ class ApiException implements Exception {
 /// Auto Backup, so an uninstall+reinstall can never silently restore a
 /// logged-in session.
 class ApiClient {
-  ApiClient({String? baseUrl}) : baseUrl = baseUrl ?? 'http://192.168.1.141:4000';
+  // Public IP (router port-forward -> this Mac's nginx on :80, see
+  // /opt/homebrew/etc/nginx/servers/tprms.conf), so the app works over
+  // mobile data too, not just when a device is on the same LAN.
+  ApiClient({String? baseUrl}) : baseUrl = baseUrl ?? 'http://43.255.141.110';
 
   final String baseUrl;
   static const _storage = FlutterSecureStorage();
   static const _accessTokenKey = 'tp_rms_access_token';
   static const _refreshTokenKey = 'tp_rms_refresh_token';
+  static const _identityKey = 'tp_rms_last_identity';
   static const _requestTimeout = Duration(seconds: 20);
 
   String? _accessToken;
@@ -55,12 +59,39 @@ class ApiClient {
   /// to be, not just from a screen that catches the resulting ApiException.
   void Function()? onSessionExpired;
 
+  /// Set by AppStore. Fired the instant ANY request comes back rejected
+  /// with the manager-only maintenance kill switch (see server's
+  /// middleware/auth.js) — not just the SSE 'maintenance' push, which can
+  /// miss a client whose stream happens to be reconnecting at that exact
+  /// moment. Between the two, every screen's next real request is a second,
+  /// reliable way to notice the block, not just the real-time one.
+  void Function()? onMaintenanceMode;
+
   Future<void> loadPersistedSession() async {
     _accessToken = await _storage.read(key: _accessTokenKey);
     _refreshToken = await _storage.read(key: _refreshTokenKey);
   }
 
   bool get isAuthenticated => _accessToken != null && _refreshToken != null;
+
+  /// The last successfully-fetched `getMe()`/`login()` identity (role/id/
+  /// username/fullName), persisted so a cold start that fails on a pure
+  /// network error (not a real auth rejection) can still route the UI —
+  /// see AppStore.restoreSession's offline fallback, which needs a role/id
+  /// to show cached data with even though this session never reached the
+  /// server. Cleared together with the tokens on an actual logout.
+  Future<void> saveIdentitySnapshot(Map<String, dynamic> user) =>
+      _storage.write(key: _identityKey, value: jsonEncode(user));
+
+  Future<Map<String, dynamic>?> getLastIdentitySnapshot() async {
+    final raw = await _storage.read(key: _identityKey);
+    if (raw == null) return null;
+    try {
+      return jsonDecode(raw) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
+  }
 
   Future<void> _persistSession(String? accessToken, String? refreshToken) async {
     _accessToken = accessToken;
@@ -77,9 +108,10 @@ class ApiClient {
     }
   }
 
-  Map<String, String> get _headers => {
+  Map<String, String> _headers([Map<String, String>? extra]) => {
         'Content-Type': 'application/json',
         if (_accessToken != null) 'Authorization': 'Bearer $_accessToken',
+        if (extra != null) ...extra,
       };
 
   Future<dynamic> _handle(http.Response res) async {
@@ -89,22 +121,24 @@ class ApiClient {
     if (res.statusCode >= 200 && res.statusCode < 300) return body;
 
     final error = body is Map ? body['error'] as Map<String, dynamic>? : null;
+    final code = error?['code'] as String?;
+    if (code == 'MAINTENANCE_MODE') onMaintenanceMode?.call();
     throw ApiException(
       statusCode: res.statusCode,
       message: error?['message'] as String? ?? 'Request failed (${res.statusCode})',
-      code: error?['code'] as String?,
+      code: code,
     );
   }
 
   /// Bare HTTP call with a timeout and friendly translation of network
   /// failures — every caller downstream only ever has to catch
   /// [ApiException], never a raw [SocketException]/[TimeoutException].
-  Future<http.Response> _rawSend(String method, String path, [Map<String, dynamic>? body]) async {
+  Future<http.Response> _rawSend(String method, String path, [Map<String, dynamic>? body, Map<String, String>? extraHeaders]) async {
     final uri = Uri.parse('$baseUrl$path');
     try {
       final future = method == 'GET'
-          ? http.get(uri, headers: _headers)
-          : http.post(uri, headers: _headers, body: body != null ? jsonEncode(body) : null);
+          ? http.get(uri, headers: _headers(extraHeaders))
+          : http.post(uri, headers: _headers(extraHeaders), body: body != null ? jsonEncode(body) : null);
       return await future.timeout(_requestTimeout);
     } on TimeoutException {
       throw ApiException(statusCode: 0, message: 'The server is taking too long to respond. Please try again.');
@@ -123,12 +157,12 @@ class ApiClient {
   /// first place — is the actual mechanism behind "no need to log in all
   /// the time": every screen just calls `_get`/`_post` as before and never
   /// has to know the access token silently rotated mid-request.
-  Future<dynamic> _authedSend(String method, String path, [Map<String, dynamic>? body]) async {
-    var res = await _rawSend(method, path, body);
+  Future<dynamic> _authedSend(String method, String path, [Map<String, dynamic>? body, Map<String, String>? extraHeaders]) async {
+    var res = await _rawSend(method, path, body, extraHeaders);
     if (res.statusCode == 401 && _refreshToken != null) {
       final refreshed = await _tryRefresh();
       if (refreshed) {
-        res = await _rawSend(method, path, body);
+        res = await _rawSend(method, path, body, extraHeaders);
       }
     }
     return _handle(res);
@@ -181,6 +215,17 @@ class ApiClient {
   Future<dynamic> _get(String path) => _authedSend('GET', path);
   Future<dynamic> _post(String path, [Map<String, dynamic>? body]) => _authedSend('POST', path, body);
 
+  /// Generic authenticated POST to any endpoint — used by
+  /// [PendingActionQueue] to flush a queued offline write without needing
+  /// a dedicated typed method per action type (the queue already knows the
+  /// right path/body at enqueue time, since it's built from the same call
+  /// the live path would have made). [idempotencyKey] is sent as
+  /// `X-Idempotency-Key` (see server/src/middleware/idempotency.js) so a
+  /// retry after a lost response replays the original result instead of
+  /// re-executing the mutation.
+  Future<dynamic> postRaw(String path, Map<String, dynamic> body, {required String idempotencyKey}) =>
+      _authedSend('POST', path, body, {'X-Idempotency-Key': idempotencyKey});
+
   /// Force a token refresh, reusing the same single-flight guard the 401
   /// retry path uses. The realtime SSE stream calls this when the server
   /// closes it with a 401 (its long-lived connection outlives the 1h
@@ -198,10 +243,62 @@ class ApiClient {
     final res = await _rawSend('POST', '/api/auth/login', {'username': username, 'password': password});
     final body = await _handle(res) as Map<String, dynamic>;
     await _persistSession(body['accessToken'] as String, body['refreshToken'] as String);
-    return body['user'] as Map<String, dynamic>;
+    final user = body['user'] as Map<String, dynamic>;
+    unawaited(saveIdentitySnapshot(user));
+    return user;
   }
 
-  Future<Map<String, dynamic>> getMe() async => await _get('/api/auth/me') as Map<String, dynamic>;
+  Future<Map<String, dynamic>> getMe() async {
+    final user = await _get('/api/auth/me') as Map<String, dynamic>;
+    unawaited(saveIdentitySnapshot(user));
+    return user;
+  }
+
+  /// The admin-only kill switch's current state — `{enabled, since}`.
+  /// Deliberately callable with no session at all (the login screen needs
+  /// this before anyone's signed in); `_get` sends whatever token exists,
+  /// but the server route itself never requires one for this one.
+  Future<Map<String, dynamic>> getMaintenanceStatus() async =>
+      await _get('/api/maintenance') as Map<String, dynamic>;
+
+  /// Flips the kill switch. Server-enforced ADMIN-only — see
+  /// server/src/routes/maintenanceRoutes.js. While on, every other role
+  /// (including MANAGEMENT) is signed out on its next request.
+  Future<Map<String, dynamic>> setMaintenanceMode(bool enabled) async =>
+      await _post('/api/maintenance', {'enabled': enabled}) as Map<String, dynamic>;
+
+  // ---------------------------------------------------------------------
+  // ADMIN-only (see server/src/routes/busySyncAdminRoutes.js /
+  // adminRoutes.js) — BUSY sync health/trigger and salesperson password
+  // resets. Server-enforced; these calls 403 for any other role.
+  // ---------------------------------------------------------------------
+
+  /// Per-branch BUSY sync health: running state, last run per branch,
+  /// total customer count, MSSQL/MariaDB connectivity.
+  Future<Map<String, dynamic>> getBusySyncHealth() async =>
+      await _get('/api/busy-sync/sync/status') as Map<String, dynamic>;
+
+  /// Most recent sync runs across all branches (newest first).
+  Future<List<dynamic>> getBusySyncRuns({int limit = 20}) async {
+    final body = await _get('/api/busy-sync/sync/runs?limit=$limit') as Map<String, dynamic>;
+    return body['runs'] as List<dynamic>? ?? const [];
+  }
+
+  /// Manually starts a sync run in the background. Omitting [branch] syncs
+  /// every branch (company-wide); passing one (must match a branch label
+  /// exactly, e.g. "Turning Point") narrows the run to just that branch.
+  /// Throws [ApiException] with statusCode 409 if a run — company-wide or
+  /// single-branch — is already in progress (one shared lock server-side).
+  Future<void> triggerBusySync({String? branch}) async {
+    await _post('/api/busy-sync/sync/trigger', branch != null ? {'branch': branch} : null);
+  }
+
+  /// Resets a salesperson's password directly (no current-password check).
+  /// Server refuses this for any non-SALESPERSON target — see
+  /// server/src/services/adminService.js.
+  Future<void> resetSalesmanPassword(String salesmanId, String newPassword) async {
+    await _post('/api/admin/salesmen/$salesmanId/reset-password', {'newPassword': newPassword});
+  }
 
   /// Sets the signed-in user's password directly — no current-password
   /// check (the caller is already authenticated via their access token).
@@ -221,6 +318,7 @@ class ApiClient {
   Future<void> logout() async {
     final token = _refreshToken;
     await _persistSession(null, null);
+    await _storage.delete(key: _identityKey);
     if (token == null) return;
     try {
       await http
@@ -410,10 +508,5 @@ class ApiClient {
   /// authentication, which `Image.network` doesn't send by default).
   String attachmentUrl(String path) => '$baseUrl/api/attachments/$path';
 
-  /// Same URL but with the access token as a query param — for opening a
-  /// PDF in an external viewer via url_launcher, which can't send headers.
-  String attachmentDownloadUrl(String path) =>
-      '$baseUrl/api/attachments/$path${_accessToken != null ? '?token=$_accessToken' : ''}';
-
-  Map<String, String> get attachmentAuthHeaders => _headers;
+  Map<String, String> get attachmentAuthHeaders => _headers();
 }

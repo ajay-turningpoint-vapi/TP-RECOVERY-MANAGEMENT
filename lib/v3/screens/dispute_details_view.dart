@@ -6,6 +6,7 @@ import 'package:salesman_mobile/v2/stores/app_store.dart';
 import 'package:salesman_mobile/v2/screens/customer_360_screen.dart';
 import 'package:salesman_mobile/v3/screens/request_detail_scaffold.dart';
 import 'package:salesman_mobile/widgets/app_message.dart';
+import 'package:salesman_mobile/widgets/loading_button.dart';
 import 'package:salesman_mobile/services/attachment_picker.dart';
 
 final _rupee =
@@ -374,7 +375,7 @@ class DisputeDetailsView extends StatelessWidget {
                     child: Row(
                       children: [
                         Expanded(
-                          child: OutlinedButton(
+                          child: LoadingOutlinedButton(
                             style: OutlinedButton.styleFrom(
                                 side: const BorderSide(color: kOrange),
                                 foregroundColor: kOrange,
@@ -388,7 +389,7 @@ class DisputeDetailsView extends StatelessWidget {
                         ),
                         const SizedBox(width: 8),
                         Expanded(
-                          child: ElevatedButton(
+                          child: LoadingElevatedButton(
                             style: ElevatedButton.styleFrom(
                                 backgroundColor: kGreen,
                                 foregroundColor: Colors.white,
@@ -411,7 +412,7 @@ class DisputeDetailsView extends StatelessWidget {
     );
   }
 
-  void _resolve(BuildContext context, AppStore store, Map<String, dynamic> d, String outcome) async {
+  Future<void> _resolve(BuildContext context, AppStore store, Map<String, dynamic> d, String outcome) async {
     final navigator = Navigator.of(context);
     try {
       await store.resolveDispute(d['id'], outcome);
@@ -620,7 +621,7 @@ class DisputeDetailsView extends StatelessWidget {
                         path = await store.apiClient.uploadAttachment(b, filename: picked!.name, contentType: picked!.mimeType ?? 'image/jpeg');
                       }
                       await store.postDisputeMessage(d['id'], body: body, attachmentPath: path);
-                      Navigator.pop(sheetCtx);
+                      if (sheetCtx.mounted) Navigator.pop(sheetCtx);
                       showAppMessageAfter(navigator, message: 'Message sent.');
                     } catch (e) {
                       setSheet(() => busy = false);
@@ -656,15 +657,15 @@ class DisputeDetailsView extends StatelessWidget {
           TextButton(
               onPressed: () => Navigator.pop(dialogCtx),
               child: const Text('Cancel')),
-          ElevatedButton(
+          LoadingElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: kRed),
             onPressed: () async {
               if (reasonController.text.trim().isEmpty) return;
               final navigator = Navigator.of(context);
-              Navigator.pop(dialogCtx);
               try {
                 await store.rejectDispute(d['id'], reasonController.text.trim());
                 onDecided();
+                if (dialogCtx.mounted) Navigator.pop(dialogCtx);
                 showAppMessageAfter(navigator, message: 'Dispute rejected. Customer returned to recovery.');
               } catch (e) {
                 showAppMessageAfter(navigator, message: 'Could not reject: $e', isError: true);
@@ -732,16 +733,16 @@ class DisputeDetailsView extends StatelessWidget {
             TextButton(
                 onPressed: () => Navigator.pop(dialogCtx),
                 child: const Text('Cancel')),
-            ElevatedButton(
+            LoadingElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: kOrange),
               onPressed: () async {
                 if (descController.text.trim().isEmpty) return;
                 final navigator = Navigator.of(context);
-                Navigator.pop(dialogCtx);
                 try {
                   await store.requestDisputeInfo(d['id'], selectedSalesman,
                       descController.text.trim(), deadline);
                   onDecided();
+                  if (dialogCtx.mounted) Navigator.pop(dialogCtx);
                   showAppMessageAfter(navigator, message: 'Clarification requested from salesperson.');
                 } catch (e) {
                   showAppMessageAfter(navigator, message: 'Could not request clarification: $e', isError: true);

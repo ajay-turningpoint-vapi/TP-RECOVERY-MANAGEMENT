@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:salesman_mobile/v2/screens/maintenance_screen.dart';
 import 'package:salesman_mobile/v2/stores/app_store.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -18,11 +21,19 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
   late AnimationController _shakeController;
   late Animation<double> _shakeAnimation;
 
+  // No SSE while logged out (server requires auth for /api/events), so this
+  // is what lets the notice clear itself the moment maintenance ends,
+  // instead of requiring a force-quit/reopen.
+  Timer? _maintenancePoll;
+
   @override
   void initState() {
     super.initState();
     _shakeController = AnimationController(vsync: this, duration: const Duration(milliseconds: 400));
     _shakeAnimation = Tween<double>(begin: 0, end: 8).chain(CurveTween(curve: Curves.elasticIn)).animate(_shakeController);
+    _maintenancePoll = Timer.periodic(const Duration(seconds: 15), (_) {
+      if (mounted) context.read<AppStore>().checkMaintenanceStatus();
+    });
   }
 
   @override
@@ -30,6 +41,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     _usernameController.dispose();
     _passwordController.dispose();
     _shakeController.dispose();
+    _maintenancePoll?.cancel();
     super.dispose();
   }
 
@@ -65,6 +77,19 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
 
   @override
   Widget build(BuildContext context) {
+    final store = context.watch<AppStore>();
+    // No admin bypass here — Admin signs in through the separate admin app
+    // (see lib/main_admin.dart) and turns maintenance off from there, so
+    // this screen is a genuine dead end for everyone else while it's on.
+    // Same widget SyncFreezeOverlay shows post-login — one maintenance UI
+    // in the whole app, never a popup/curtain.
+    if (store.maintenanceMode) {
+      return const MaintenanceScreen();
+    }
+    return _buildLoginScreen();
+  }
+
+  Widget _buildLoginScreen() {
     return Scaffold(
       backgroundColor: const Color(0xFFF0F4FF),
       body: Center(
@@ -106,133 +131,134 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                 style: TextStyle(fontSize: 13, color: Color(0xFF64748B), fontWeight: FontWeight.w500),
               ),
               const SizedBox(height: 40),
-
-              // Form card
-              AnimatedBuilder(
-                animation: _shakeAnimation,
-                builder: (ctx, child) => Transform.translate(
-                  offset: Offset(_shakeController.isAnimating ? _shakeAnimation.value * ((_shakeController.value * 10).round().isEven ? 1 : -1) : 0, 0),
-                  child: child,
-                ),
-                child: Container(
-                  padding: const EdgeInsets.all(24),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 24, offset: const Offset(0, 8)),
-                    ],
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      const Text(
-                        'Sign In',
-                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
-                      ),
-                      const SizedBox(height: 4),
-                      const Text(
-                        'Enter your credentials to access your account',
-                        style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
-                      ),
-                      const SizedBox(height: 24),
-
-                      // Username field
-                      _buildLabel('Username'),
-                      const SizedBox(height: 8),
-                      TextField(
-                        controller: _usernameController,
-                        keyboardType: TextInputType.emailAddress,
-                        autocorrect: false,
-                        onChanged: (_) => setState(() => _errorMessage = null),
-                        style: const TextStyle(fontSize: 14, color: Color(0xFF0F172A)),
-                        decoration: _inputDecoration(
-                          hint: 'Your TP-RMS username',
-                          icon: Icons.person_outline,
-                          hasError: _errorMessage != null,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-
-                      // Password field
-                      _buildLabel('Password'),
-                      const SizedBox(height: 8),
-                      TextField(
-                        controller: _passwordController,
-                        obscureText: _obscureText,
-                        onChanged: (_) => setState(() => _errorMessage = null),
-                        onSubmitted: (_) => _handleLogin(),
-                        style: const TextStyle(fontSize: 14, color: Color(0xFF0F172A)),
-                        decoration: _inputDecoration(
-                          hint: 'Enter password',
-                          icon: Icons.lock_outline,
-                          hasError: _errorMessage != null,
-                        ).copyWith(
-                          suffixIcon: IconButton(
-                            icon: Icon(
-                              _obscureText ? Icons.visibility_off_outlined : Icons.visibility_outlined,
-                              color: const Color(0xFF64748B),
-                              size: 18,
-                            ),
-                            onPressed: () => setState(() => _obscureText = !_obscureText),
-                          ),
-                        ),
-                      ),
-
-                      // Error message
-                      if (_errorMessage != null) ...[
-                        const SizedBox(height: 12),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFFEF2F2),
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: const Color(0xFFFECACA)),
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(Icons.error_outline, color: Color(0xFFDC2626), size: 16),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  _errorMessage!,
-                                  style: const TextStyle(color: Color(0xFFDC2626), fontSize: 12, fontWeight: FontWeight.w500),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-
-                      const SizedBox(height: 28),
-
-                      // Sign In button
-                      SizedBox(
-                        height: 50,
-                        child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF2563EB),
-                            foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            elevation: 0,
-                          ),
-                          onPressed: _isLoading ? null : _handleLogin,
-                          child: _isLoading
-                              ? const SizedBox(
-                                  height: 20,
-                                  width: 20,
-                                  child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
-                                )
-                              : const Text('Sign In', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
+              _buildLoginCard(),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLoginCard() {
+    return AnimatedBuilder(
+      animation: _shakeAnimation,
+      builder: (ctx, child) => Transform.translate(
+        offset: Offset(_shakeController.isAnimating ? _shakeAnimation.value * ((_shakeController.value * 10).round().isEven ? 1 : -1) : 0, 0),
+        child: child,
+      ),
+      child: Container(
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 24, offset: const Offset(0, 8)),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'Sign In',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Enter your credentials to access your account',
+              style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+            ),
+            const SizedBox(height: 24),
+
+            // Username field
+            _buildLabel('Username'),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _usernameController,
+              keyboardType: TextInputType.emailAddress,
+              autocorrect: false,
+              onChanged: (_) => setState(() => _errorMessage = null),
+              style: const TextStyle(fontSize: 14, color: Color(0xFF0F172A)),
+              decoration: _inputDecoration(
+                hint: 'Your TP-RMS username',
+                icon: Icons.person_outline,
+                hasError: _errorMessage != null,
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Password field
+            _buildLabel('Password'),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _passwordController,
+              obscureText: _obscureText,
+              onChanged: (_) => setState(() => _errorMessage = null),
+              onSubmitted: (_) => _handleLogin(),
+              style: const TextStyle(fontSize: 14, color: Color(0xFF0F172A)),
+              decoration: _inputDecoration(
+                hint: 'Enter password',
+                icon: Icons.lock_outline,
+                hasError: _errorMessage != null,
+              ).copyWith(
+                suffixIcon: IconButton(
+                  icon: Icon(
+                    _obscureText ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                    color: const Color(0xFF64748B),
+                    size: 18,
+                  ),
+                  onPressed: () => setState(() => _obscureText = !_obscureText),
+                ),
+              ),
+            ),
+
+            // Error message
+            if (_errorMessage != null) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFEF2F2),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFFECACA)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.error_outline, color: Color(0xFFDC2626), size: 16),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _errorMessage!,
+                        style: const TextStyle(color: Color(0xFFDC2626), fontSize: 12, fontWeight: FontWeight.w500),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
+            const SizedBox(height: 28),
+
+            // Sign In button
+            SizedBox(
+              height: 50,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF2563EB),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  elevation: 0,
+                ),
+                onPressed: _isLoading ? null : _handleLogin,
+                child: _isLoading
+                    ? const SizedBox(
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
+                      )
+                    : const Text('Sign In', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+              ),
+            ),
+          ],
         ),
       ),
     );

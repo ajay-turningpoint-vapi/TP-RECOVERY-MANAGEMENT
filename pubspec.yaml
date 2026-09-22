@@ -60,6 +60,20 @@ dependencies:
   # assumes newer AGP than this project's AGP 7.3.0.
   speech_to_text: 6.5.1
 
+  # Local cache (last-known customers/tasks/ptps/etc. for offline cold
+  # starts) + the offline write queue (pending outcome/PTP/dispute/etc.
+  # actions recorded while signal is down) — see AppStore's local DB layer.
+  drift: ^2.20.3
+  # Pinned below 0.5.32: newer releases bumped their own module's
+  # compileSdk to 35, which this project's AGP 7.3.0/Gradle 7.6.3
+  # toolchain can't parse (aapt2 too old for the SDK 35 platform jar
+  # format — "RES_TABLE_TYPE_TYPE entry offsets overlap actual entry
+  # data"). 0.5.29 still targets compileSdk 32, avoiding the problem
+  # without an AGP upgrade.
+  sqlite3_flutter_libs: 0.5.29
+  path: ^1.9.0
+  uuid: ^4.5.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -74,6 +88,8 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^3.0.0
+  drift_dev: ^2.20.3
+  build_runner: ^2.4.11
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

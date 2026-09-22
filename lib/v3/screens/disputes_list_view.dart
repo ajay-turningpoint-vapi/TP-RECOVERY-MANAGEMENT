@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:salesman_mobile/v2/stores/app_store.dart';
 import 'package:salesman_mobile/v3/screens/request_detail_scaffold.dart';
+import 'package:salesman_mobile/widgets/data_loading.dart' show LoadingAppBarStrip;
 
 final _rupee = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
 const _navy = Color(0xFF1B2B48);
@@ -108,6 +109,7 @@ class _DisputesListViewState extends State<DisputesListView> {
             label: const Text('Filter', style: TextStyle(color: _blue, fontWeight: FontWeight.bold, fontSize: 12)),
           ),
         ],
+        bottom: const LoadingAppBarStrip(color: _blue),
       ),
       body: Column(
         children: [

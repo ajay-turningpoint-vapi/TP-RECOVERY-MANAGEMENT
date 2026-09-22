@@ -4,6 +4,7 @@ const createApp = require('./app');
 const db = require('./config/db');
 const sseHub = require('./realtime/sseHub');
 const heartbeatService = require('./services/heartbeatService');
+const maintenanceService = require('./services/maintenanceService');
 
 async function main() {
   // Fail fast, loudly, if the database is unreachable at boot — better to
@@ -15,6 +16,8 @@ async function main() {
     logger.error('Could not reach MariaDB at startup — refusing to start.', { message: err.message });
     process.exit(1);
   }
+
+  await maintenanceService.init();
 
   const app = createApp();
   // Redis pub/sub → SSE fan-out. Lives here, not in createApp(), so the

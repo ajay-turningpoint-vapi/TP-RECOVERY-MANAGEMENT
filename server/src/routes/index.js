@@ -22,5 +22,7 @@ router.use('/api/busy-sync', require('./busySyncAdminRoutes'));
 router.use('/api/sync-status', require('./syncStatusRoutes'));
 router.use('/api/attachments', require('./attachmentRoutes'));
 router.use('/api/events', require('./sseRoutes'));
+router.use('/api/maintenance', require('./maintenanceRoutes'));
+router.use('/api/admin', require('./adminRoutes'));
 
 module.exports = router;

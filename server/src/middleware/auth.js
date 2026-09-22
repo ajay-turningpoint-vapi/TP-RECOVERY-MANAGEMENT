@@ -1,6 +1,7 @@
 const { verifyToken } = require('../utils/jwt');
-const { UnauthorizedError, ForbiddenError } = require('../errors/AppError');
+const { UnauthorizedError, ForbiddenError, ServiceUnavailableError } = require('../errors/AppError');
 const userRepository = require('../repositories/userRepository');
+const maintenanceService = require('../services/maintenanceService');
 const asyncHandler = require('./asyncHandler');
 
 /**
@@ -33,6 +34,14 @@ const authenticate = asyncHandler(async (req, res, next) => {
   const currentVersion = await userRepository.getSessionVersion(payload.id);
   if (currentVersion == null || payload.sessionVersion !== currentVersion) {
     throw new UnauthorizedError('Signed in on another device — please log in again');
+  }
+
+  // The admin-only kill switch (see services/maintenanceService.js) —
+  // everyone except ADMIN is rejected here on every request while it's on
+  // (this now includes MANAGEMENT — the switch moved to ADMIN-only), so an
+  // admin always keeps full access to turn it back off.
+  if (maintenanceService.isEnabled() && payload.role !== 'ADMIN') {
+    throw new ServiceUnavailableError('Server is under maintenance. Please try again later.');
   }
 
   req.user = payload;

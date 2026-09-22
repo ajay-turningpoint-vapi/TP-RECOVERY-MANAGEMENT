@@ -69,11 +69,13 @@ class _ManagerAlertsRemindersScreenState extends State<ManagerAlertsRemindersScr
     final overdueCustomers = store.customers.where((c) => c.totalDue > 0 && c.oldestOverdueDays >= 30).toList();
     final ptpDueToday = store.ptps.where((p) => p.status == PtpStatus.scheduled && _isSameDay(p.promiseDate, DateTime.now())).toList();
     final noFollowUp = store.noFollowUpAccounts;
-    // 'Awaiting Verification' belongs to the canonical in-progress bucket
-    // (see AppStore's _disputeInProgressStatuses), not awaiting-review —
-    // matching store.disputesAwaitingReviewCount and the Dispute Status
-    // Report's own bucketing exactly.
-    final disputesAwaiting = store.disputes.where((d) => d['status'] == 'Pending Approval').toList();
+    // Matches AppStore.disputeNeedsReActionStatuses — both a fresh claim
+    // ('Pending Approval') and a resolution owner's submitted claim
+    // ('Awaiting Verification') genuinely need an RE/Manager action, so
+    // both belong in this alert (distinct from the Dispute Status
+    // Report's separate 4-way status *overview*, where 'Awaiting
+    // Verification' is correctly grouped under "In Progress" instead).
+    final disputesAwaiting = store.disputes.where((d) => AppStore.disputeNeedsReActionStatuses.contains(d['status'])).toList();
     final ptpExpired = store.ptps.where((p) => (p.status == PtpStatus.scheduled || p.status == PtpStatus.financialSyncPending) && _isPastDue(p.promiseDate)).toList();
     final recentlyCreatedNoActivity = store.customers.where((c) => c.totalDue > 0 && c.auditHistory.isEmpty).toList();
     final highCreditDays = store.customers.where((c) => c.totalDue > 0 && c.oldestOverdueDays > c.creditDays).toList();

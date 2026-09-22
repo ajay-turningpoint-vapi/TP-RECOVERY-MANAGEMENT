@@ -3,6 +3,8 @@ import 'package:provider/provider.dart';
 import 'package:salesman_mobile/v2/stores/app_store.dart';
 import 'package:intl/intl.dart';
 import 'package:salesman_mobile/widgets/app_message.dart';
+import 'package:salesman_mobile/widgets/loading_button.dart';
+import 'package:salesman_mobile/v3/screens/dispute_detail_screen.dart';
 
 class ReApprovalsTab extends StatefulWidget {
   const ReApprovalsTab({super.key});
@@ -29,7 +31,11 @@ class _ReApprovalsTabState extends State<ReApprovalsTab> with SingleTickerProvid
   @override
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
-    final pendingDisputes = store.visibleDisputes.where((d) => d['status'] == 'Pending Approval').toList();
+    // Tab badge covers both dispute sub-states that need an RE decision —
+    // matches AppStore.disputeNeedsReActionStatuses. 'Pending Approval'
+    // alone used to make this badge (and the tab's own list) silently
+    // undercount the moment a resolution owner submitted their work.
+    final pendingDisputes = store.visibleDisputes.where((d) => AppStore.disputeNeedsReActionStatuses.contains(d['status'])).toList();
     final pendingClaims = store.paymentClaims.where((p) => p['status'] == 'Awaiting Verification' || p['status'] == 'Sync Pending').toList();
     final pendingPtpCorrections = store.ptpCorrectionRequests;
     final pendingOutcomeEdits = store.pendingOutcomeEdits;
@@ -109,7 +115,7 @@ class _ReApprovalsTabState extends State<ReApprovalsTab> with SingleTickerProvid
               Row(
                 children: [
                   Expanded(
-                    child: OutlinedButton(
+                    child: LoadingOutlinedButton(
                       style: OutlinedButton.styleFrom(
                         side: const BorderSide(color: Color(0xFFE53935)),
                         foregroundColor: const Color(0xFFE53935),
@@ -129,7 +135,7 @@ class _ReApprovalsTabState extends State<ReApprovalsTab> with SingleTickerProvid
                   ),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: ElevatedButton(
+                    child: LoadingElevatedButton(
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF388E3C),
                         foregroundColor: Colors.white,
@@ -200,7 +206,7 @@ class _ReApprovalsTabState extends State<ReApprovalsTab> with SingleTickerProvid
               Row(
                 children: [
                   Expanded(
-                    child: OutlinedButton(
+                    child: LoadingOutlinedButton(
                       style: OutlinedButton.styleFrom(
                         side: const BorderSide(color: Color(0xFFE53935)),
                         foregroundColor: const Color(0xFFE53935),
@@ -220,7 +226,7 @@ class _ReApprovalsTabState extends State<ReApprovalsTab> with SingleTickerProvid
                   ),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: ElevatedButton(
+                    child: LoadingElevatedButton(
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF388E3C),
                         foregroundColor: Colors.white,
@@ -249,7 +255,13 @@ class _ReApprovalsTabState extends State<ReApprovalsTab> with SingleTickerProvid
 
   Widget _buildDisputesList(List<Map<String, dynamic>> allDisputes, AppStore store) {
     final pendingDisputes = allDisputes.where((d) => d['status'] == 'Pending Approval').toList();
-    final resolvedDisputes = allDisputes.where((d) => d['status'] != 'Pending Approval').toList();
+    // A resolution owner's submitted claim — needs an RE decision (Verify
+    // & Resolve / Still Unpaid → Recovery), but that's a fuller flow than
+    // this tab's inline Approve/Reject buttons support, so it gets its own
+    // section with a "Review" button through to the real dispute screen
+    // instead of pretending Approve/Reject apply here too.
+    final awaitingVerification = allDisputes.where((d) => d['status'] == 'Awaiting Verification').toList();
+    final resolvedDisputes = allDisputes.where((d) => !AppStore.disputeNeedsReActionStatuses.contains(d['status'])).toList();
     final fmt = NumberFormat.currency(locale: 'en_IN', symbol: '₹ ', decimalDigits: 0);
 
     return ListView(
@@ -259,12 +271,19 @@ class _ReApprovalsTabState extends State<ReApprovalsTab> with SingleTickerProvid
           const Text('AWAITING RE APPROVAL', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF5A6B87), letterSpacing: 0.5)),
           const SizedBox(height: 12),
           ...pendingDisputes.map((d) => _buildDisputeItemCard(d, store, fmt, isPending: true)),
-        ] else
+        ] else if (awaitingVerification.isEmpty)
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 16.0),
             child: Center(child: Text('No pending disputes.', style: TextStyle(color: Color(0xFF5A6B87)))),
           ),
-        
+
+        if (awaitingVerification.isNotEmpty) ...[
+          const SizedBox(height: 24),
+          const Text('NEEDS VERIFICATION', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF5A6B87), letterSpacing: 0.5)),
+          const SizedBox(height: 12),
+          ...awaitingVerification.map((d) => _buildVerificationItemCard(context, d, fmt)),
+        ],
+
         if (resolvedDisputes.isNotEmpty) ...[
           const SizedBox(height: 24),
           const Text('OTHER DISPUTES', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF5A6B87), letterSpacing: 0.5)),
@@ -272,6 +291,55 @@ class _ReApprovalsTabState extends State<ReApprovalsTab> with SingleTickerProvid
           ...resolvedDisputes.map((d) => _buildDisputeItemCard(d, store, fmt, isPending: false)),
         ],
       ],
+    );
+  }
+
+  /// A resolution owner's submitted claim — tapping through opens the full
+  /// dispute screen (Verify & Resolve / Still Unpaid → Recovery), which
+  /// this tab's own inline Approve/Reject/Need Info buttons don't cover.
+  Widget _buildVerificationItemCard(BuildContext context, Map<String, dynamic> d, NumberFormat fmt) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFF57C00).withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Text(d['customer'] as String? ?? 'Unknown customer',
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF1B2B48))),
+              ),
+              const SizedBox(width: 8),
+              Text(fmt.format(d['amount']), style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFF57C00), fontSize: 15)),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text('Reason: ${d['reason']}', style: const TextStyle(fontSize: 12, color: Color(0xFF5A6B87))),
+          const SizedBox(height: 6),
+          const Text('Status: Awaiting Verification', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFF57C00))),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF0052CC),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => DisputeDetailScreen(disputeId: d['id'] as String))),
+              child: const Text('Review', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -445,12 +513,11 @@ class _ReApprovalsTabState extends State<ReApprovalsTab> with SingleTickerProvid
                   onPressed: () => Navigator.pop(dialogCtx),
                   child: const Text('Cancel'),
                 ),
-                ElevatedButton(
+                LoadingElevatedButton(
                   style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0052CC)),
                   onPressed: () async {
                     if (descController.text.trim().isEmpty) return;
                     final navigator = Navigator.of(context);
-                    Navigator.pop(dialogCtx);
                     try {
                       await store.approveDispute(
                         dispute['id'],
@@ -458,6 +525,10 @@ class _ReApprovalsTabState extends State<ReApprovalsTab> with SingleTickerProvid
                         selectedDate,
                         descController.text.trim(),
                       );
+                      // Pop only on success — stays open (button spinning) while
+                      // the request is in flight, so a slow connection never
+                      // looks like a dead button and can't be double-tapped.
+                      if (dialogCtx.mounted) Navigator.pop(dialogCtx);
                       showAppMessageAfter(navigator, message: 'Dispute approved. Resolution task created!');
                     } catch (e) {
                       showAppMessageAfter(navigator, message: 'Could not approve: $e', isError: true);
@@ -502,14 +573,14 @@ class _ReApprovalsTabState extends State<ReApprovalsTab> with SingleTickerProvid
               onPressed: () => Navigator.pop(dialogCtx),
               child: const Text('Cancel'),
             ),
-            ElevatedButton(
+            LoadingElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFE53935)),
               onPressed: () async {
                 if (reasonController.text.trim().isEmpty) return;
                 final navigator = Navigator.of(context);
-                Navigator.pop(dialogCtx);
                 try {
                   await store.rejectDispute(dispute['id'], reasonController.text.trim());
+                  if (dialogCtx.mounted) Navigator.pop(dialogCtx);
                   showAppMessageAfter(navigator, message: 'Dispute rejected. Customer returned to recovery.');
                 } catch (e) {
                   showAppMessageAfter(navigator, message: 'Could not reject: $e', isError: true);
@@ -621,12 +692,11 @@ class _ReApprovalsTabState extends State<ReApprovalsTab> with SingleTickerProvid
                   onPressed: () => Navigator.pop(dialogCtx),
                   child: const Text('Cancel'),
                 ),
-                ElevatedButton(
+                LoadingElevatedButton(
                   style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFF57C00)),
                   onPressed: () async {
                     if (descController.text.trim().isEmpty) return;
                     final navigator = Navigator.of(context);
-                    Navigator.pop(dialogCtx);
                     try {
                       await store.requestDisputeInfo(
                         dispute['id'],
@@ -634,6 +704,7 @@ class _ReApprovalsTabState extends State<ReApprovalsTab> with SingleTickerProvid
                         descController.text.trim(),
                         selectedDate,
                       );
+                      if (dialogCtx.mounted) Navigator.pop(dialogCtx);
                       showAppMessageAfter(navigator, message: 'Information requested. Info gathering task created.');
                     } catch (e) {
                       showAppMessageAfter(navigator, message: 'Could not request info: $e', isError: true);
@@ -705,7 +776,7 @@ class _ReApprovalsTabState extends State<ReApprovalsTab> with SingleTickerProvid
               Row(
                 children: [
                   Expanded(
-                    child: OutlinedButton(
+                    child: LoadingOutlinedButton(
                       style: OutlinedButton.styleFrom(
                         side: const BorderSide(color: Color(0xFFE53935)),
                         foregroundColor: const Color(0xFFE53935),
@@ -725,7 +796,7 @@ class _ReApprovalsTabState extends State<ReApprovalsTab> with SingleTickerProvid
                   ),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: ElevatedButton(
+                    child: LoadingElevatedButton(
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF388E3C),
                         foregroundColor: Colors.white,

@@ -13,8 +13,22 @@ import 'package:salesman_mobile/v2/models/outcome_edit_request.dart';
 import 'package:salesman_mobile/services/api_client.dart';
 import 'package:salesman_mobile/services/notification_service.dart';
 import 'package:salesman_mobile/services/realtime_client.dart';
+import 'package:salesman_mobile/services/local_db.dart';
+import 'package:salesman_mobile/services/pending_action.dart';
+import 'package:salesman_mobile/services/pending_action_queue.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
+
+/// Thrown by a write method (recordOutcome, a PTP/dispute/payment-claim/
+/// task action, ...) instead of the network [ApiException] it caught, when
+/// that failure was network-shaped and the action has been queued for
+/// automatic sync instead of lost. Callers should show a success-toned
+/// "Saved — will sync once you're back online" message, not an error one —
+/// a real (non-network) rejection still throws [ApiException] as before
+/// and is never queued.
+class QueuedForSyncException implements Exception {
+  const QueuedForSyncException();
+}
 
 /// One server-paginated page of a customer's audit history — see
 /// AppStore.fetchAuditHistoryPage. `nextCursor` is null once there's
@@ -32,7 +46,7 @@ class AppStore extends ChangeNotifier {
   // "Rahul"/"Rahul Sharma" persona left over from an old demo account that
   // no longer exists in the real database at all.
   String currentSalesmanId = '';
-  String userRole = ''; // 'SALESPERSON', 'RECOVERY_EXECUTIVE', or 'MANAGEMENT'
+  String userRole = ''; // 'SALESPERSON', 'RECOVERY_EXECUTIVE', 'MANAGEMENT', or 'ADMIN'
   String currentUserFullName = '';
   // The actual login credential (e.g. 'gopal') — distinct from
   // currentSalesmanId, which is the internal DB id (a UUID for real
@@ -94,6 +108,59 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Manager-only kill switch (see server's maintenanceService.js). Blocks
+  // every non-MANAGEMENT request server-side; this is purely the client's
+  // reflection of that state, kept current two ways — whichever fires
+  // first wins: the SSE 'maintenance' push (see _onRealtimeEvent, instant
+  // for an already-connected client) or ApiClient.onMaintenanceMode (fires
+  // off ANY rejected request, covering a client whose stream is mid-
+  // reconnect when the toggle happens). MANAGEMENT itself is never
+  // blocked, so this only ever matters for other roles.
+  bool maintenanceMode = false;
+  DateTime? maintenanceSince;
+
+  void _handleMaintenanceMode() {
+    if (maintenanceMode) return;
+    maintenanceMode = true;
+    notifyListeners();
+  }
+
+  /// Proactive, unauthenticated check — called once from [restoreSession]
+  /// on every cold start so the login screen itself can reflect an active
+  /// maintenance window, not just a login attempt made during one. Also
+  /// polled every 15s by LoginScreen while logged out (no SSE without
+  /// auth), which is how a logged-out user sitting on the maintenance
+  /// screen learns it's over.
+  Future<void> checkMaintenanceStatus() async {
+    try {
+      final result = await apiClient.getMaintenanceStatus();
+      final enabled = result['enabled'] as bool? ?? false;
+      final since = result['since'] as String?;
+      final wasEnabled = maintenanceMode;
+      maintenanceMode = enabled;
+      maintenanceSince = enabled && since != null ? DateTime.tryParse(since) : null;
+      if (wasEnabled && !enabled) _notifyMaintenanceOver();
+      notifyListeners();
+    } catch (_) {
+      // Can't reach the server at all — the normal connectivity handling
+      // elsewhere already covers that; nothing maintenance-specific to do.
+    }
+  }
+
+  /// A real OS notification (not just the screen clearing itself) — the
+  /// maintenance page is deliberately calm/passive ("this page updates on
+  /// its own"), so anyone who backgrounded the app while waiting still
+  /// needs a prompt to come back, not just a silently-changed screen.
+  void _notifyMaintenanceOver() {
+    NotificationService.instance.show(
+      id: 990000001,
+      title: 'Maintenance Complete',
+      body: "You're all set — Clock is back online and ready to use.",
+      icon: 'ic_notif_clock',
+      bigText: true,
+    );
+  }
+
   // Real-time push replaces all client polling. One SSE stream
   // (`GET /api/events`) delivers coarse "these lists changed" events; we
   // re-fetch just those lists. See services/realtime_client.dart.
@@ -117,6 +184,113 @@ class AppStore extends ChangeNotifier {
   bool get hasLoadedInitialData => _hasLoadedInitialData;
   bool get isInitialDataLoading => isLoggedIn && !_hasLoadedInitialData;
 
+  // Surfaced by InitialDataLoader when the very first load (no cache to
+  // fall back on — see _loadFromCache below) fails outright, so the user
+  // gets a real error + retry button instead of an indefinite spinner.
+  String? _initialLoadError;
+  String? get initialLoadError => _initialLoadError;
+
+  // Last-known-good local snapshot (see lib/services/local_db.dart) —
+  // customers/tasks/ptps/etc. survive a cold start with no signal, read
+  // back and shown immediately while a live refresh is attempted in the
+  // background. Non-null means the user is currently looking at cached
+  // data, not a confirmed-live snapshot (see _loadFromCache/dataAsOf).
+  final LocalDb _localDb = LocalDb();
+  DateTime? dataAsOf;
+  bool get isShowingCachedData => dataAsOf != null;
+
+  // Offline write queue (see lib/services/pending_action_queue.dart) — a
+  // Record Outcome / PTP / dispute / payment-claim / task action that fails
+  // on a network error is queued here instead of just failing, and synced
+  // automatically once connectivity returns.
+  late final PendingActionQueue pendingActionQueue = PendingActionQueue(_localDb, apiClient);
+  StreamSubscription<List<PendingAction>>? _pendingActionsSub;
+  Timer? _pendingFlushTimer;
+  List<PendingAction> _pendingActions = [];
+  List<PendingAction> get pendingActions => _pendingActions;
+  int get pendingActionCount => _pendingActions.length;
+  bool hasPendingActionForCustomer(String customerId) =>
+      _pendingActions.any((a) => a.relatedCustomerId == customerId && a.status != 'failedTerminal');
+
+  void _startPendingActionWatch() {
+    _pendingActionsSub?.cancel();
+    _pendingActionsSub = _localDb.watchOpenPendingActions(currentSalesmanId).listen((rows) {
+      _pendingActions = rows;
+      notifyListeners();
+    });
+    _pendingFlushTimer?.cancel();
+    // Backstop: SSE-reconnect and app-resume (see _startRealtime /
+    // onAppResumed) are the primary flush triggers; this just guarantees a
+    // queue never sits stuck if neither fires for a while (e.g. the app
+    // stays foregrounded with a flaky, never-fully-dropped connection).
+    _pendingFlushTimer = Timer.periodic(const Duration(seconds: 60), (_) {
+      unawaited(pendingActionQueue.flush(currentSalesmanId));
+    });
+  }
+
+  void _stopPendingActionWatch() {
+    _pendingActionsSub?.cancel();
+    _pendingActionsSub = null;
+    _pendingFlushTimer?.cancel();
+    _pendingFlushTimer = null;
+    _pendingActions = [];
+  }
+
+  /// Called from main_v3.dart's WidgetsBindingObserver on
+  /// AppLifecycleState.resumed — a salesperson foregrounding the app after
+  /// regaining signal shouldn't have to wait for SSE's own backoff ladder
+  /// (up to 30s) before a queued action flushes.
+  void onAppResumed() {
+    if (!isLoggedIn) return;
+    unawaited(pendingActionQueue.flush(currentSalesmanId));
+  }
+
+  /// Every write method's catch block funnels its [ApiException] through
+  /// here: a real rejection (statusCode != 0) is rethrown unchanged, so
+  /// every existing screen's error handling is untouched for that case. A
+  /// network-shaped failure (statusCode 0) is queued instead, then this
+  /// throws [QueuedForSyncException] so the caller can show a distinct
+  /// "saved, will sync later" message instead of today's error toast. If
+  /// the customer already has an unsynced action pending, the queue itself
+  /// refuses a second one ([PendingActionBlockedException]) — surfaced
+  /// here as a plain [ApiException] so it reads like any other rejection
+  /// rather than a silent no-op.
+  Future<Never> _queueOrRethrow(
+    ApiException e, {
+    required PendingActionType type,
+    required String targetEndpoint,
+    required Map<String, dynamic> payload,
+    String? relatedCustomerId,
+    List<int>? attachmentBytes,
+    String? attachmentContentType,
+  }) async {
+    if (e.statusCode != 0) throw e;
+    try {
+      await pendingActionQueue.enqueue(
+        type: type,
+        targetEndpoint: targetEndpoint,
+        payload: payload,
+        scopeUserId: currentSalesmanId,
+        relatedCustomerId: relatedCustomerId,
+        attachmentBytes: attachmentBytes,
+        attachmentContentType: attachmentContentType,
+      );
+    } on PendingActionBlockedException catch (blocked) {
+      throw ApiException(statusCode: 0, message: blocked.message);
+    }
+    throw const QueuedForSyncException();
+  }
+
+  Future<void> _cacheList(String key, Object? raw) async {
+    if (currentSalesmanId.isEmpty) return;
+    try {
+      await _localDb.putList(key, currentSalesmanId, raw);
+    } catch (_) {
+      // Best-effort — a local disk write failing must never break a live
+      // refresh that otherwise succeeded.
+    }
+  }
+
   // First `_refreshNotificationsFromApi` call each session loads the
   // existing backlog, not newly-arrived items — this suppresses firing a
   // burst of OS notifications for history the user hasn't even opened the
@@ -132,6 +306,7 @@ class AppStore extends ChangeNotifier {
     // back to the login screen from wherever they are, not just from a
     // screen that happens to catch the resulting ApiException.
     apiClient.onSessionExpired = _handleSessionExpired;
+    apiClient.onMaintenanceMode = _handleMaintenanceMode;
   }
 
   List<Customer> customers = [];
@@ -467,8 +642,23 @@ class AppStore extends ChangeNotifier {
   int get physicalVisitsPendingReviewCount =>
       _branchActive ? physicalVisitsPendingReview.length : (_dashboardReport['physicalVisitsPendingReviewCount'] as int?) ?? 0;
   int get disputesAwaitingReviewCount => _branchActive
-      ? visibleDisputes.where((d) => d['status'] == 'Pending Approval').length
+      ? visibleDisputes.where((d) => disputeNeedsReActionStatuses.contains(d['status'])).length
       : (_dashboardReport['disputesAwaitingReviewCount'] as int?) ?? 0;
+
+  /// Every dispute status where an RE/Management action is genuinely
+  /// needed right now — a fresh claim to approve/reject ('Pending
+  /// Approval'), or a resolution owner's claim to verify ('Awaiting
+  /// Verification'). Every RE-facing badge/list/count meaning "how many
+  /// disputes need my attention" must read this, not just 'Pending
+  /// Approval' alone — that was the single root cause behind a dispute
+  /// going silently invisible (no badge, no notification, buried under
+  /// "resolved/other") the moment a resolution owner submitted theirs for
+  /// verification. Distinct from a pure status-overview bucketing (e.g.
+  /// the manager's Dispute Status Report), where 'Awaiting Verification'
+  /// is correctly grouped under "In Progress" instead — that's a
+  /// different question ("what state is it in") from this one ("does it
+  /// need MY action right now").
+  static const Set<String> disputeNeedsReActionStatuses = {'Pending Approval', 'Awaiting Verification'};
   int get pendingTaskExtensionCount => (_dashboardReport['pendingTaskExtensionCount'] as int?) ?? 0;
   int get needsAttentionBadgeCount =>
       _branchActive ? totalOpenTaskItemsCount : (_dashboardReport['needsAttentionBadgeCount'] as int?) ?? 0;
@@ -519,6 +709,7 @@ class AppStore extends ChangeNotifier {
     }
     final raw = await apiClient.getSalesmen();
     salesmen = raw.cast<Map<String, dynamic>>();
+    unawaited(_cacheList('salesmen', raw));
   }
 
   /// RE marks an underperforming salesman's nudge "complete" for today. It
@@ -680,6 +871,11 @@ class AppStore extends ChangeNotifier {
 
   Future<void> _refreshOutcomeCorrectionsFromApi() async {
     final raw = await apiClient.getOutcomeCorrections();
+    _applyOutcomeCorrections(raw);
+    unawaited(_cacheList('outcomeCorrections', raw));
+  }
+
+  void _applyOutcomeCorrections(List<dynamic> raw) {
     final customerNames = {for (final c in customers) c.id: c.name};
     outcomeCorrectionRequests = raw.map((json) {
       final r = json as Map<String, dynamic>;
@@ -735,7 +931,7 @@ class AppStore extends ChangeNotifier {
   /// requests, outcome correction requests, and payment-claim
   /// verifications — see ApprovalsListScreen, which this count matches.
   int get pendingApprovalsCount =>
-      visibleDisputes.where((d) => d['status'] == 'Pending Approval').length +
+      visibleDisputes.where((d) => disputeNeedsReActionStatuses.contains(d['status'])).length +
       ptpCorrectionRequests.length +
       pendingOutcomeEdits.length +
       pendingOutcomeCorrections.length +
@@ -752,7 +948,7 @@ class AppStore extends ChangeNotifier {
       return c.escalationLevel != 'none';
     }
 
-    return visibleDisputes.where((d) => d['status'] == 'Pending Approval' && d['priority'] == 'High').length +
+    return visibleDisputes.where((d) => disputeNeedsReActionStatuses.contains(d['status']) && d['priority'] == 'High').length +
         ptpCorrectionRequests.where((p) => escalated(p.customerId)).length +
         pendingOutcomeEdits.where((r) => escalated(r.customerId)).length +
         pendingOutcomeCorrections.where((r) => escalated(r.customerId)).length +
@@ -764,6 +960,11 @@ class AppStore extends ChangeNotifier {
 
   Future<void> _refreshOutcomeEditsFromApi() async {
     final raw = await apiClient.getOutcomeEdits();
+    _applyOutcomeEdits(raw);
+    unawaited(_cacheList('outcomeEdits', raw));
+  }
+
+  void _applyOutcomeEdits(List<dynamic> raw) {
     final customerNames = {for (final c in customers) c.id: c.name};
     outcomeEditRequests = raw.map((json) {
       final r = json as Map<String, dynamic>;
@@ -837,6 +1038,13 @@ class AppStore extends ChangeNotifier {
   /// previously the persisted token was never read back at all, so every
   /// cold start showed the login screen regardless of any saved session.
   Future<void> restoreSession() async {
+    // Runs unconditionally, whether or not there's a persisted session, so
+    // even someone who's never logged in sees the real maintenance state
+    // on the login screen itself — not just after a rejected login attempt.
+    // Best-effort: a failed check here just means the login screen looks
+    // normal until an actual login attempt reveals the block instead.
+    unawaited(checkMaintenanceStatus());
+
     await apiClient.loadPersistedSession();
     if (!apiClient.isAuthenticated) {
       sessionLoading = false;
@@ -848,15 +1056,104 @@ class AppStore extends ChangeNotifier {
       _applyLoggedInUser(user);
       sessionLoading = false;
       notifyListeners();
-      await _refreshAllFromApi();
+      unawaited(_loadFromCache().then((_) => _refreshDataForRole()).catchError((_) {
+        // _initialLoadError/dataAsOf already reflect the failure —
+        // nothing further to do with the exception itself here.
+      }));
+    } on ApiException catch (e) {
+      if (e.statusCode == 0) {
+        // A pure network failure — the tokens were never actually rejected,
+        // getMe() just couldn't be reached. Logging the user out here would
+        // wipe a perfectly good refresh token over a signal drop (the bug
+        // this replaces). Fall back to the last-known identity + cached
+        // data instead of the login screen.
+        final identity = await apiClient.getLastIdentitySnapshot();
+        final hasCache = identity != null && await _localDb.hasAnyCache(identity['id'] as String);
+        if (identity != null && hasCache) {
+          _applyLoggedInUser(identity);
+          sessionLoading = false;
+          notifyListeners();
+          await _loadFromCache();
+        } else {
+          // Nothing to fall back on (first-ever launch with no signal) —
+          // the one case offline-first genuinely can't help. Same
+          // end-state as before: land on the login screen, but WITHOUT
+          // destroying the stored tokens, since they were never rejected.
+          sessionLoading = false;
+          _initialLoadError = e.message;
+          notifyListeners();
+        }
+      } else if (e.code == 'MAINTENANCE_MODE') {
+        // The manager-only kill switch, not a real auth rejection —
+        // ApiClient.onMaintenanceMode already flipped maintenanceMode to
+        // true. Keep the tokens and last-known identity intact so the app
+        // resumes normally the moment maintenance clears, instead of
+        // forcing a fresh login for something that was never the
+        // session's fault.
+        final identity = await apiClient.getLastIdentitySnapshot();
+        if (identity != null) _applyLoggedInUser(identity);
+        sessionLoading = false;
+        notifyListeners();
+      } else {
+        // A real auth rejection (401/403) — the token is genuinely invalid.
+        await apiClient.logout();
+        isLoggedIn = false;
+        sessionLoading = false;
+        notifyListeners();
+      }
     } catch (_) {
-      // Access token expired and the refresh attempt also failed (refresh
-      // token itself expired/revoked, or genuinely no network at all) —
-      // fall back to the login screen instead of hanging the splash.
       await apiClient.logout();
       isLoggedIn = false;
       sessionLoading = false;
       notifyListeners();
+    }
+  }
+
+  /// Reads back the last-known snapshot for the signed-in user (see
+  /// lib/services/local_db.dart) and populates every in-memory list from
+  /// it, so a cold start with no signal shows real last-known data instead
+  /// of a blank/stuck screen. Sets [dataAsOf] to the oldest list's fetch
+  /// time as a staleness marker — cleared the moment a live refresh
+  /// actually succeeds (see _refreshAllFromApi). No-op if nothing's cached
+  /// yet for this user (first-ever login on this device).
+  Future<void> _loadFromCache() async {
+    if (currentSalesmanId.isEmpty) return;
+    try {
+      final asOf = await _localDb.oldestFetchedAt(currentSalesmanId);
+      if (asOf == null) return; // nothing cached yet for this user
+
+      final rawCustomers = await _localDb.getList('customers', currentSalesmanId);
+      if (rawCustomers != null) _applyCustomers(rawCustomers as List<dynamic>);
+      final rawTasks = await _localDb.getList('tasks', currentSalesmanId);
+      if (rawTasks != null) _applyTasks(rawTasks as List<dynamic>);
+      final rawPtps = await _localDb.getList('ptps', currentSalesmanId);
+      if (rawPtps != null) _applyPtps(rawPtps as List<dynamic>);
+      final rawDisputes = await _localDb.getList('disputes', currentSalesmanId);
+      if (rawDisputes != null) _applyDisputes(rawDisputes as List<dynamic>);
+      final rawClaims = await _localDb.getList('paymentClaims', currentSalesmanId);
+      if (rawClaims != null) _applyPaymentClaims(rawClaims as List<dynamic>);
+      final rawEscalations = await _localDb.getList('escalations', currentSalesmanId);
+      if (rawEscalations != null) _applyEscalations(rawEscalations as List<dynamic>);
+      final rawNotifications = await _localDb.getList('notifications', currentSalesmanId);
+      if (rawNotifications != null) _applyNotifications(rawNotifications as Map<String, dynamic>, notifyOs: false);
+      final rawSalesmen = await _localDb.getList('salesmen', currentSalesmanId);
+      if (rawSalesmen != null) salesmen = (rawSalesmen as List<dynamic>).cast<Map<String, dynamic>>();
+      final rawCorrections = await _localDb.getList('outcomeCorrections', currentSalesmanId);
+      if (rawCorrections != null) _applyOutcomeCorrections(rawCorrections as List<dynamic>);
+      final rawEdits = await _localDb.getList('outcomeEdits', currentSalesmanId);
+      if (rawEdits != null) _applyOutcomeEdits(rawEdits as List<dynamic>);
+      final rawReport = await _localDb.getList('dashboardReport', currentSalesmanId);
+      if (rawReport != null) _dashboardReport = rawReport as Map<String, dynamic>;
+      final rawTrends = await _localDb.getList('trends', currentSalesmanId);
+      if (rawTrends != null) trends = (rawTrends as List<dynamic>).cast<Map<String, dynamic>>();
+
+      dataAsOf = asOf;
+      _hasLoadedInitialData = true;
+      _initialLoadError = null;
+      notifyListeners();
+    } catch (_) {
+      // A corrupt/unreadable cache must never block a live login attempt —
+      // _refreshAllFromApi runs regardless of whether this succeeded.
     }
   }
 
@@ -869,12 +1166,14 @@ class AppStore extends ChangeNotifier {
     lastBusySync = DateTime.now();
     unawaited(_loadBranchFilter());
     _startRealtime();
+    _startPendingActionWatch();
   }
 
   void _handleSessionExpired() {
     isLoggedIn = false;
     _branchFilter = kAllBranches;
     _stopRealtime();
+    _stopPendingActionWatch();
     notifyListeners();
   }
 
@@ -893,6 +1192,9 @@ class AppStore extends ChangeNotifier {
         // includes notifications; `_notificationsPrimed` stays true so a
         // reconnect never re-fires OS banners for the backlog.
         unawaited(_reconnectCatchUp());
+        // A live path to the server exists again — the primary trigger for
+        // flushing anything the offline queue is holding.
+        unawaited(pendingActionQueue.flush(currentSalesmanId));
       }
     });
     _realtimeEventsSub = _realtime.events.listen(_onRealtimeEvent);
@@ -912,7 +1214,7 @@ class AppStore extends ChangeNotifier {
   Future<void> _reconnectCatchUp() async {
     if (!isLoggedIn) return;
     try {
-      await _refreshAllFromApi();
+      await _refreshDataForRole();
       await _refreshSyncStatusFromApi();
     } catch (_) {/* the next event or reconnect retries */}
   }
@@ -935,6 +1237,15 @@ class AppStore extends ChangeNotifier {
         break;
       case 'notification':
         _refreshNotificationsFromApi().then((_) => notifyListeners()).catchError((_) {});
+        break;
+      case 'maintenance':
+        final enabled = e.data['enabled'] as bool? ?? false;
+        final since = e.data['since'] as String?;
+        final wasEnabled = maintenanceMode;
+        maintenanceMode = enabled;
+        maintenanceSince = enabled && since != null ? DateTime.tryParse(since) : null;
+        if (wasEnabled && !enabled) _notifyMaintenanceOver();
+        notifyListeners();
         break;
       case 'invalidate':
         final resources = (e.data['resources'] as List?)?.cast<String>() ?? const <String>[];
@@ -1087,10 +1398,19 @@ class AppStore extends ChangeNotifier {
   /// to know about [ApiException].
   Future<String?> loginWithApi(String username, String password) async {
     try {
+      // A shared device logging in as a DIFFERENT user than whoever used it
+      // last — drop the previous user's cached portfolio so it can never
+      // flash on screen (even briefly, before the first live fetch lands)
+      // for someone else. Same-user re-login keeps the cache, which is the
+      // whole point (an instant warm dashboard next time).
+      final previousIdentity = await apiClient.getLastIdentitySnapshot();
       final user = await apiClient.login(username, password);
+      if (previousIdentity != null && previousIdentity['id'] != user['id']) {
+        unawaited(_localDb.clearFor(previousIdentity['id'] as String));
+      }
       _applyLoggedInUser(user);
 
-      await _refreshAllFromApi();
+      await _refreshDataForRole();
       return null;
     } on ApiException catch (e) {
       return e.message;
@@ -1114,6 +1434,99 @@ class AppStore extends ChangeNotifier {
     }
   }
 
+  /// Admin-only kill switch — server-enforced (see
+  /// server/src/routes/maintenanceRoutes.js), this call itself will 403 for
+  /// anyone else (including MANAGEMENT, which no longer has this at all).
+  /// Sets [maintenanceMode] from the real server response immediately; the
+  /// broadcast SSE 'maintenance' push (see _onRealtimeEvent) then confirms
+  /// the same state for every other connected client, including this one
+  /// on reconnect. Returns null on success, or a user-facing error message
+  /// otherwise.
+  Future<String?> toggleMaintenanceMode(bool enabled) async {
+    try {
+      final result = await apiClient.setMaintenanceMode(enabled);
+      maintenanceMode = result['enabled'] as bool? ?? enabled;
+      final since = result['since'] as String?;
+      maintenanceSince = since != null ? DateTime.tryParse(since) : null;
+      notifyListeners();
+      return null;
+    } on ApiException catch (e) {
+      return e.message;
+    } catch (e) {
+      return 'Could not reach the server. Please check your connection and try again.';
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // ADMIN-only (see server/src/routes/busySyncAdminRoutes.js / adminRoutes.js)
+  // ─────────────────────────────────────────────────────────────────────
+
+  /// Raw pass-through, no AppStore-level caching (same pattern as
+  /// [fetchAuditHistoryPage]) — this data is only ever shown on the one
+  /// Admin screen, never needed elsewhere in the app.
+  Future<Map<String, dynamic>> fetchBusySyncHealth() => apiClient.getBusySyncHealth();
+  Future<List<dynamic>> fetchBusySyncRuns({int limit = 20}) => apiClient.getBusySyncRuns(limit: limit);
+
+  /// Starts a sync run — company-wide when [branch] is omitted, or scoped
+  /// to just that one branch (see admin_scaffold_v3.dart's per-branch Sync
+  /// button). Returns null on success, or a user-facing error message
+  /// (including "already running").
+  Future<String?> triggerBusySync({String? branch}) async {
+    try {
+      await apiClient.triggerBusySync(branch: branch);
+      return null;
+    } on ApiException catch (e) {
+      return e.message;
+    } catch (e) {
+      return 'Could not reach the server. Please check your connection and try again.';
+    }
+  }
+
+  /// Resets a salesperson's password — server refuses any other target
+  /// role. Returns null on success, or a user-facing error message.
+  Future<String?> resetSalesmanPassword(String salesmanId, String newPassword) async {
+    try {
+      await apiClient.resetSalesmanPassword(salesmanId, newPassword);
+      return null;
+    } on ApiException catch (e) {
+      return e.message;
+    } catch (e) {
+      return 'Could not reach the server. Please check your connection and try again.';
+    }
+  }
+
+  /// The post-login data refresh, branched by role. ADMIN has no
+  /// server-side access to customers/tasks/ptps/disputes/etc at all (see
+  /// authorize() gates throughout server/src/routes) — [_refreshAllFromApi]
+  /// would 403 immediately on its first, unguarded call and never even set
+  /// [_hasLoadedInitialData], leaving InitialDataLoader stuck. ADMIN only
+  /// ever needs the salesmen roster (for the password-reset picker), so it
+  /// gets its own lean path that still sets the same completion flags the
+  /// full bundle would. Every other role is unaffected — this just calls
+  /// straight through to [_refreshAllFromApi].
+  Future<void> _refreshDataForRole() async {
+    if (userRole != 'ADMIN') {
+      await _refreshAllFromApi();
+      return;
+    }
+    _refreshInFlight = true;
+    notifyListeners();
+    try {
+      await _refreshSalesmenFromApi();
+      _hasLoadedInitialData = true;
+      _initialLoadError = null;
+      dataAsOf = null;
+    } catch (e) {
+      if (!_hasLoadedInitialData) {
+        _initialLoadError = e is ApiException ? e.message : 'Could not reach the server. Please check your connection and try again.';
+      }
+      rethrow;
+    } finally {
+      _refreshInFlight = false;
+      notifyListeners();
+    }
+  }
+
   /// The full real-data refresh sequence — used both at login and by
   /// [refreshBusySync] (report screens' "refresh" icon).
   Future<void> _refreshAllFromApi() async {
@@ -1121,8 +1534,13 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
     try {
       // Customers first and unguarded — every other list keys off it, so if
-      // this genuinely fails the login should surface the error.
-      await refreshCustomersFromApi();
+      // this genuinely fails the login should surface the error. Bounded
+      // so a network stall can't hang this indefinitely (ApiClient's own
+      // 20s-per-request timeout only covers ONE call; this covers the
+      // whole call including any 401-triggered refresh-and-retry inside
+      // it) — see InitialDataLoader, which shows initialLoadError + a
+      // retry button once _hasLoadedInitialData is still false after this.
+      await refreshCustomersFromApi().timeout(const Duration(seconds: 25));
       await _guardedRefresh('tasks', _refreshTasksFromApi);
       await _guardedRefresh('ptps', _refreshPtpsFromApi);
       await _guardedRefresh('disputes', _refreshDisputesFromApi);
@@ -1134,10 +1552,31 @@ class AppStore extends ChangeNotifier {
       await _guardedRefresh('outcomeEdits', _refreshOutcomeEditsFromApi);
       await _guardedRefresh('reports', _refreshReportsFromApi);
       _hasLoadedInitialData = true;
+      _initialLoadError = null;
+      dataAsOf = null; // this is now a confirmed-live snapshot, not cache
+    } catch (e) {
+      // Only surface as a blocking error state if there's still nothing on
+      // screen at all (no cache was loaded) — with cached data already
+      // showing, a failed background refresh just leaves dataAsOf set and
+      // the offline banner (see sync_freeze_overlay.dart) handles it.
+      if (!_hasLoadedInitialData) {
+        _initialLoadError = e is ApiException ? e.message : 'Could not reach the server. Please check your connection and try again.';
+      }
+      rethrow;
     } finally {
       _refreshInFlight = false;
       notifyListeners();
     }
+  }
+
+  /// Bound to the retry button in InitialDataLoader's error state — a real
+  /// user-triggered retry rather than hoping the SSE client reconnects on
+  /// its own eventually.
+  Future<void> retryInitialLoad() async {
+    if (!isLoggedIn) return;
+    try {
+      await _refreshDataForRole();
+    } catch (_) {/* initialLoadError already set; UI reads it */}
   }
 
   /// Company-wide (or salesperson-scoped) dashboard aggregates and real
@@ -1146,16 +1585,46 @@ class AppStore extends ChangeNotifier {
   /// server/src/services/reportService.js).
   Future<void> _refreshReportsFromApi() async {
     _dashboardReport = await apiClient.getDashboardReport();
-    trends = (await apiClient.getTrends()).cast<Map<String, dynamic>>();
+    final rawTrends = await apiClient.getTrends();
+    trends = rawTrends.cast<Map<String, dynamic>>();
+    unawaited(_cacheList('dashboardReport', _dashboardReport));
+    unawaited(_cacheList('trends', rawTrends));
   }
 
   Future<void> refreshCustomersFromApi() async {
     final raw = await apiClient.getCustomers();
-    customers = raw.map((json) => Customer.fromJson(json as Map<String, dynamic>)).toList();
+    _applyCustomers(raw);
+    unawaited(_cacheList('customers', raw));
+  }
+
+  // GET /api/customers never includes invoices/auditHistory (only the
+  // single-customer detail fetch does — see refreshCustomerDetailFromApi).
+  // This runs on every broad 'customers' SSE invalidation, which fires for
+  // ANY write anywhere in the app, not just to a customer the user has
+  // open — without carrying the previous in-memory values forward, a
+  // Customer 360 screen sitting open on one customer would have its
+  // History/Invoices tabs silently reset to empty the instant some other
+  // salesperson recorded an outcome on a completely different customer.
+  void _applyCustomers(List<dynamic> raw) {
+    final previousById = {for (final c in customers) c.id: c};
+    customers = raw.map((json) {
+      final updated = Customer.fromJson(json as Map<String, dynamic>);
+      final previous = previousById[updated.id];
+      if (previous == null) return updated;
+      return updated.copyWith(
+        auditHistory: updated.auditHistory.isEmpty ? previous.auditHistory : updated.auditHistory,
+        invoices: updated.invoices.isEmpty ? previous.invoices : updated.invoices,
+      );
+    }).toList();
   }
 
   Future<void> _refreshTasksFromApi() async {
     final raw = await apiClient.getTasks();
+    _applyTasks(raw);
+    unawaited(_cacheList('tasks', raw));
+  }
+
+  void _applyTasks(List<dynamic> raw) {
     final customerNames = {for (final c in customers) c.id: c.name};
     tasks = raw.map((json) {
       final map = json as Map<String, dynamic>;
@@ -1165,6 +1634,11 @@ class AppStore extends ChangeNotifier {
 
   Future<void> _refreshPtpsFromApi() async {
     final raw = await apiClient.getPtps();
+    _applyPtps(raw);
+    unawaited(_cacheList('ptps', raw));
+  }
+
+  void _applyPtps(List<dynamic> raw) {
     ptps = raw.map((json) => PromiseToPay.fromJson(json as Map<String, dynamic>)).toList();
   }
 
@@ -1175,6 +1649,11 @@ class AppStore extends ChangeNotifier {
   /// of those screens need to change.
   Future<void> _refreshDisputesFromApi() async {
     final raw = await apiClient.getDisputes();
+    _applyDisputes(raw);
+    unawaited(_cacheList('disputes', raw));
+  }
+
+  void _applyDisputes(List<dynamic> raw) {
     final customerNames = {for (final c in customers) c.id: c.name};
     disputes = raw.map((json) {
       final d = json as Map<String, dynamic>;
@@ -1213,6 +1692,11 @@ class AppStore extends ChangeNotifier {
 
   Future<void> _refreshPaymentClaimsFromApi() async {
     final raw = await apiClient.getPaymentClaims();
+    _applyPaymentClaims(raw);
+    unawaited(_cacheList('paymentClaims', raw));
+  }
+
+  void _applyPaymentClaims(List<dynamic> raw) {
     final customerNames = {for (final c in customers) c.id: c.name};
     paymentClaims = raw.map((json) {
       final p = json as Map<String, dynamic>;
@@ -1232,6 +1716,11 @@ class AppStore extends ChangeNotifier {
 
   Future<void> _refreshEscalationsFromApi() async {
     final raw = await apiClient.getEscalations();
+    _applyEscalations(raw);
+    unawaited(_cacheList('escalations', raw));
+  }
+
+  void _applyEscalations(List<dynamic> raw) {
     final customerNames = {for (final c in customers) c.id: c.name};
     escalationCases = raw.map((json) {
       final e = json as Map<String, dynamic>;
@@ -1241,9 +1730,19 @@ class AppStore extends ChangeNotifier {
 
   Future<void> _refreshNotificationsFromApi() async {
     final raw = await apiClient.getNotifications();
+    // Cache first — _applyNotifications diffs against the PREVIOUS in-memory
+    // `notifications` to decide what's "new" (see _notifyAboutNewlyArrived),
+    // so caching after would cache post-diff state instead of the raw
+    // response; doesn't matter for replay (cache load never re-fires OS
+    // notifications, see _loadFromCache), so order here is inconsequential.
+    unawaited(_cacheList('notifications', raw));
+    _applyNotifications(raw, notifyOs: true);
+  }
+
+  void _applyNotifications(Map<String, dynamic> raw, {required bool notifyOs}) {
     final items = raw['items'] as List<dynamic>;
     final fresh = items.map((json) => NotificationItem.fromJson(json as Map<String, dynamic>)).toList();
-    _notifyAboutNewlyArrived(fresh);
+    if (notifyOs) _notifyAboutNewlyArrived(fresh);
     notifications = fresh;
   }
 
@@ -1319,6 +1818,7 @@ class AppStore extends ChangeNotifier {
     isLoggedIn = false;
     _branchFilter = kAllBranches;
     _stopRealtime();
+    _stopPendingActionWatch();
     isSyncing = false;
     notifyListeners();
     await apiClient.logout();
@@ -1330,20 +1830,28 @@ class AppStore extends ChangeNotifier {
   /// 'Returned to Recovery' (nothing was received — no money moves).
   Future<void> resolveDispute(String id, String outcome, {String? note}) async {
     final dispute = disputes.firstWhere((d) => d['id'] == id);
-    await apiClient.resolveDispute(id, {'outcome': outcome, if (note != null) 'note': note});
+    final customerId = dispute['customerCode'] as String;
+    final body = {'outcome': outcome, if (note != null) 'note': note};
+    try {
+      await apiClient.resolveDispute(id, body);
+    } on ApiException catch (e) {
+      await _queueOrRethrow(e,
+          type: PendingActionType.disputeResolve, targetEndpoint: '/api/disputes/$id/resolve', payload: body, relatedCustomerId: customerId);
+    }
     await _refreshDisputesFromApi();
-    await _refreshOneCustomerFromApi(dispute['customerCode'] as String);
+    await _refreshOneCustomerFromApi(customerId);
     notifyListeners();
   }
 
   Future<void> approveDispute(String id, String resolutionOwner, DateTime deadline, String description,
       {String? note, String? attachmentPath, String? department}) async {
     final dispute = disputes.firstWhere((d) => d['id'] == id);
+    final customerId = dispute['customerCode'] as String;
     // The server requires a non-empty note for the resolution owner; older
     // callers only supply `description` (the resolution instruction) — use
     // that as the note when none is given.
     final effectiveNote = (note != null && note.trim().isNotEmpty) ? note.trim() : description;
-    await apiClient.approveDispute(id, {
+    final body = {
       'resolutionOwner': resolutionOwner,
       // .toUtc() first — a naive local-time string here gets misread by the
       // server as UTC (z.coerce.date()), shifting evening IST deadlines
@@ -1353,19 +1861,35 @@ class AppStore extends ChangeNotifier {
       'note': effectiveNote,
       if (attachmentPath != null && attachmentPath.isNotEmpty) 'attachmentPath': attachmentPath,
       if (department != null && department.isNotEmpty) 'department': department,
-    });
+    };
+    try {
+      await apiClient.approveDispute(id, body);
+    } on ApiException catch (e) {
+      await _queueOrRethrow(e,
+          type: PendingActionType.disputeApprove, targetEndpoint: '/api/disputes/$id/approve', payload: body, relatedCustomerId: customerId);
+    }
     await _refreshDisputesFromApi();
     await _refreshTasksFromApi();
-    await _refreshOneCustomerFromApi(dispute['customerCode'] as String);
+    await _refreshOneCustomerFromApi(customerId);
     notifyListeners();
   }
 
   /// Free back-and-forth message on a dispute (RE ⇄ resolution-owner salesman).
   Future<void> postDisputeMessage(String disputeId, {required String body, String? attachmentPath}) async {
-    await apiClient.postDisputeMessage(disputeId, {
+    final payload = {
       'body': body,
       if (attachmentPath != null && attachmentPath.isNotEmpty) 'attachmentPath': attachmentPath,
-    });
+    };
+    final dispute = disputes.firstWhere((d) => d['id'] == disputeId);
+    try {
+      await apiClient.postDisputeMessage(disputeId, payload);
+    } on ApiException catch (e) {
+      await _queueOrRethrow(e,
+          type: PendingActionType.disputeMessage,
+          targetEndpoint: '/api/disputes/$disputeId/message',
+          payload: payload,
+          relatedCustomerId: dispute['customerCode'] as String);
+    }
     await _refreshDisputesFromApi();
     notifyListeners();
   }
@@ -1373,47 +1897,84 @@ class AppStore extends ChangeNotifier {
   /// The resolution-owner salesman resolves the dispute from their task.
   Future<void> resolveDisputeByOwner(String disputeId, String taskId, {String? note}) async {
     final dispute = disputes.firstWhere((d) => d['id'] == disputeId);
-    await apiClient.resolveDisputeByOwner(disputeId, {
+    final customerId = dispute['customerCode'] as String;
+    final body = {
       'taskId': taskId,
       if (note != null && note.isNotEmpty) 'note': note,
-    });
+    };
+    try {
+      await apiClient.resolveDisputeByOwner(disputeId, body);
+    } on ApiException catch (e) {
+      await _queueOrRethrow(e,
+          type: PendingActionType.disputeResolveByOwner,
+          targetEndpoint: '/api/disputes/$disputeId/resolve-by-owner',
+          payload: body,
+          relatedCustomerId: customerId);
+    }
     await _refreshDisputesFromApi();
     await _refreshTasksFromApi();
-    await _refreshOneCustomerFromApi(dispute['customerCode'] as String);
+    await _refreshOneCustomerFromApi(customerId);
     notifyListeners();
   }
 
   Future<void> rejectDisputeByOwner(String disputeId, String taskId, String reason) async {
     final dispute = disputes.firstWhere((d) => d['id'] == disputeId);
-    await apiClient.rejectDisputeByOwner(disputeId, {'taskId': taskId, 'reason': reason});
+    final customerId = dispute['customerCode'] as String;
+    final body = {'taskId': taskId, 'reason': reason};
+    try {
+      await apiClient.rejectDisputeByOwner(disputeId, body);
+    } on ApiException catch (e) {
+      await _queueOrRethrow(e,
+          type: PendingActionType.disputeRejectByOwner,
+          targetEndpoint: '/api/disputes/$disputeId/reject-by-owner',
+          payload: body,
+          relatedCustomerId: customerId);
+    }
     await _refreshDisputesFromApi();
     await _refreshTasksFromApi();
-    await _refreshOneCustomerFromApi(dispute['customerCode'] as String);
+    await _refreshOneCustomerFromApi(customerId);
     notifyListeners();
   }
 
   Future<void> rejectDispute(String id, String reason) async {
     final dispute = disputes.firstWhere((d) => d['id'] == id);
-    await apiClient.rejectDispute(id, {'reason': reason});
+    final customerId = dispute['customerCode'] as String;
+    final body = {'reason': reason};
+    try {
+      await apiClient.rejectDispute(id, body);
+    } on ApiException catch (e) {
+      await _queueOrRethrow(e,
+          type: PendingActionType.disputeReject, targetEndpoint: '/api/disputes/$id/reject', payload: body, relatedCustomerId: customerId);
+    }
     await _refreshDisputesFromApi();
     // A rejected dispute now also auto-creates a call-customer follow-up
     // task for the salesperson (server-side) — refresh tasks too so it
     // shows up immediately, same as approveDispute already does.
     await _refreshTasksFromApi();
-    await _refreshOneCustomerFromApi(dispute['customerCode'] as String);
+    await _refreshOneCustomerFromApi(customerId);
     notifyListeners();
   }
 
   Future<void> requestDisputeInfo(String id, String salesmanId, String desc, DateTime deadline) async {
     final dispute = disputes.firstWhere((d) => d['id'] == id);
-    await apiClient.requestDisputeInfo(id, {
+    final customerId = dispute['customerCode'] as String;
+    final body = {
       'salesmanId': salesmanId,
       'desc': desc,
       'deadline': deadline.toUtc().toIso8601String(),
-    });
+    };
+    try {
+      await apiClient.requestDisputeInfo(id, body);
+    } on ApiException catch (e) {
+      await _queueOrRethrow(e,
+          type: PendingActionType.disputeRequestInfo,
+          targetEndpoint: '/api/disputes/$id/request-info',
+          payload: body,
+          relatedCustomerId: customerId);
+    }
     await _refreshDisputesFromApi();
     await _refreshTasksFromApi();
-    await _refreshOneCustomerFromApi(dispute['customerCode'] as String);
+    await _refreshOneCustomerFromApi(customerId);
     notifyListeners();
   }
 
@@ -1421,7 +1982,17 @@ class AppStore extends ChangeNotifier {
   /// task. Appends [body] to the dispute thread, closes [taskId], and the
   /// dispute goes back to the RE queue (server-side).
   Future<void> answerDisputeClarification(String disputeId, String taskId, String body) async {
-    await apiClient.answerDisputeClarification(disputeId, {'taskId': taskId, 'body': body});
+    final payload = {'taskId': taskId, 'body': body};
+    final dispute = disputes.firstWhere((d) => d['id'] == disputeId);
+    try {
+      await apiClient.answerDisputeClarification(disputeId, payload);
+    } on ApiException catch (e) {
+      await _queueOrRethrow(e,
+          type: PendingActionType.disputeAnswer,
+          targetEndpoint: '/api/disputes/$disputeId/answer',
+          payload: payload,
+          relatedCustomerId: dispute['customerCode'] as String?);
+    }
     await _refreshDisputesFromApi();
     await _refreshTasksFromApi();
     notifyListeners();
@@ -1437,7 +2008,15 @@ class AppStore extends ChangeNotifier {
   /// or Failed, never Sync Pending.
   Future<void> verifyPaymentClaim(String id, bool success) async {
     final claim = paymentClaims.firstWhere((p) => p['id'] == id);
-    await apiClient.verifyPaymentClaim(id, success);
+    try {
+      await apiClient.verifyPaymentClaim(id, success);
+    } on ApiException catch (e) {
+      await _queueOrRethrow(e,
+          type: PendingActionType.paymentClaimVerify,
+          targetEndpoint: '/api/payment-claims/$id/verify',
+          payload: {'success': success},
+          relatedCustomerId: claim['customerCode'] as String?);
+    }
     await _refreshPaymentClaimsFromApi();
     // Verifying (either way) now also auto-creates a call-customer
     // follow-up task for the salesperson (server-side) — refresh tasks
@@ -1535,13 +2114,7 @@ class AppStore extends ChangeNotifier {
       String? ptpMode,
       XFile? screenshot,
       bool replacingNoAnswer = false}) async {
-    String? attachmentPath;
-    if (screenshot != null) {
-      final bytes = await screenshot.readAsBytes();
-      attachmentPath = await apiClient.uploadAttachment(bytes, filename: screenshot.name, contentType: screenshot.mimeType ?? 'image/jpeg');
-    }
-
-    final detail = await apiClient.recordOutcome(customerId, {
+    final body = {
       'nextAction': nextAction,
       'reason': reason,
       'details': details,
@@ -1549,14 +2122,36 @@ class AppStore extends ChangeNotifier {
       if (ptpAmountValue != null) 'ptpAmountValue': ptpAmountValue,
       if (ptpDate != null) 'ptpDate': ptpDate.toUtc().toIso8601String(),
       if (ptpMode != null) 'ptpMode': ptpMode,
-      if (attachmentPath != null) 'attachmentPath': attachmentPath,
       // Salesman is replacing a misrecorded No Answer via "Edit Recorded
       // Outcome" (Today's Recovery Tasks only) — see
       // customerService.recordOutcome's `replacingNoAnswer` branch, which
       // erases the old No Answer audit row and attempt count instead of
       // layering this new outcome on top of it.
       if (replacingNoAnswer) 'replacingNoAnswer': true,
-    });
+    };
+
+    Map<String, dynamic> detail;
+    try {
+      String? attachmentPath;
+      if (screenshot != null) {
+        final bytes = await screenshot.readAsBytes();
+        attachmentPath = await apiClient.uploadAttachment(bytes, filename: screenshot.name, contentType: screenshot.mimeType ?? 'image/jpeg');
+      }
+      detail = await apiClient.recordOutcome(customerId, {
+        ...body,
+        if (attachmentPath != null) 'attachmentPath': attachmentPath,
+      });
+    } on ApiException catch (e) {
+      await _queueOrRethrow(
+        e,
+        type: PendingActionType.recordOutcome,
+        targetEndpoint: '/api/customers/$customerId/record-outcome',
+        payload: body,
+        relatedCustomerId: customerId,
+        attachmentBytes: screenshot != null ? await screenshot.readAsBytes() : null,
+        attachmentContentType: screenshot?.mimeType ?? (screenshot != null ? 'image/jpeg' : null),
+      );
+    }
 
     final updated = Customer.fromJson(detail);
     final index = customers.indexWhere((c) => c.id == customerId);
@@ -1621,15 +2216,25 @@ class AppStore extends ChangeNotifier {
   /// Physical Visit task — real proof the visit happened, preserved in the
   /// customer's history alongside the completion.
   Future<void> completeTask(String taskId, {XFile? visitPhoto}) async {
-    String? attachmentPath;
-    if (visitPhoto != null) {
-      final bytes = await visitPhoto.readAsBytes();
-      attachmentPath = await apiClient.uploadAttachment(bytes, filename: visitPhoto.name, contentType: visitPhoto.mimeType ?? 'image/jpeg');
+    final task = tasks.firstWhere((t) => t.id == taskId, orElse: () => tasks.first);
+    try {
+      String? attachmentPath;
+      if (visitPhoto != null) {
+        final bytes = await visitPhoto.readAsBytes();
+        attachmentPath = await apiClient.uploadAttachment(bytes, filename: visitPhoto.name, contentType: visitPhoto.mimeType ?? 'image/jpeg');
+      }
+      await apiClient.completeTask(taskId, attachmentPath: attachmentPath);
+    } on ApiException catch (e) {
+      await _queueOrRethrow(e,
+          type: PendingActionType.taskComplete,
+          targetEndpoint: '/api/tasks/$taskId/complete',
+          payload: const {},
+          relatedCustomerId: task.customerId,
+          attachmentBytes: visitPhoto != null ? await visitPhoto.readAsBytes() : null,
+          attachmentContentType: visitPhoto?.mimeType ?? (visitPhoto != null ? 'image/jpeg' : null));
     }
-    await apiClient.completeTask(taskId, attachmentPath: attachmentPath);
     tasksCompleted++;
     await _refreshTasksFromApi();
-    final task = tasks.firstWhere((t) => t.id == taskId, orElse: () => tasks.first);
     await _refreshOneCustomerFromApi(task.customerId);
     notifyListeners();
   }
@@ -1641,9 +2246,17 @@ class AppStore extends ChangeNotifier {
   }
 
   Future<void> approveTaskEdit(String taskId) async {
-    await apiClient.approveTaskEdit(taskId);
-    await _refreshTasksFromApi();
     final task = tasks.firstWhere((t) => t.id == taskId, orElse: () => tasks.first);
+    try {
+      await apiClient.approveTaskEdit(taskId);
+    } on ApiException catch (e) {
+      await _queueOrRethrow(e,
+          type: PendingActionType.taskApproveEdit,
+          targetEndpoint: '/api/tasks/$taskId/approve-edit',
+          payload: const {},
+          relatedCustomerId: task.customerId);
+    }
+    await _refreshTasksFromApi();
     await _refreshOneCustomerFromApi(task.customerId);
     notifyListeners();
   }
@@ -1657,16 +2270,33 @@ class AppStore extends ChangeNotifier {
   /// removed from My Tasks; these RE-side review methods remain in case
   /// any legacy pending requests still exist.
   Future<void> rescheduleTask(String taskId, String reason, DateTime newDeadline) async {
-    await apiClient.rescheduleTask(taskId, {'reason': reason, 'newDeadline': newDeadline.toUtc().toIso8601String()});
-    await _refreshTasksFromApi();
     final task = tasks.firstWhere((t) => t.id == taskId, orElse: () => tasks.first);
+    final body = {'reason': reason, 'newDeadline': newDeadline.toUtc().toIso8601String()};
+    try {
+      await apiClient.rescheduleTask(taskId, body);
+    } on ApiException catch (e) {
+      await _queueOrRethrow(e,
+          type: PendingActionType.taskReschedule,
+          targetEndpoint: '/api/tasks/$taskId/reschedule',
+          payload: body,
+          relatedCustomerId: task.customerId);
+    }
+    await _refreshTasksFromApi();
     await _refreshOneCustomerFromApi(task.customerId);
     notifyListeners();
   }
 
   Future<void> rejectTaskEdit(String taskId) async {
     final task = tasks.firstWhere((t) => t.id == taskId);
-    await apiClient.rejectTaskEdit(taskId);
+    try {
+      await apiClient.rejectTaskEdit(taskId);
+    } on ApiException catch (e) {
+      await _queueOrRethrow(e,
+          type: PendingActionType.taskRejectEdit,
+          targetEndpoint: '/api/tasks/$taskId/reject-edit',
+          payload: const {},
+          relatedCustomerId: task.customerId);
+    }
     await _refreshTasksFromApi();
     await _refreshOneCustomerFromApi(task.customerId);
     notifyListeners();
@@ -1674,7 +2304,16 @@ class AppStore extends ChangeNotifier {
 
   Future<void> reassignTask(String taskId, String newOwnerId, String reason) async {
     final task = tasks.firstWhere((t) => t.id == taskId);
-    await apiClient.reassignTask(taskId, {'newOwnerId': newOwnerId, 'reason': reason});
+    final body = {'newOwnerId': newOwnerId, 'reason': reason};
+    try {
+      await apiClient.reassignTask(taskId, body);
+    } on ApiException catch (e) {
+      await _queueOrRethrow(e,
+          type: PendingActionType.taskReassign,
+          targetEndpoint: '/api/tasks/$taskId/reassign',
+          payload: body,
+          relatedCustomerId: task.customerId);
+    }
     await _refreshTasksFromApi();
     await _refreshOneCustomerFromApi(task.customerId);
     notifyListeners();
@@ -1726,19 +2365,37 @@ class AppStore extends ChangeNotifier {
   // ---------------------------------------------------------------------
   Future<void> requestPtpCorrection(String ptpId, double newAmount, DateTime newDate, String reason,
       {String? paymentMode}) async {
-    await apiClient.requestPtpCorrection(ptpId, {
+    final ptp = ptps.firstWhere((p) => p.id == ptpId);
+    final body = {
       'amount': newAmount,
       'date': newDate.toUtc().toIso8601String(),
       if (paymentMode != null && paymentMode.isNotEmpty) 'paymentMode': paymentMode,
       'reason': reason,
-    });
+    };
+    try {
+      await apiClient.requestPtpCorrection(ptpId, body);
+    } on ApiException catch (e) {
+      await _queueOrRethrow(e,
+          type: PendingActionType.ptpCorrectionRequest,
+          targetEndpoint: '/api/ptps/$ptpId/request-correction',
+          payload: body,
+          relatedCustomerId: ptp.customerId);
+    }
     await _refreshPtpsFromApi();
     notifyListeners();
   }
 
   Future<void> approvePtpCorrection(String ptpId) async {
     final ptp = ptps.firstWhere((p) => p.id == ptpId);
-    await apiClient.approvePtpCorrection(ptpId);
+    try {
+      await apiClient.approvePtpCorrection(ptpId);
+    } on ApiException catch (e) {
+      await _queueOrRethrow(e,
+          type: PendingActionType.ptpCorrectionApprove,
+          targetEndpoint: '/api/ptps/$ptpId/approve-correction',
+          payload: const {},
+          relatedCustomerId: ptp.customerId);
+    }
     await _refreshPtpsFromApi();
     await _refreshOneCustomerFromApi(ptp.customerId);
     notifyListeners();
@@ -1746,7 +2403,16 @@ class AppStore extends ChangeNotifier {
 
   Future<void> rejectPtpCorrection(String ptpId, String reason) async {
     final ptp = ptps.firstWhere((p) => p.id == ptpId);
-    await apiClient.rejectPtpCorrection(ptpId, {'reason': reason});
+    final body = {'reason': reason};
+    try {
+      await apiClient.rejectPtpCorrection(ptpId, body);
+    } on ApiException catch (e) {
+      await _queueOrRethrow(e,
+          type: PendingActionType.ptpCorrectionReject,
+          targetEndpoint: '/api/ptps/$ptpId/reject-correction',
+          payload: body,
+          relatedCustomerId: ptp.customerId);
+    }
     await _refreshPtpsFromApi();
     await _refreshOneCustomerFromApi(ptp.customerId);
     notifyListeners();

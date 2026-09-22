@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:salesman_mobile/services/api_client.dart';
 import 'package:salesman_mobile/widgets/app_message.dart';
@@ -11,6 +12,7 @@ import 'package:salesman_mobile/v2/screens/login_screen.dart';
 import 'package:salesman_mobile/v2/theme/app_theme.dart';
 import 'package:salesman_mobile/v3/screens/re_scaffold_v3.dart';
 import 'package:salesman_mobile/v3/screens/manager_scaffold_v3.dart';
+import 'package:salesman_mobile/v3/screens/admin_scaffold_v3.dart';
 import 'package:salesman_mobile/v2/screens/mobile_frame.dart';
 import 'package:salesman_mobile/v2/screens/sync_freeze_overlay.dart';
 
@@ -21,6 +23,13 @@ void main() {
   // (see showGlobalError) instead of a red error screen or silence.
   runZonedGuarded(() {
     WidgetsFlutterBinding.ensureInitialized();
+
+    // Portrait only — matches the Android manifest / iOS Info.plist
+    // orientation locks (which cover the brief window before this Dart call
+    // runs), so the app never rotates into landscape on any platform.
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+    ]);
 
     // Framework-level (build/layout/paint) errors.
     final priorOnError = FlutterError.onError;
@@ -102,8 +111,35 @@ bool _isNoisyFrameworkError(FlutterErrorDetails details) {
       details.library == 'image resource service';
 }
 
-class TPRMSV3App extends StatelessWidget {
+class TPRMSV3App extends StatefulWidget {
   const TPRMSV3App({super.key});
+
+  @override
+  State<TPRMSV3App> createState() => _TPRMSV3AppState();
+}
+
+class _TPRMSV3AppState extends State<TPRMSV3App> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // A salesperson foregrounding the app after regaining signal — don't
+    // make them wait for SSE's own reconnect backoff (up to 30s) before a
+    // queued offline action flushes.
+    if (state == AppLifecycleState.resumed) {
+      context.read<AppStore>().onAppResumed();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -122,6 +158,7 @@ class TPRMSV3App extends StatelessWidget {
       }
       if (store.userRole == 'RECOVERY_EXECUTIVE') return const ReScaffoldV3();
       if (store.userRole == 'MANAGEMENT') return const ManagerScaffoldV3();
+      if (store.userRole == 'ADMIN') return const AdminScaffoldV3();
       return const MainScaffold();
     }
 

@@ -20,7 +20,7 @@ class MoreMenuScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
     final pendingApprovals = store.tasks.where((t) => t.approvalStatus == 'Pending').length +
-        store.disputes.where((d) => d['status'] == 'Pending Approval').length +
+        store.disputes.where((d) => AppStore.disputeNeedsReActionStatuses.contains(d['status'])).length +
         store.paymentClaims.where((p) => p['status'] == 'Awaiting Verification' || p['status'] == 'Sync Pending').length +
         store.ptpCorrectionRequests.length +
         store.pendingOutcomeCorrectionCount +

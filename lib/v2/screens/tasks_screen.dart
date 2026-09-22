@@ -231,7 +231,7 @@ class _TasksScreenState extends State<TasksScreen> {
         : (disputeMeta['kind'] == 'clarify'
             ? {'icon': Icons.help_outline, 'color': const Color(0xFFF57C00), 'bg': const Color(0xFFFFF3E0)}
             : {'icon': Icons.gavel_outlined, 'color': const Color(0xFF4F46E5), 'bg': const Color(0xFFEEF2FF)});
-    final cardTitle = disputeMeta?['title'] ?? t.reason;
+    final cardTitle = disputeMeta?['title'] ?? friendlyTaskReason(t.reason);
     final relatedTo = disputeMeta?['related'] ?? _relatedOutcomeLabel(t);
 
     return Container(

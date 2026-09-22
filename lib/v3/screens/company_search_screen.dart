@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:salesman_mobile/v2/stores/app_store.dart';
 import 'package:salesman_mobile/v2/models/customer.dart';
 import 'package:salesman_mobile/v2/screens/customer_360_screen.dart';
+import 'package:salesman_mobile/widgets/data_loading.dart' show LoadingAppBarStrip;
 
 const _bg = Color(0xFFF8FAFC);
 const _dark = Color(0xFF0F172A);
@@ -52,6 +53,7 @@ class _CompanySearchScreenState extends State<CompanySearchScreen> {
             hintStyle: TextStyle(fontSize: 14, color: _muted),
           ),
         ),
+        bottom: const LoadingAppBarStrip(color: _blue),
       ),
       body: LayoutBuilder(
         builder: (context, constraints) {

@@ -52,14 +52,14 @@ async function releaseLock(connection) {
  * `ran: false` on the result means a concurrent run held the lock and
  * this call was a no-op.
  */
-async function runCustomerAgeingSync() {
+async function runCustomerAgeingSync(branchLabel) {
   const lockConnection = await acquireLock();
   if (!lockConnection) {
     logger.warn('[busy-sync] customer_ageing sync already in progress — skipping this trigger.');
     return { ran: false };
   }
   try {
-    return await runLocked();
+    return await runLocked(branchLabel);
   } finally {
     await releaseLock(lockConnection);
   }
@@ -72,13 +72,13 @@ async function runCustomerAgeingSync() {
  * immediate response and then polls GET /sync/status (which reads
  * getSyncProgress() below) to render a real progress bar.
  */
-async function startCustomerAgeingSyncInBackground() {
+async function startCustomerAgeingSyncInBackground(branchLabel) {
   const lockConnection = await acquireLock();
   if (!lockConnection) {
     return { started: false };
   }
 
-  runLocked()
+  runLocked(branchLabel)
     .catch((err) => {
       logger.error(`[busy-sync] Background run threw: ${err.message}`);
     })
@@ -87,22 +87,30 @@ async function startCustomerAgeingSyncInBackground() {
   return { started: true };
 }
 
-async function runLocked() {
+async function runLocked(branchLabel) {
   // Covers this run whether it came from the scheduled worker job (already
   // wrapped once around all three daily-sync steps — see
-  // workers/busySyncWorker.js) or the MANAGEMENT admin dashboard's manual
+  // workers/busySyncWorker.js) or the MANAGEMENT/ADMIN dashboard's manual
   // trigger (which calls this directly, standalone). Reference-counted, so
   // nesting inside the worker's own wrap is safe — see
   // services/syncLockService.js's doc comment.
   await syncLockService.beginSync();
   try {
-    return await runLockedInner();
+    return await runLockedInner(branchLabel);
   } finally {
     await syncLockService.endSync();
   }
 }
 
-async function runLockedInner() {
+/**
+ * `branchLabel` narrows this run to a single branch (see BRANCHES' `label`)
+ * — used by the admin dashboard's per-branch "Sync" button. Undefined runs
+ * every branch, same as before. Either way this still holds the single
+ * global advisory lock for its whole duration (see acquireLock above), so a
+ * one-branch run and the "sync everything" button can't race each other —
+ * whichever asks first wins, the other gets the existing 409.
+ */
+async function runLockedInner(branchLabel) {
   // MariaDB's DATETIME column truncates fractional seconds, but a plain JS
   // Date carries milliseconds — floor to whole seconds so the value we
   // write to last_synced_at and the value we later compare against in the
@@ -110,10 +118,12 @@ async function runLockedInner() {
   // never mistaken for stale ones. Shared across all branches in this run.
   const startedAt = new Date(Math.floor(Date.now() / 1000) * 1000);
 
+  const branches = branchLabel ? BRANCHES.filter((b) => b.label === branchLabel) : BRANCHES;
+
   const branchErrors = [];
   const runIds = [];
 
-  for (const branch of BRANCHES) {
+  for (const branch of branches) {
     const runId = await startRun(startedAt, branch.label);
     runIds.push(runId);
     logger.info(

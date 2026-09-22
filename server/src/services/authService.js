@@ -3,7 +3,8 @@ const refreshTokenRepository = require('../repositories/refreshTokenRepository')
 const { verifyPassword, hashPassword } = require('../utils/password');
 const { signToken } = require('../utils/jwt');
 const env = require('../config/env');
-const { UnauthorizedError } = require('../errors/AppError');
+const { UnauthorizedError, ServiceUnavailableError } = require('../errors/AppError');
+const maintenanceService = require('./maintenanceService');
 
 function toPublicUser(user) {
   return {
@@ -43,6 +44,16 @@ async function login(username, password) {
   const valid = await verifyPassword(password, user.password_hash);
   if (!valid) {
     throw new UnauthorizedError('Invalid username or password');
+  }
+
+  // The admin-only kill switch — checked after credentials so a wrong
+  // password still reports as "Invalid username or password" during
+  // maintenance too, not as a maintenance notice (don't leak which
+  // usernames are real). ADMIN can always still log in (this now includes
+  // blocking MANAGEMENT too — the switch moved to ADMIN-only), so there's
+  // always a way to turn this back off.
+  if (maintenanceService.isEnabled() && user.role !== 'ADMIN') {
+    throw new ServiceUnavailableError('Server is under maintenance. Please try again later.');
   }
 
   // Single-device login: a fresh password sign-in is the newest session.

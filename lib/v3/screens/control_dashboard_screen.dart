@@ -10,6 +10,7 @@ import 'package:salesman_mobile/v3/screens/ptp_list_screen.dart';
 import 'package:salesman_mobile/v3/screens/escalations_screen.dart';
 import 'package:salesman_mobile/v3/screens/approvals_list_screen.dart';
 import 'package:salesman_mobile/v3/screens/report_detail_screens.dart' show SalesmanScoreDetailScreen;
+import 'package:salesman_mobile/widgets/data_loading.dart' show DataLoadingBar;
 
 const _bg = Color(0xFFF7F8FA);
 const _dark = Color(0xFF1E293B);
@@ -88,6 +89,7 @@ class _ControlDashboardScreenState extends State<ControlDashboardScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  const DataLoadingBar(),
                   _buildHeader(context, store),
                   _buildDateBranchRow(store),
                   const SizedBox(height: 14),

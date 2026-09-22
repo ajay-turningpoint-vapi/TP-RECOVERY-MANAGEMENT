@@ -5,6 +5,7 @@ import 'package:salesman_mobile/v2/stores/app_store.dart';
 import 'package:salesman_mobile/v2/models/ptp.dart';
 import 'package:salesman_mobile/v2/screens/customer_360_screen.dart';
 import 'package:salesman_mobile/widgets/call_helper.dart';
+import 'package:salesman_mobile/widgets/data_loading.dart' show LoadingAppBarStrip;
 
 const _dark = Color(0xFF0F172A);
 const _navy = Color(0xFF1B2B48);
@@ -98,6 +99,7 @@ class AttentionDetailScreen extends StatelessWidget {
         actions: [
           IconButton(icon: const Icon(Icons.more_vert, color: _dark), onPressed: () {}),
         ],
+        bottom: const LoadingAppBarStrip(color: _blue),
       ),
       body: Column(
         children: [
@@ -336,18 +338,18 @@ class AttentionDetailScreen extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 child: Row(
                   children: [
-                    const SizedBox(width: _custColAvatarGap),
-                    const SizedBox(width: _custColName, child: Text('Customer Name', style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
-                    const SizedBox(width: _custColGap),
-                    const SizedBox(width: _custColOverdue, child: Text('Overdue Amt', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
-                    const SizedBox(width: _custColGap),
-                    const SizedBox(width: _custColDays, child: Text('Days', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
-                    const SizedBox(width: _custColGap),
-                    const SizedBox(width: _custColHealth, child: Text('Credit Health', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
+                    SizedBox(width: _custColAvatarGap),
+                    SizedBox(width: _custColName, child: Text('Customer Name', style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
+                    SizedBox(width: _custColGap),
+                    SizedBox(width: _custColOverdue, child: Text('Overdue Amt', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
+                    SizedBox(width: _custColGap),
+                    SizedBox(width: _custColDays, child: Text('Days', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
+                    SizedBox(width: _custColGap),
+                    SizedBox(width: _custColHealth, child: Text('Credit Health', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, color: _muted, fontWeight: FontWeight.bold))),
                   ],
                 ),
               ),

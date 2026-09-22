@@ -8,6 +8,7 @@ import 'package:salesman_mobile/v2/screens/customer_360_screen.dart';
 import 'package:salesman_mobile/v3/screens/request_detail_scaffold.dart';
 import 'package:salesman_mobile/widgets/app_message.dart';
 import 'package:salesman_mobile/widgets/call_helper.dart';
+import 'package:salesman_mobile/widgets/loading_button.dart';
 import 'package:salesman_mobile/services/attachment_picker.dart';
 
 final _rupee = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
@@ -102,7 +103,11 @@ class TaskDetailsScreenV3 extends StatelessWidget {
                   : [
                       ElevatedButton.icon(
                         style: ElevatedButton.styleFrom(backgroundColor: kBlue, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 13), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-                        onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => Customer360Screen(customer: customer))),
+                        // Physical Visit tasks jump straight into Record
+                        // Outcome (which now requires a visit photo up
+                        // front — see customer_360_screen.dart) instead of
+                        // just landing on the profile page with no prompt.
+                        onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => Customer360Screen(customer: customer, editOutcome: t.type == TaskType.physicalVisit))),
                         icon: const Icon(Icons.play_circle_outline, size: 16),
                         label: const FittedBox(fit: BoxFit.scaleDown, child: Text('Take Action', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
                       ),
@@ -154,7 +159,7 @@ class TaskDetailsScreenV3 extends StatelessWidget {
         ]),
         const SizedBox(height: 18),
         const SectionLabel('TASK DESCRIPTION'),
-        InfoCard(children: [Text(t.reason, style: const TextStyle(fontSize: 12.5, color: kDark))]),
+        InfoCard(children: [Text(friendlyTaskReason(t.reason), style: const TextStyle(fontSize: 12.5, color: kDark))]),
         // Note + evidence the RE attached when approving/rejecting — the
         // server copies these onto the follow-up task it creates here.
         if (t.note?.isNotEmpty ?? false) ...[
@@ -282,11 +287,11 @@ class TaskDetailsScreenV3 extends StatelessWidget {
                         path = await store.apiClient.uploadAttachment(b, filename: picked!.name, contentType: picked!.mimeType ?? 'image/jpeg');
                       }
                       await store.postDisputeMessage(t.disputeId!, body: body, attachmentPath: path);
-                      Navigator.pop(sheetCtx);
-                      showAppMessage(navigator.context, message: 'Message sent.');
+                      if (sheetCtx.mounted) Navigator.pop(sheetCtx);
+                      showAppMessageAfter(navigator, message: 'Message sent.');
                     } catch (e) {
                       setSheet(() => busy = false);
-                      showAppMessage(navigator.context, message: 'Could not send: $e', isError: true);
+                      showAppMessageAfter(navigator, message: 'Could not send: $e', isError: true);
                     }
                   },
                   child: busy
@@ -321,13 +326,13 @@ class TaskDetailsScreenV3 extends StatelessWidget {
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('Cancel')),
-          ElevatedButton(
+          LoadingElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: kGreen, foregroundColor: Colors.white),
             onPressed: () async {
               final navigator = Navigator.of(context);
-              Navigator.pop(dialogCtx);
               try {
                 await store.resolveDisputeByOwner(t.disputeId!, t.id, note: noteController.text.trim());
+                if (dialogCtx.mounted) Navigator.pop(dialogCtx);
                 navigator.pop();
                 showAppMessageAfter(navigator, message: 'Submitted for RE verification.');
               } catch (e) {
@@ -361,7 +366,7 @@ class TaskDetailsScreenV3 extends StatelessWidget {
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('Cancel')),
-          ElevatedButton(
+          LoadingElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: kRed, foregroundColor: Colors.white),
             onPressed: () async {
               final reason = reasonController.text.trim();
@@ -370,9 +375,9 @@ class TaskDetailsScreenV3 extends StatelessWidget {
                 return;
               }
               final navigator = Navigator.of(context);
-              Navigator.pop(dialogCtx);
               try {
                 await store.rejectDisputeByOwner(t.disputeId!, t.id, reason);
+                if (dialogCtx.mounted) Navigator.pop(dialogCtx);
                 navigator.pop();
                 showAppMessageAfter(navigator, message: 'Sent back to the RE for reassignment.');
               } catch (e) {
@@ -421,15 +426,15 @@ class TaskDetailsScreenV3 extends StatelessWidget {
             const SizedBox(height: 14),
             SizedBox(
               width: double.infinity,
-              child: ElevatedButton(
+              child: LoadingElevatedButton(
                 style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF4F46E5), foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 13), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
                 onPressed: () async {
                   final body = controller.text.trim();
                   if (body.isEmpty) return;
                   final navigator = Navigator.of(context);
-                  Navigator.pop(sheetCtx);
                   try {
                     await store.answerDisputeClarification(t.disputeId!, t.id, body);
+                    if (sheetCtx.mounted) Navigator.pop(sheetCtx);
                     navigator.pop();
                     showAppMessageAfter(navigator, message: 'Clarification sent to the RE.');
                   } catch (e) {

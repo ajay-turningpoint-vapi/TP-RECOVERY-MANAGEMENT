@@ -525,7 +525,7 @@ async function recordOutcome(customerId, user, body) {
   {
     // Customer Refused's task (honoring followUpAt if the salesperson
     // picked one) is created in applyOutcome, in-transaction, not here.
-    const { nextAction, reason, details } = body;
+    const { nextAction, reason, details, followUpAt } = body;
     if (reason === 'Dispute Raised') {
       // Raising a dispute is itself an instrument that covers its amount
       // (recoveryReconcileService.coverageFor already counts 'Pending

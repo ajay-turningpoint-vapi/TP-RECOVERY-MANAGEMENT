@@ -32,6 +32,8 @@ function matches(entry, event) {
   switch (event.type) {
     case 'sync':
       return true; // the freeze overlay is for everyone
+    case 'maintenance':
+      return true; // the manager-only kill switch blocks everyone (see maintenanceService.js)
     case 'notification':
       if (scope.broadcast) return true;
       if (scope.userId) return entry.userId === scope.userId;

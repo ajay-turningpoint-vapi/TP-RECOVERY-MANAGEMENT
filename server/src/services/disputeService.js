@@ -4,11 +4,28 @@ const taskRepository = require('../repositories/taskRepository');
 const auditRepository = require('../repositories/auditRepository');
 const customerRepository = require('../repositories/customerRepository');
 const disputeMessageRepository = require('../repositories/disputeMessageRepository');
+const userRepository = require('../repositories/userRepository');
 const taskService = require('./taskService');
 const { enqueueNotification } = require('../queues/notificationQueue');
 const { notifyDecision, salesmanForCustomer } = require('./decisionNotify');
 const { driveRecoveryTask, rupees } = require('./recoveryTaskService');
 const { NotFoundError, ValidationError } = require('../errors/AppError');
+
+/**
+ * No single RE "owns" a dispute (RE/Management both see the whole book via
+ * listForUser) — when a resolution owner acts on one (resolveByOwner /
+ * rejectByOwner below), every RE/Management user needs to know, not just
+ * whoever happens to have the Disputes tab open. Queued per-recipient
+ * (enqueueNotification), never inline — a slow insert must never delay the
+ * response to the resolution owner who just acted.
+ */
+async function notifyReAndManagement({ title, body, customerId, severity = 'info' }) {
+  const users = await userRepository.findAll();
+  const recipients = users.filter((u) => u.role === 'RECOVERY_EXECUTIVE' || u.role === 'MANAGEMENT');
+  await Promise.all(
+    recipients.map((u) => enqueueNotification({ userId: u.id, severity, title, body, customerId }))
+  );
+}
 
 async function withMessages(disputes) {
   const byDispute = await disputeMessageRepository.listAllGrouped();
@@ -435,10 +452,17 @@ async function resolveByOwner(disputeId, user, { taskId, note }) {
     );
   });
 
-  // The generic post-write hook already tells every RE/Manager client the
-  // dispute changed (it will now show up under "Awaiting Verification" on
-  // the Disputes tab); no separate task or notification is created for
-  // the raiser until the RE actually verifies it.
+  // The generic post-write hook tells every already-open RE/Manager client
+  // to refetch the disputes list, but that's a silent list refresh, not a
+  // notification — without this, a resolution owner submitting their work
+  // was invisible to the RE until they happened to reopen the Disputes tab
+  // and scroll to it themselves (no bell, no badge).
+  await notifyReAndManagement({
+    severity: 'warning',
+    title: `Resolution submitted for verification — ₹${dispute.amount.toFixed(0)}`,
+    body: `${user.fullName} marked the dispute resolved. Verify against BUSY to confirm or return it to recovery.`,
+    customerId: dispute.customerId,
+  });
   return disputeRepository.findById(disputeId);
 }
 
@@ -489,9 +513,17 @@ async function rejectByOwner(disputeId, user, { taskId, reason }) {
     );
   });
 
-  // No single RE "owns" a dispute (RE/Manager both see the whole book via
-  // listForUser) — the generic post-write hook already tells every
-  // RE/Manager client the dispute changed, same as resolveByOwner above.
+  // Same gap as resolveByOwner above: the generic post-write hook only
+  // silently refreshes an already-open client's list, so without a real
+  // notification this dispute — now needing reassignment — could sit
+  // invisible until an RE happened to notice it while browsing the
+  // Disputes tab.
+  await notifyReAndManagement({
+    severity: 'warning',
+    title: `Resolution owner declined — ₹${dispute.amount.toFixed(0)} dispute needs reassignment`,
+    body: `${user.fullName} declined: "${reason}"`,
+    customerId: dispute.customerId,
+  });
   return disputeRepository.findById(disputeId);
 }
 

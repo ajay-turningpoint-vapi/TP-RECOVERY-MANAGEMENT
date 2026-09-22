@@ -49,8 +49,12 @@ class NotificationService {
 
   /// [icon] is a `@drawable/ic_notif_*` resource name (see [iconFor]) —
   /// defaults to the generic alert bell when the caller doesn't know/care
-  /// which category this notification belongs to.
-  Future<void> show({required int id, required String title, required String body, String icon = 'ic_notif_alert'}) async {
+  /// which category this notification belongs to. [bigText] renders [body]
+  /// with Android's expandable big-text style — the collapsed preview is
+  /// unchanged, but a two-finger-swipe expand shows the full message
+  /// instead of clipping it. Opt-in (defaults false) since most existing
+  /// alerts here are already short enough not to need it.
+  Future<void> show({required int id, required String title, required String body, String icon = 'ic_notif_alert', bool bigText = false}) async {
     if (!_initialized) await init();
     await _plugin.show(
       id,
@@ -64,6 +68,7 @@ class NotificationService {
           importance: Importance.high,
           priority: Priority.high,
           icon: '@drawable/$icon',
+          styleInformation: bigText ? BigTextStyleInformation(body) : null,
         ),
       ),
     );

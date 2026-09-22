@@ -4,6 +4,7 @@ import 'package:salesman_mobile/v2/stores/app_store.dart';
 import 'package:salesman_mobile/v2/screens/re_salesman_control_screen.dart';
 import 'package:intl/intl.dart';
 import 'package:salesman_mobile/widgets/app_message.dart';
+import 'package:salesman_mobile/widgets/loading_button.dart';
 
 final _rupee = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
 
@@ -251,16 +252,16 @@ class _ReTeamTabState extends State<ReTeamTab> {
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('Cancel')),
-            ElevatedButton(
+            LoadingElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0052CC)),
               onPressed: () async {
                 final reason = reasonController.text.trim().isEmpty ? 'Balancing field workload across the team.' : reasonController.text.trim();
                 final navigator = Navigator.of(context);
-                Navigator.pop(dialogCtx);
                 try {
                   for (final c in topFive) {
                     await store.reassignCustomer(c.id, fromName, toName, reason);
                   }
+                  if (dialogCtx.mounted) Navigator.pop(dialogCtx);
                   showAppMessageAfter(navigator, message: '${topFive.length} accounts reassigned from $fromDisplay to ${nameFor(toName)}. Audit entry logged for each.');
                 } catch (e) {
                   showAppMessageAfter(navigator, message: 'Could not reassign all accounts: $e', isError: true);

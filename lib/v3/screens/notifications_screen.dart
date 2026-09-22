@@ -6,6 +6,8 @@ import 'package:salesman_mobile/v2/models/notification_item.dart';
 import 'package:salesman_mobile/v2/screens/customer_360_screen.dart';
 import 'package:salesman_mobile/v3/screens/five_pm_control_screen.dart';
 import 'package:salesman_mobile/widgets/app_message.dart';
+import 'package:salesman_mobile/widgets/loading_button.dart';
+import 'package:salesman_mobile/widgets/data_loading.dart' show LoadingAppBarStrip;
 
 const _bg = Color(0xFFF8FAFC);
 const _dark = Color(0xFF0F172A);
@@ -54,7 +56,7 @@ class NotificationsScreen extends StatelessWidget {
         elevation: 0,
         foregroundColor: _dark,
         actions: [
-          TextButton(
+          LoadingTextButton(
             onPressed: () async {
               final navigator = Navigator.of(context);
               try {
@@ -71,6 +73,7 @@ class NotificationsScreen extends StatelessWidget {
             onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FivePmControlScreen())),
           ),
         ],
+        bottom: const LoadingAppBarStrip(color: Color(0xFF2563EB)),
       ),
       body: items.isEmpty
           ? const Center(child: Text('No notifications.', style: TextStyle(color: _muted)))

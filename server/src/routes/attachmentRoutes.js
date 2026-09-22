@@ -30,17 +30,12 @@ function uploadSingle(req, res, next) {
 // trust model as the rest of this app's authenticated-but-not-further-
 // scoped GETs (see attachmentController.js's own path-traversal guard for
 // what IS strictly enforced: which file, not who can ask for one).
-// A GET may be opened by the OS (a PDF viewer / browser via url_launcher),
-// which can't attach an Authorization header — accept the access token as
-// a ?token= query param there, then fall through to the normal header auth.
-function allowQueryToken(req, _res, next) {
-  if (!req.headers.authorization && typeof req.query.token === 'string' && req.query.token) {
-    req.headers.authorization = `Bearer ${req.query.token}`;
-  }
-  next();
-}
-
+// Header-only auth — the app fetches attachments via http.get with a real
+// Authorization header (see attachment_opener.dart / TaskAttachmentThumbnail),
+// never via url_launcher, so there's no case that needs a ?token= query-
+// param fallback. That fallback used to exist for such a case; removed
+// since a token in the URL lands in plaintext in nginx's access log.
 router.post('/', authenticate, uploadSingle, controller.upload);
-router.get('/:filename', allowQueryToken, authenticate, controller.get);
+router.get('/:filename', authenticate, controller.get);
 
 module.exports = router;

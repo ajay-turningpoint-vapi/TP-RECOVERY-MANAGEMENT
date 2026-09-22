@@ -25,7 +25,10 @@ function buildCorsOrigin() {
   }
   const localhostPattern = /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/;
   // RFC 1918 private ranges: 10.x, 172.16–31.x, 192.168.x.
-  const privateLanPattern = /^https?:\/\/(10(\.\d{1,3}){3}|172\.(1[6-9]|2\d|3[01])(\.\d{1,3}){2}|192\.168(\.\d{1,3}){2}):\d+$/;
+  // Port suffix is optional — nginx now fronts the app on the default
+  // HTTP port (80), and a browser's Origin header omits the port when
+  // it's the default one.
+  const privateLanPattern = /^https?:\/\/(10(\.\d{1,3}){3}|172\.(1[6-9]|2\d|3[01])(\.\d{1,3}){2}|192\.168(\.\d{1,3}){2})(:\d+)?$/;
   return (origin, callback) => {
     if (!origin || localhostPattern.test(origin) || privateLanPattern.test(origin) || env.corsOrigins.includes(origin)) {
       callback(null, true);

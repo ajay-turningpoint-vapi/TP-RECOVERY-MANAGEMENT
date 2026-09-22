@@ -59,6 +59,29 @@ android {
         versionName = flutterVersionName
     }
 
+    // Two installable apps from one codebase: the real field app (Salesperson
+    // / RE / Manager, entry point lib/main.dart) and a separate, admin-only
+    // app (entry point lib/main_admin.dart — see android/app/src/admin's
+    // manifest overlay for its distinct label). Different applicationId so
+    // both can be installed side by side on the same device; the "field"
+    // flavor keeps the original applicationId so the existing release
+    // signing/keystore and any already-installed app are unaffected.
+    // ("main" can't be used as a flavor name — it collides with Android's
+    // reserved default src/main source set and fails the Gradle build.)
+    // Build with:
+    //   flutter build apk --release --flavor field -t lib/main.dart
+    //   flutter build apk --release --flavor admin -t lib/main_admin.dart
+    flavorDimensions = ["app"]
+    productFlavors {
+        field {
+            dimension = "app"
+        }
+        admin {
+            dimension = "app"
+            applicationIdSuffix = ".admin"
+        }
+    }
+
     signingConfigs {
         if (hasReleaseSigning) {
             release {

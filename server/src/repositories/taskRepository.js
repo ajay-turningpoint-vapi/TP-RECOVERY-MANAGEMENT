@@ -28,13 +28,18 @@ function mapTask(row) {
   };
 }
 
+// Newest-created first — a task's deadline says nothing about how fresh it
+// is (a just-assigned task can easily have a later deadline than the
+// existing backlog), so sorting by deadline buried brand-new tasks wherever
+// their due date happened to fall instead of surfacing them at the top of
+// the list the moment they're created.
 async function findAll() {
-  const rows = await query('SELECT * FROM tasks ORDER BY deadline');
+  const rows = await query('SELECT * FROM tasks ORDER BY created_at DESC');
   return rows.map(mapTask);
 }
 
 async function findByOwner(ownerId) {
-  const rows = await query('SELECT * FROM tasks WHERE owner_id = :ownerId ORDER BY deadline', { ownerId });
+  const rows = await query('SELECT * FROM tasks WHERE owner_id = :ownerId ORDER BY created_at DESC', { ownerId });
   return rows.map(mapTask);
 }
 

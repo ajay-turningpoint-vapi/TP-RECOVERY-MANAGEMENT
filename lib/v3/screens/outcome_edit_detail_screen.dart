@@ -7,6 +7,7 @@ import 'package:salesman_mobile/v2/models/outcome_edit_request.dart';
 import 'package:salesman_mobile/v2/screens/customer_360_screen.dart';
 import 'package:salesman_mobile/v3/screens/request_detail_scaffold.dart';
 import 'package:salesman_mobile/widgets/app_message.dart';
+import 'package:salesman_mobile/widgets/loading_button.dart';
 
 const _accent = Color(0xFF0EA5A4);
 
@@ -124,16 +125,19 @@ class OutcomeEditDetailScreen extends StatelessWidget {
       bannerIcon: Icons.edit_note,
       actions: isPending
           ? [
-              OutlinedButton.icon(
+              LoadingOutlinedButton(
                 style: OutlinedButton.styleFrom(
                     side: const BorderSide(color: kRed, width: 1.4),
                     foregroundColor: kRed,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-                onPressed: () => _reject(context, store, request.id),
-                icon: const Icon(Icons.close, size: 17),
-                label: const Text('Reject', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                onPressed: () async => _reject(context, store, request.id),
+                child: const Row(mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.center, children: [
+                  Icon(Icons.close, size: 17),
+                  SizedBox(width: 8),
+                  Text('Reject', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                ]),
               ),
-              ElevatedButton.icon(
+              LoadingElevatedButton(
                 style: ElevatedButton.styleFrom(
                     backgroundColor: kGreen,
                     foregroundColor: Colors.white,
@@ -149,8 +153,11 @@ class OutcomeEditDetailScreen extends StatelessWidget {
                     showAppMessageAfter(navigator, message: 'Could not approve: $e', isError: true);
                   }
                 },
-                icon: const Icon(Icons.check, size: 17),
-                label: const Text('Approve', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                child: const Row(mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.center, children: [
+                  Icon(Icons.check, size: 17),
+                  SizedBox(width: 8),
+                  Text('Approve', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                ]),
               ),
             ]
           : [],
@@ -294,15 +301,14 @@ class OutcomeEditDetailScreen extends StatelessWidget {
             decoration: const InputDecoration(hintText: 'Reason', border: OutlineInputBorder())),
         actions: [
           TextButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('Cancel')),
-          ElevatedButton(
+          LoadingElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: kRed),
             onPressed: () async {
               if (reasonController.text.trim().isEmpty) return;
-              final dialogNavigator = Navigator.of(dialogCtx);
               final screenNavigator = Navigator.of(context);
               try {
                 await store.rejectOutcomeEdit(id, reasonController.text.trim());
-                dialogNavigator.pop();
+                if (dialogCtx.mounted) Navigator.pop(dialogCtx);
                 screenNavigator.pop();
                 showAppMessageAfter(screenNavigator, message: 'Outcome edit rejected.');
               } catch (e) {

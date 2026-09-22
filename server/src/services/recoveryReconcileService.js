@@ -17,7 +17,15 @@ const TOLERANCE = 1; // rupees — anything below this is treated as zero
 // handed the slice back to the salesperson.
 const OPEN_PTP_STATUSES = ['scheduled', 'pendingVerification', 'financialSyncPending'];
 const COVERING_CLAIM_STATUSES = ['Awaiting Verification', 'Sync Pending'];
-const COVERING_DISPUTE_STATUSES = ['Pending Approval', 'Approved', 'In Resolution', 'Need More Information'];
+// 'Awaiting Verification' must stay covering — it means the resolution
+// owner claims the money came in and the RE hasn't confirmed against BUSY
+// yet. Without it here, the moment a resolution owner submitted their
+// work (disputeService.resolveByOwner), this slice would stop counting as
+// covered and the nightly/on-demand reconcile sweep would re-open the
+// salesperson's recovery task chasing money that's still genuinely tied
+// up in RE verification — a real, if quiet, regression this status
+// introduced (found while fixing the related missing-notification bug).
+const COVERING_DISPUTE_STATUSES = ['Pending Approval', 'Approved', 'In Resolution', 'Need More Information', 'Awaiting Verification'];
 
 
 /**

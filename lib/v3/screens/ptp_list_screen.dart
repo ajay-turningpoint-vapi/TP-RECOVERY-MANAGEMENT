@@ -5,6 +5,7 @@ import 'package:salesman_mobile/v2/models/customer.dart';
 import 'package:salesman_mobile/v2/models/ptp.dart';
 import 'package:salesman_mobile/v2/stores/app_store.dart';
 import 'package:salesman_mobile/v2/screens/customer_360_screen.dart';
+import 'package:salesman_mobile/widgets/data_loading.dart' show LoadingAppBarStrip;
 
 const _bg = Color(0xFFF8FAFC);
 const _dark = Color(0xFF0F172A);
@@ -70,6 +71,7 @@ class PtpListScreen extends StatelessWidget {
         elevation: 0,
         foregroundColor: _dark,
         title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: _dark)),
+        bottom: const LoadingAppBarStrip(color: Color(0xFF2563EB)),
       ),
       body: SafeArea(
         child: Column(

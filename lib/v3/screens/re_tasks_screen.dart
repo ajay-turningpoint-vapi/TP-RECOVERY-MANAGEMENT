@@ -8,6 +8,7 @@ import 'package:salesman_mobile/v3/screens/unified_task_detail_screen.dart';
 import 'package:salesman_mobile/v3/screens/dispute_detail_screen.dart';
 import 'package:salesman_mobile/v3/screens/ptp_correction_review_screen.dart';
 import 'package:salesman_mobile/v3/widgets/branch_filter_chip.dart';
+import 'package:salesman_mobile/widgets/data_loading.dart' show DataLoadingBar;
 
 final _rupee =
     NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
@@ -29,6 +30,12 @@ class _TaskItem {
   final String subtitle1;
   final String subtitle2;
   final DateTime date;
+  // When this item was actually raised/created — distinct from [date] (the
+  // due-by time, used for the Today/Overdue/Upcoming buckets). The list is
+  // ordered by this, newest first, so a just-created item always surfaces
+  // at the top instead of wherever its deadline happens to sort it among
+  // the existing backlog.
+  final DateTime createdAt;
   final bool isDone;
   /// Owner of the underlying task (RE's own id for Internal Action tasks
   /// routed to them). '' for items with no single task owner.
@@ -54,6 +61,7 @@ class _TaskItem {
     required this.subtitle1,
     required this.subtitle2,
     required this.date,
+    required this.createdAt,
     required this.isDone,
     this.ownerId = '',
     this.amountLabel,
@@ -132,10 +140,12 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
   /// hours, which is exactly what a same-day-overdue item would show.
   String _overdueLabel(DateTime now, DateTime due) {
     final diff = now.difference(due);
-    if (diff.inDays >= 1)
+    if (diff.inDays >= 1) {
       return '${diff.inDays} Day${diff.inDays == 1 ? '' : 's'}';
-    if (diff.inHours >= 1)
+    }
+    if (diff.inHours >= 1) {
       return '${diff.inHours} Hour${diff.inHours == 1 ? '' : 's'}';
+    }
     final minutes = diff.inMinutes < 1 ? 1 : diff.inMinutes;
     return '$minutes Minute${minutes == 1 ? '' : 's'}';
   }
@@ -187,6 +197,7 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
         subtitle1: 'Salesman: ${store.salesmanDisplayName(salesmanId)}',
         subtitle2: t.customerName,
         date: t.deadline,
+        createdAt: t.createdAt,
         isDone: done,
         ownerId: t.ownerId,
         amountLabel: 'Outstanding',
@@ -216,6 +227,7 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
         subtitle1: 'Salesman: ${store.salesmanDisplayName(salesmanId)}',
         subtitle2: t.customerName,
         date: t.completedAt ?? t.deadline,
+        createdAt: t.completedAt ?? t.createdAt,
         isDone: false,
         amountLabel: dispute != null ? 'Amount in Dispute' : 'Outstanding',
         amountValue: dispute != null
@@ -252,6 +264,10 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
         subtitle1: 'Salesman: ${(s['fullName'] as String?) ?? s['name']} (${s['collectionAchievedPercent']}% achieved)',
         subtitle2: worst.name,
         date: DateTime.now(),
+        // A daily system-generated nudge, not something anyone "just did" —
+        // pinned to the start of today rather than the live clock so it
+        // doesn't jump back to the very top of the list on every rebuild.
+        createdAt: DateTime(now.year, now.month, now.day),
         isDone: false,
         amountLabel: 'Overdue Amount',
         amountValue: worst.totalDue,
@@ -261,12 +277,13 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
       ));
     }
 
-    // 6) Disputes awaiting review — 'Awaiting Verification' belongs to the
-    // canonical in-progress bucket, not awaiting-review (matches
-    // store.disputesAwaitingReviewCount, which totalOpenTaskItemsCount's
-    // dispute term is built from).
-    for (final d
-        in store.visibleDisputes.where((d) => d['status'] == 'Pending Approval')) {
+    // 6) Disputes needing an RE decision right now — a fresh claim to
+    // approve/reject, or a resolution owner's claim to verify (matches
+    // AppStore.disputeNeedsReActionStatuses; excluding the latter used to
+    // make it silently disappear from this list the moment a resolution
+    // owner submitted their work — no badge, nothing to tap).
+    for (final d in store.visibleDisputes.where((d) => AppStore.disputeNeedsReActionStatuses.contains(d['status']))) {
+      final awaitingVerification = d['status'] == 'Awaiting Verification';
       items.add(_TaskItem(
         id: 'dispute_${d['id']}',
         kind: TaskKind.dispute,
@@ -274,11 +291,19 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
         icon: Icons.description_outlined,
         color: kIndigo,
         priority: (d['priority'] as String?) == 'High' ? 'HIGH' : 'MEDIUM',
-        title: 'Dispute Awaiting Review',
-        subtitle1:
-            'Raised: ${DateFormat('dd MMM yyyy').format(d['raisedDate'])}',
+        title: awaitingVerification ? 'Dispute Awaiting Verification' : 'Dispute Awaiting Review',
+        subtitle1: awaitingVerification
+            ? 'Submitted: ${DateFormat('dd MMM yyyy').format(d['lastUpdated'] as DateTime? ?? d['raisedDate'])}'
+            : 'Raised: ${DateFormat('dd MMM yyyy').format(d['raisedDate'])}',
         subtitle2: '${d['customer']}  ·  ${d['invoice']}',
         date: _reviewDeadline((d['raisedDate'] as DateTime?) ?? DateTime.now()),
+        // When this actually landed in the RE's queue — the raise date for
+        // a fresh approval, or the resolution owner's submission for a
+        // verification (see the awaitingVerification title/subtitle above,
+        // which already draws the same distinction).
+        createdAt: awaitingVerification
+            ? ((d['lastUpdated'] as DateTime?) ?? (d['raisedDate'] as DateTime? ?? DateTime.now()))
+            : (d['raisedDate'] as DateTime? ?? DateTime.now()),
         isDone: false,
         amountLabel: 'Dispute Amount',
         amountValue: (d['amount'] as num).toDouble(),
@@ -301,6 +326,7 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
         subtitle1: 'Customer: ${c.name}',
         subtitle2: 'Salesman: ${store.salesmanDisplayName(c.assignedSalesmanId)}',
         date: _reviewDeadline(p.correctionRequestedDate ?? p.promiseDate),
+        createdAt: p.correctionRequestedDate ?? p.promiseDate,
         isDone: false,
         amountLabel: 'Requested Amount',
         amountValue: p.correctionRequestedAmount ?? p.amountPromised,
@@ -325,6 +351,7 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
         subtitle1: 'Customer: ${c.name}',
         subtitle2: 'Salesman: ${store.salesmanDisplayName(c.assignedSalesmanId)}',
         date: _reviewDeadline((p['claimDateRaw'] as DateTime?) ?? DateTime.now()),
+        createdAt: (p['claimDateRaw'] as DateTime?) ?? DateTime.now(),
         isDone: false,
         amountLabel: 'Claimed Amount',
         amountValue: (p['amount'] as num).toDouble(),
@@ -345,6 +372,7 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
         subtitle1: 'Customer: ${r.customerName}',
         subtitle2: 'by ${store.salesmanDisplayName(r.salesmanId)}',
         date: _reviewDeadline(r.requestedAt),
+        createdAt: r.requestedAt,
         isDone: false,
         amountLabel: null,
       ));
@@ -377,6 +405,7 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
             'Salesman: ${store.salesmanDisplayName(c.assignedSalesmanId)}',
         subtitle2: c.name,
         date: p.promiseDate,
+        createdAt: p.promiseDate,
         isDone: false,
         amountLabel: 'PTP Amount',
         amountValue: p.amountPromised,
@@ -449,7 +478,11 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
       case _Filter.all:
         filtered = items.where((i) => !i.isDone).toList();
     }
-    filtered.sort((a, b) => a.date.compareTo(b.date));
+    // Newest-raised first — matches the salesperson Tasks screen (server-
+    // sorted by created_at DESC). A deadline-based sort here buried a
+    // just-created item wherever its due date happened to fall among the
+    // existing backlog instead of surfacing it immediately.
+    filtered.sort((a, b) => b.createdAt.compareTo(a.createdAt));
     final shown = filtered.take(_visible).toList();
     _totalFilteredCount = filtered.length;
 
@@ -460,6 +493,7 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
           builder: (context, constraints) {
             final content = Column(
               children: [
+                const DataLoadingBar(),
                 _header(context),
                 _statCards(total, dueToday, overdue, upcoming, completed),
                 _search(),

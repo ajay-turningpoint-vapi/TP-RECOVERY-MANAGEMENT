@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:salesman_mobile/v2/stores/app_store.dart';
+import 'package:salesman_mobile/widgets/loading_button.dart';
 
 const _blue = Color(0xFF2563EB);
 
@@ -59,7 +60,12 @@ class LoadingAppBarStrip extends StatelessWidget implements PreferredSizeWidget 
 /// Full-area loader for the window between the scaffold rendering and the
 /// first server fetch completing (real on a warm start — see
 /// AppStore.restoreSession, which shows the UI before data arrives). Once
-/// `hasLoadedInitialData` flips, [child] is shown as normal.
+/// `hasLoadedInitialData` flips (including from a local cache — see
+/// AppStore._loadFromCache), [child] is shown as normal. Only a genuinely
+/// cache-less first-ever load with no connectivity can still land here —
+/// bounded by _refreshAllFromApi's own timeout, and shown with a real
+/// retry button rather than spinning forever (see AppStore.initialLoadError
+/// / retryInitialLoad).
 class InitialDataLoader extends StatelessWidget {
   final Widget child;
   const InitialDataLoader({super.key, required this.child});
@@ -68,6 +74,30 @@ class InitialDataLoader extends StatelessWidget {
   Widget build(BuildContext context) {
     final loading = context.select<AppStore, bool>((s) => s.isInitialDataLoading);
     if (!loading) return child;
+    final error = context.select<AppStore, String?>((s) => s.initialLoadError);
+    if (error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.cloud_off_rounded, size: 36, color: Color(0xFF94A3B8)),
+              const SizedBox(height: 14),
+              Text(error,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 13, color: Color(0xFF64748B), fontWeight: FontWeight.w600)),
+              const SizedBox(height: 18),
+              LoadingElevatedButton(
+                onPressed: () async => context.read<AppStore>().retryInitialLoad(),
+                style: ElevatedButton.styleFrom(backgroundColor: _blue, foregroundColor: Colors.white),
+                child: const Text('Retry'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
     return const Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
