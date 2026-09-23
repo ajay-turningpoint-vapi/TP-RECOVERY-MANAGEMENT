@@ -59,7 +59,7 @@ class AppTheme {
           textStyle: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 16),
         ),
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         color: cardSurface,
         elevation: 12,
         shadowColor: Colors.black.withOpacity(0.5),
@@ -107,7 +107,7 @@ class AppTheme {
       // Pin an explicit blue-seeded scheme and turn tinting off everywhere
       // so modals render true white/grey, not tinted.
       colorScheme: ColorScheme.fromSeed(seedColor: secondaryBlue, brightness: Brightness.light, surfaceTint: Colors.transparent),
-      dialogTheme: const DialogTheme(backgroundColor: Colors.white, surfaceTintColor: Colors.transparent),
+      dialogTheme: const DialogThemeData(backgroundColor: Colors.white, surfaceTintColor: Colors.transparent),
       bottomSheetTheme: const BottomSheetThemeData(backgroundColor: Colors.white, surfaceTintColor: Colors.transparent, modalBackgroundColor: Colors.white),
       popupMenuTheme: const PopupMenuThemeData(color: Colors.white, surfaceTintColor: Colors.transparent),
       canvasColor: Colors.white,
@@ -127,7 +127,7 @@ class AppTheme {
           textStyle: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 16),
         ),
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         color: cardSurfaceLight,
         surfaceTintColor: Colors.transparent,
         elevation: 8,

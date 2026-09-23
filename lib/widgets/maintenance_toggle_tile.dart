@@ -80,25 +80,30 @@ class _MaintenanceToggleTileState extends State<MaintenanceToggleTile> {
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: enabled ? const Color(0xFFF59E0B) : Colors.grey.withOpacity(0.15), width: enabled ? 1.4 : 1),
       ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-        leading: Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(color: const Color(0xFFF59E0B).withOpacity(0.12), shape: BoxShape.circle),
-          child: const Icon(Icons.construction_rounded, color: Color(0xFFF59E0B), size: 18),
+      // See profile_screen.dart's _ActionTile — a newer Flutter throws
+      // without a real Material ancestor for ListTile's background/ink.
+      child: Material(
+        type: MaterialType.transparency,
+        child: ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+          leading: Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(color: const Color(0xFFF59E0B).withOpacity(0.12), shape: BoxShape.circle),
+            child: const Icon(Icons.construction_rounded, color: Color(0xFFF59E0B), size: 18),
+          ),
+          title: const Text('Maintenance Mode', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Color(0xFF1B2B48))),
+          subtitle: Text(
+            enabled ? 'ON — app blocked for everyone else' : 'OFF — app is accessible normally',
+            style: TextStyle(fontSize: 11.5, color: enabled ? const Color(0xFFB45309) : const Color(0xFF5A6B87), fontWeight: enabled ? FontWeight.w700 : FontWeight.w500),
+          ),
+          trailing: _busy
+              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.2))
+              : Switch(
+                  value: enabled,
+                  activeColor: const Color(0xFFF59E0B),
+                  onChanged: (v) => _onChanged(context, store, v),
+                ),
         ),
-        title: const Text('Maintenance Mode', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Color(0xFF1B2B48))),
-        subtitle: Text(
-          enabled ? 'ON — app blocked for everyone else' : 'OFF — app is accessible normally',
-          style: TextStyle(fontSize: 11.5, color: enabled ? const Color(0xFFB45309) : const Color(0xFF5A6B87), fontWeight: enabled ? FontWeight.w700 : FontWeight.w500),
-        ),
-        trailing: _busy
-            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.2))
-            : Switch(
-                value: enabled,
-                activeColor: const Color(0xFFF59E0B),
-                onChanged: (v) => _onChanged(context, store, v),
-              ),
       ),
     );
   }

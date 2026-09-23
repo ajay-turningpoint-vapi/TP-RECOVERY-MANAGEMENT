@@ -14,6 +14,13 @@ analyzer:
   # human-readable E2E test progress/evidence output — not a code smell.
   exclude:
     - integration_test/**
+    - build/**
+    - android/**
+    - ios/**
+    - web/**
+    - windows/**
+    - macos/**
+    - linux/**
 
 linter:
   # The lint rules applied to this project can be customized in the

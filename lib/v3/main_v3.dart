@@ -108,6 +108,11 @@ bool _isNoisyFrameworkError(FlutterErrorDetails details) {
       // something an end user can act on, so don't throw a modal for them.
       text.contains('Incorrect use of ParentDataWidget') ||
       text.contains('ParentDataWidget') ||
+      // Purely cosmetic — a ListTile without a Material ancestor still
+      // renders and responds to taps, it just may not show its background
+      // color / ink splash. Fix these at the source when found (see
+      // profile_screen.dart's _ActionTile), but never block the user on it.
+      text.contains('background color or ink splashes may be invisible') ||
       details.library == 'image resource service';
 }
 
@@ -166,6 +171,7 @@ class _TPRMSV3AppState extends State<TPRMSV3App> with WidgetsBindingObserver {
       title: 'TP-RMS V3',
       navigatorKey: appNavigatorKey,
       theme: AppTheme.lightTheme,
+      debugShowCheckedModeBanner: false,
       home: getHomeScreen(),
       builder: (context, child) {
         return MediaQuery(

@@ -27,7 +27,9 @@ void main() {
     FlutterError.onError = (details) {
       priorOnError?.call(details);
       FlutterError.presentError(details);
-      showGlobalError('Something went wrong. Please try again.');
+      if (!_isNoisyFrameworkError(details)) {
+        showGlobalError('Something went wrong. Please try again.');
+      }
     };
 
     PlatformDispatcher.instance.onError = (error, stack) {
@@ -50,6 +52,22 @@ void main() {
   });
 }
 
+/// Framework-level noise that's a real bug to fix but never something the
+/// user can act on — mirrors main_v3.dart's filter of the same name.
+bool _isNoisyFrameworkError(FlutterErrorDetails details) {
+  final text = details.exception.toString();
+  return text.contains('overflowed by') ||
+      text.contains('RenderFlex') ||
+      text.contains('Incorrect use of ParentDataWidget') ||
+      text.contains('ParentDataWidget') ||
+      // Purely cosmetic — a ListTile without a Material ancestor still
+      // renders and responds to taps, it just may not show its background
+      // color / ink splash. Fix these at the source when found, but never
+      // block the user on it.
+      text.contains('background color or ink splashes may be invisible') ||
+      details.library == 'image resource service';
+}
+
 class TPRMSAdminApp extends StatelessWidget {
   const TPRMSAdminApp({super.key});
 
@@ -70,6 +88,7 @@ class TPRMSAdminApp extends StatelessWidget {
       title: 'TP-RMS Admin',
       navigatorKey: appNavigatorKey,
       theme: AppTheme.lightTheme,
+      debugShowCheckedModeBanner: false,
       home: getHomeScreen(),
       builder: (context, child) {
         return MediaQuery(
