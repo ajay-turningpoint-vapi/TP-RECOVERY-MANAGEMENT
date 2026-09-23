@@ -118,7 +118,7 @@ class _ManagerManagementAttentionScreenState extends State<ManagerManagementAtte
           return Container(
             width: 130,
             padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(color: color.withOpacity(0.05), borderRadius: BorderRadius.circular(12), border: Border.all(color: color.withOpacity(0.15))),
+            decoration: BoxDecoration(color: color.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(12), border: Border.all(color: color.withValues(alpha: 0.15))),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -142,13 +142,13 @@ class _ManagerManagementAttentionScreenState extends State<ManagerManagementAtte
       borderRadius: BorderRadius.circular(14),
       child: Container(
         padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: kRed.withOpacity(0.25))),
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: kRed.withValues(alpha: 0.25))),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3), decoration: BoxDecoration(color: kRed.withOpacity(0.1), borderRadius: BorderRadius.circular(6)), child: const Text('L4', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: kRed))),
+                Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3), decoration: BoxDecoration(color: kRed.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)), child: const Text('L4', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: kRed))),
                 const SizedBox(width: 8),
                 Expanded(child: Text(c.customerName, style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold, color: kNavy))),
                 const Icon(Icons.chevron_right, size: 16, color: kMuted),
@@ -210,7 +210,7 @@ class _ManagerManagementAttentionScreenState extends State<ManagerManagementAtte
               Row(
                 children: [
                   Expanded(child: Text(c.customerName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: kNavy))),
-                  Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), decoration: BoxDecoration(color: kRed.withOpacity(0.1), borderRadius: BorderRadius.circular(8)), child: const Text('L4', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: kRed))),
+                  Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), decoration: BoxDecoration(color: kRed.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)), child: const Text('L4', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: kRed))),
                 ],
               ),
               Text('${customer.branch}  ·  Owner: ${store.salesmanDisplayName(c.ownerId)}', style: const TextStyle(fontSize: 12, color: kMuted)),
@@ -288,7 +288,7 @@ class _ManagerManagementAttentionScreenState extends State<ManagerManagementAtte
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
-                  value: owner,
+                  initialValue: owner,
                   isExpanded: true,
                   decoration: const InputDecoration(labelText: 'Owner', border: OutlineInputBorder(), isDense: true),
                   items: salesmenNames.map((n) => DropdownMenuItem(value: n, child: Text(store.salesmanDisplayName(n)))).toList(),
@@ -296,7 +296,7 @@ class _ManagerManagementAttentionScreenState extends State<ManagerManagementAtte
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
-                  value: priority,
+                  initialValue: priority,
                   isExpanded: true,
                   decoration: const InputDecoration(labelText: 'Priority', border: OutlineInputBorder(), isDense: true),
                   items: const [DropdownMenuItem(value: 'Critical', child: Text('Critical')), DropdownMenuItem(value: 'High', child: Text('High')), DropdownMenuItem(value: 'Medium', child: Text('Medium'))],
@@ -357,7 +357,7 @@ class _ManagerManagementAttentionScreenState extends State<ManagerManagementAtte
   Widget _footer(BuildContext context, AppStore store) {
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: kBlue.withOpacity(0.06), borderRadius: BorderRadius.circular(10), border: Border.all(color: kBlue.withOpacity(0.15))),
+      decoration: BoxDecoration(color: kBlue.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(10), border: Border.all(color: kBlue.withValues(alpha: 0.15))),
       child: const Row(
         children: [
           Icon(Icons.info_outline, size: 15, color: kBlue),

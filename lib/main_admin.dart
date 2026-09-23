@@ -68,6 +68,7 @@ class TPRMSAdminApp extends StatelessWidget {
 
     return MaterialApp(
       title: 'TP-RMS Admin',
+      debugShowCheckedModeBanner: false,
       navigatorKey: appNavigatorKey,
       theme: AppTheme.lightTheme,
       home: getHomeScreen(),
@@ -102,7 +103,7 @@ class _SessionRestoringScreen extends StatelessWidget {
             SizedBox(
               width: 28,
               height: 28,
-              child: CircularProgressIndicator(strokeWidth: 2.5, valueColor: AlwaysStoppedAnimation(Colors.white.withOpacity(0.85))),
+              child: CircularProgressIndicator(strokeWidth: 2.5, valueColor: AlwaysStoppedAnimation(Colors.white.withValues(alpha: 0.85))),
             ),
           ],
         ),

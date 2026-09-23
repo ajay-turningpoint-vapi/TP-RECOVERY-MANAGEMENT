@@ -293,7 +293,7 @@ class _ManagerDisputeManagementSummaryScreenState extends State<ManagerDisputeMa
           return Container(
             width: 122,
             padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(color: color.withOpacity(0.05), borderRadius: BorderRadius.circular(12), border: Border.all(color: color.withOpacity(0.15))),
+            decoration: BoxDecoration(color: color.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(12), border: Border.all(color: color.withValues(alpha: 0.15))),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -423,11 +423,11 @@ class _ManagerDisputeManagementSummaryScreenState extends State<ManagerDisputeMa
                 return Container(
                   width: 112,
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                  decoration: BoxDecoration(color: color.withOpacity(0.05), borderRadius: BorderRadius.circular(12), border: Border.all(color: color.withOpacity(0.15))),
+                  decoration: BoxDecoration(color: color.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(12), border: Border.all(color: color.withValues(alpha: 0.15))),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: color.withOpacity(0.12), shape: BoxShape.circle), child: Icon(_summaryReasonIcon(e.key), size: 14, color: color)),
+                      Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: color.withValues(alpha: 0.12), shape: BoxShape.circle), child: Icon(_summaryReasonIcon(e.key), size: 14, color: color)),
                       const SizedBox(height: 6),
                       Text(e.key, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 9.5, color: kDark, fontWeight: FontWeight.w700)),
                       const Spacer(),
@@ -665,7 +665,7 @@ class _ManagerDisputeManagementSummaryScreenState extends State<ManagerDisputeMa
                 children: [
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                    decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
+                    decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)),
                     child: Text(bucket, style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: color)),
                   ),
                   const SizedBox(height: 2),
@@ -706,7 +706,7 @@ class _ManagerDisputeManagementSummaryScreenState extends State<ManagerDisputeMa
                   ),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+                    decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
                     child: Text(bucket, style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: color)),
                   ),
                 ],
@@ -755,7 +755,7 @@ class _ManagerDisputeManagementSummaryScreenState extends State<ManagerDisputeMa
   Widget _footer(BuildContext context, AppStore store) {
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: kBlue.withOpacity(0.06), borderRadius: BorderRadius.circular(10), border: Border.all(color: kBlue.withOpacity(0.15))),
+      decoration: BoxDecoration(color: kBlue.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(10), border: Border.all(color: kBlue.withValues(alpha: 0.15))),
       child: Row(
         children: [
           const Icon(Icons.info_outline, size: 15, color: kBlue),

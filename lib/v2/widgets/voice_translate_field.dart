@@ -64,10 +64,12 @@ class _VoiceTranslateFieldState extends State<VoiceTranslateField> {
       // BCP-47 format (hyphen, not underscore) — the Android plugin passes
       // this straight to Locale.forLanguageTag(); "hi_IN" fails to parse
       // and silently falls back to the device's default (English) locale.
-      localeId: 'hi-IN',
-      cancelOnError: true,
-      partialResults: true,
-      listenMode: stt.ListenMode.dictation,
+      listenOptions: stt.SpeechListenOptions(
+        localeId: 'hi-IN',
+        cancelOnError: true,
+        partialResults: true,
+        listenMode: stt.ListenMode.dictation,
+      ),
       onResult: (result) {
         widget.controller.text = result.recognizedWords;
         widget.controller.selection = TextSelection.collapsed(offset: widget.controller.text.length);

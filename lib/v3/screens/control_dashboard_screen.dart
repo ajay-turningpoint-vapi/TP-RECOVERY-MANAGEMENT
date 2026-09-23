@@ -261,7 +261,7 @@ class _ControlDashboardScreenState extends State<ControlDashboardScreen> {
               children: [
                 Container(
                   padding: const EdgeInsets.all(6),
-                  decoration: BoxDecoration(color: c.color.withOpacity(0.1), shape: BoxShape.circle),
+                  decoration: BoxDecoration(color: c.color.withValues(alpha: 0.1), shape: BoxShape.circle),
                   child: Icon(c.icon, color: c.color, size: 15),
                 ),
                 const Icon(Icons.chevron_right, size: 15, color: _muted),
@@ -483,7 +483,7 @@ class _ControlDashboardScreenState extends State<ControlDashboardScreen> {
               width: _perfColSalesman,
               child: Row(
                 children: [
-                  CircleAvatar(radius: 13, backgroundColor: color.withOpacity(0.15), child: Text(initials, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold))),
+                  CircleAvatar(radius: 13, backgroundColor: color.withValues(alpha: 0.15), child: Text(initials, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold))),
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(

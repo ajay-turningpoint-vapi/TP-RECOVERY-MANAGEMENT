@@ -230,7 +230,7 @@ class _ManagerNoFollowUpReportScreenState extends State<ManagerNoFollowUpReportS
         final (icon, color, value, label, sub) = c;
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-          decoration: BoxDecoration(color: color.withOpacity(0.05), borderRadius: BorderRadius.circular(14), border: Border.all(color: color.withOpacity(0.15))),
+          decoration: BoxDecoration(color: color.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(14), border: Border.all(color: color.withValues(alpha: 0.15))),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -275,7 +275,7 @@ class _ManagerNoFollowUpReportScreenState extends State<ManagerNoFollowUpReportS
                 ),
               ),
               lineBarsData: [
-                LineChartBarData(spots: [for (var i = 0; i < trend.length; i++) FlSpot(i.toDouble(), (trend[i]['count'] as num).toDouble())], isCurved: true, color: kBlue, barWidth: 2.5, dotData: const FlDotData(show: true), belowBarData: BarAreaData(show: true, color: kBlue.withOpacity(0.08))),
+                LineChartBarData(spots: [for (var i = 0; i < trend.length; i++) FlSpot(i.toDouble(), (trend[i]['count'] as num).toDouble())], isCurved: true, color: kBlue, barWidth: 2.5, dotData: const FlDotData(show: true), belowBarData: BarAreaData(show: true, color: kBlue.withValues(alpha: 0.08))),
               ],
             ),
           ),
@@ -297,7 +297,7 @@ class _ManagerNoFollowUpReportScreenState extends State<ManagerNoFollowUpReportS
               child: Container(
                 margin: const EdgeInsets.symmetric(horizontal: 3),
                 padding: const EdgeInsets.symmetric(vertical: 10),
-                decoration: BoxDecoration(color: color.withOpacity(0.05), borderRadius: BorderRadius.circular(12), border: Border.all(color: color.withOpacity(0.15))),
+                decoration: BoxDecoration(color: color.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(12), border: Border.all(color: color.withValues(alpha: 0.15))),
                 child: Column(
                   children: [
                     Icon(icon, size: 15, color: color),
@@ -392,7 +392,7 @@ class _ManagerNoFollowUpReportScreenState extends State<ManagerNoFollowUpReportS
                     const SizedBox(width: 6),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                      decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
+                      decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)),
                       child: Text(priority, style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: color)),
                     ),
                   ],
@@ -460,7 +460,7 @@ class _ManagerNoFollowUpReportScreenState extends State<ManagerNoFollowUpReportS
   Widget _footer(AppStore store) {
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: kBlue.withOpacity(0.06), borderRadius: BorderRadius.circular(10), border: Border.all(color: kBlue.withOpacity(0.15))),
+      decoration: BoxDecoration(color: kBlue.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(10), border: Border.all(color: kBlue.withValues(alpha: 0.15))),
       child: Row(
         children: [
           const Icon(Icons.info_outline, size: 15, color: kBlue),

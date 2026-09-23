@@ -97,7 +97,7 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> with SingleTickerPr
                   decoration: BoxDecoration(
                     gradient: const LinearGradient(colors: [Color(0xFF0052CC), Color(0xFF1E3A8A)], begin: Alignment.topLeft, end: Alignment.bottomRight),
                     borderRadius: BorderRadius.circular(24),
-                    boxShadow: [BoxShadow(color: const Color(0xFF0052CC).withOpacity(0.3), blurRadius: 20, offset: const Offset(0, 8))],
+                    boxShadow: [BoxShadow(color: const Color(0xFF0052CC).withValues(alpha: 0.3), blurRadius: 20, offset: const Offset(0, 8))],
                   ),
                   child: const Icon(Icons.admin_panel_settings_rounded, color: Colors.white, size: 40),
                 ),
@@ -118,7 +118,7 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> with SingleTickerPr
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(20),
-                    boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 24, offset: const Offset(0, 8))],
+                    boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 24, offset: const Offset(0, 8))],
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,

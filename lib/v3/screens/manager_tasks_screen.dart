@@ -198,7 +198,7 @@ class _ManagerTasksScreenState extends State<ManagerTasksScreen> {
             return Container(
               width: 92,
               padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(color: color.withOpacity(0.06), borderRadius: BorderRadius.circular(12), border: Border.all(color: color.withOpacity(0.15))),
+              decoration: BoxDecoration(color: color.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(12), border: Border.all(color: color.withValues(alpha: 0.15))),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -252,7 +252,7 @@ class _ManagerTasksScreenState extends State<ManagerTasksScreen> {
                           const SizedBox(width: 6),
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                            decoration: BoxDecoration(color: active ? Colors.white.withOpacity(0.25) : kBg, borderRadius: BorderRadius.circular(10)),
+                            decoration: BoxDecoration(color: active ? Colors.white.withValues(alpha: 0.25) : kBg, borderRadius: BorderRadius.circular(10)),
                             child: Text('$count', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: active ? Colors.white : kMuted)),
                           ),
                         ],
@@ -340,7 +340,7 @@ class _ManagerTasksScreenState extends State<ManagerTasksScreen> {
                     return FilterChip(
                       label: Text(p, style: const TextStyle(fontSize: 11.5)),
                       selected: selected,
-                      selectedColor: _priorityColor(p).withOpacity(0.15),
+                      selectedColor: _priorityColor(p).withValues(alpha: 0.15),
                       checkmarkColor: _priorityColor(p),
                       onSelected: (v) {
                         setModalState(() {
@@ -416,7 +416,7 @@ class _ManagerTasksScreenState extends State<ManagerTasksScreen> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: priorityColor.withOpacity(0.1), borderRadius: BorderRadius.circular(10)), child: Icon(taskTypeIcon(t.type), size: 18, color: priorityColor)),
+              Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: priorityColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)), child: Icon(taskTypeIcon(t.type), size: 18, color: priorityColor)),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
@@ -443,13 +443,13 @@ class _ManagerTasksScreenState extends State<ManagerTasksScreen> {
                     children: [
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(color: priorityColor.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
+                        decoration: BoxDecoration(color: priorityColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)),
                         child: Text(priorityLabel, style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: priorityColor)),
                       ),
                       const SizedBox(width: 4),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(color: statusColor.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
+                        decoration: BoxDecoration(color: statusColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)),
                         child: Text(statusLabel, style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: statusColor)),
                       ),
                     ],
@@ -515,7 +515,7 @@ class _ManagerTasksScreenState extends State<ManagerTasksScreen> {
               children: [
                 Row(
                   children: [
-                    Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: priorityColor.withOpacity(0.1), borderRadius: BorderRadius.circular(10)), child: Icon(taskTypeIcon(t.type), color: priorityColor)),
+                    Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: priorityColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)), child: Icon(taskTypeIcon(t.type), color: priorityColor)),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Column(
@@ -531,9 +531,9 @@ class _ManagerTasksScreenState extends State<ManagerTasksScreen> {
                 const SizedBox(height: 16),
                 Row(
                   children: [
-                    Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4), decoration: BoxDecoration(color: priorityColor.withOpacity(0.1), borderRadius: BorderRadius.circular(8)), child: Text('$priorityLabel Priority', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: priorityColor))),
+                    Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4), decoration: BoxDecoration(color: priorityColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)), child: Text('$priorityLabel Priority', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: priorityColor))),
                     const SizedBox(width: 8),
-                    Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4), decoration: BoxDecoration(color: statusColor.withOpacity(0.1), borderRadius: BorderRadius.circular(8)), child: Text(statusLabel, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: statusColor))),
+                    Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4), decoration: BoxDecoration(color: statusColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)), child: Text(statusLabel, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: statusColor))),
                   ],
                 ),
                 const SizedBox(height: 16),
@@ -576,7 +576,7 @@ class _ManagerTasksScreenState extends State<ManagerTasksScreen> {
     return Container(
       margin: const EdgeInsets.fromLTRB(14, 0, 14, 10),
       padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(color: kRed.withOpacity(0.06), borderRadius: BorderRadius.circular(12), border: Border.all(color: kRed.withOpacity(0.2))),
+      decoration: BoxDecoration(color: kRed.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(12), border: Border.all(color: kRed.withValues(alpha: 0.2))),
       child: Row(
         children: [
           const Icon(Icons.warning_amber_rounded, color: kRed, size: 22),

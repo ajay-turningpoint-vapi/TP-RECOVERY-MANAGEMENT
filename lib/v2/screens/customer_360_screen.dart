@@ -278,11 +278,11 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                       width: double.infinity,
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                          color: const Color(0xFF7C3AED).withOpacity(0.06),
+                          color: const Color(0xFF7C3AED).withValues(alpha: 0.06),
                           borderRadius: BorderRadius.circular(10),
                           border: Border.all(
                               color:
-                                  const Color(0xFF7C3AED).withOpacity(0.15))),
+                                  const Color(0xFF7C3AED).withValues(alpha: 0.15))),
                       child: const Row(
                         children: [
                           Icon(Icons.visibility_outlined,
@@ -368,7 +368,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
             decoration: BoxDecoration(
               color: Colors.white,
               border:
-                  Border(top: BorderSide(color: Colors.grey.withOpacity(0.15))),
+                  Border(top: BorderSide(color: Colors.grey.withValues(alpha: 0.15))),
             ),
             child: effectiveReadOnly
                 ? const Row(
@@ -473,7 +473,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: badgeColor.withOpacity(0.25), width: 1.4),
+        border: Border.all(color: badgeColor.withValues(alpha: 0.25), width: 1.4),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -493,7 +493,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                    color: badgeColor.withOpacity(0.12),
+                    color: badgeColor.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(6)),
                 child: Text(escLevel,
                     style: TextStyle(
@@ -608,9 +608,9 @@ class _Customer360ScreenState extends State<Customer360Screen> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
-                  color: healthColor.withOpacity(0.10),
+                  color: healthColor.withValues(alpha: 0.10),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: healthColor.withOpacity(0.35))),
+                  border: Border.all(color: healthColor.withValues(alpha: 0.35))),
               child: Row(
                 children: [
                   Icon(Icons.favorite, size: 14, color: healthColor),
@@ -661,7 +661,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                 width: 30,
                 height: 30,
                 alignment: Alignment.center,
-                decoration: BoxDecoration(color: color.withOpacity(0.12), shape: BoxShape.circle),
+                decoration: BoxDecoration(color: color.withValues(alpha: 0.12), shape: BoxShape.circle),
                 child: Icon(icon, size: 15, color: color),
               ),
               const SizedBox(width: 10),
@@ -710,7 +710,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Center(
-                child: Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey.withOpacity(0.3), borderRadius: BorderRadius.circular(2))),
+                child: Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey.withValues(alpha: 0.3), borderRadius: BorderRadius.circular(2))),
               ),
               const SizedBox(height: 18),
               Row(
@@ -719,7 +719,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                     width: 56,
                     height: 56,
                     alignment: Alignment.center,
-                    decoration: BoxDecoration(gradient: LinearGradient(colors: [bandColor, bandColor.withOpacity(0.7)]), shape: BoxShape.circle),
+                    decoration: BoxDecoration(gradient: LinearGradient(colors: [bandColor, bandColor.withValues(alpha: 0.7)]), shape: BoxShape.circle),
                     child: Text(breakdown == null && c.creditHealthScore == null ? '—' : '$total%',
                         style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: Colors.white)),
                   ),
@@ -732,7 +732,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                         const SizedBox(height: 4),
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(color: bandColor.withOpacity(0.12), borderRadius: BorderRadius.circular(6)),
+                          decoration: BoxDecoration(color: bandColor.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(6)),
                           child: Text(band, style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: bandColor)),
                         ),
                       ],
@@ -763,7 +763,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                 const SizedBox(height: 6),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                  decoration: BoxDecoration(color: bandColor.withOpacity(0.08), borderRadius: BorderRadius.circular(12), border: Border.all(color: bandColor.withOpacity(0.25))),
+                  decoration: BoxDecoration(color: bandColor.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(12), border: Border.all(color: bandColor.withValues(alpha: 0.25))),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -914,7 +914,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
       decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: color.withOpacity(0.3), width: 1.4)),
+          border: Border.all(color: color.withValues(alpha: 0.3), width: 1.4)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1039,7 +1039,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                    color: statusColor(openDispute['status']).withOpacity(0.12),
+                    color: statusColor(openDispute['status']).withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(6)),
                 child: Text(raiserStatusLabel(openDispute['status'] as String),
                     style: TextStyle(
@@ -1176,7 +1176,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                 ]),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
-                  value: mode,
+                  initialValue: mode,
                   decoration: dec('Mode of Communication'),
                   items: const [
                     DropdownMenuItem(value: 'Phone Call', child: Text('Phone Call')),
@@ -1282,7 +1282,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.withOpacity(0.15)),
+        border: Border.all(color: Colors.grey.withValues(alpha: 0.15)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1377,7 +1377,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.withOpacity(0.15)),
+        border: Border.all(color: Colors.grey.withValues(alpha: 0.15)),
       ),
       child: Row(
         children: [
@@ -1406,7 +1406,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
               onTap: () => contactActions(context, phone),
               child: Container(
                 padding: const EdgeInsets.all(9),
-                decoration: BoxDecoration(color: const Color(0xFF0052CC).withOpacity(0.08), shape: BoxShape.circle),
+                decoration: BoxDecoration(color: const Color(0xFF0052CC).withValues(alpha: 0.08), shape: BoxShape.circle),
                 child: const Icon(Icons.call, size: 17, color: Color(0xFF0052CC)),
               ),
             )
@@ -1423,7 +1423,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.withOpacity(0.15)),
+        border: Border.all(color: Colors.grey.withValues(alpha: 0.15)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1502,7 +1502,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.withOpacity(0.15)),
+        border: Border.all(color: Colors.grey.withValues(alpha: 0.15)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1609,7 +1609,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.withOpacity(0.15)),
+        border: Border.all(color: Colors.grey.withValues(alpha: 0.15)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1699,7 +1699,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.withOpacity(0.15)),
+        border: Border.all(color: Colors.grey.withValues(alpha: 0.15)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1792,7 +1792,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
         border: Border.all(color: const Color(0xFFE6EBF2)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.03),
+            color: Colors.black.withValues(alpha: 0.03),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -1911,7 +1911,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: c.withOpacity(0.12),
+        color: c.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Text(
@@ -2073,9 +2073,9 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                   child: Container(
                     padding: const EdgeInsets.fromLTRB(10, 5, 8, 5),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF0052CC).withOpacity(0.08),
+                      color: const Color(0xFF0052CC).withValues(alpha: 0.08),
                       borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: const Color(0xFF0052CC).withOpacity(0.25)),
+                      border: Border.all(color: const Color(0xFF0052CC).withValues(alpha: 0.25)),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
@@ -2293,7 +2293,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                     color: color,
                     shape: BoxShape.circle,
                     border: Border.all(color: Colors.white, width: 2),
-                    boxShadow: [BoxShadow(color: color.withOpacity(0.25), blurRadius: 4)],
+                    boxShadow: [BoxShadow(color: color.withValues(alpha: 0.25), blurRadius: 4)],
                   ),
                 ),
                 Expanded(child: Container(width: 2, color: isLast ? Colors.transparent : railColor)),
@@ -2330,7 +2330,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
         border: Border.all(color: const Color(0xFFE6EBF2)),
         boxShadow: [
           BoxShadow(
-              color: Colors.black.withOpacity(0.03),
+              color: Colors.black.withValues(alpha: 0.03),
               blurRadius: 8,
               offset: const Offset(0, 2)),
         ],
@@ -2374,7 +2374,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 7, vertical: 2),
                               decoration: BoxDecoration(
-                                color: iconColor.withOpacity(0.1),
+                                color: iconColor.withValues(alpha: 0.1),
                                 borderRadius: BorderRadius.circular(20),
                               ),
                               child: Text(
@@ -2455,7 +2455,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                                     _detailIcon(descParts[i].key,
                                         descParts[i].value),
                                     size: 13,
-                                    color: iconColor.withOpacity(0.75)),
+                                    color: iconColor.withValues(alpha: 0.75)),
                                 const SizedBox(width: 7),
                                 SizedBox(
                                   width: 108,
@@ -2520,7 +2520,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                     children: [
                       CircleAvatar(
                         radius: 11,
-                        backgroundColor: iconColor.withOpacity(0.12),
+                        backgroundColor: iconColor.withValues(alpha: 0.12),
                         child: Text(
                           audit.actor.isNotEmpty
                               ? audit.actor[0].toUpperCase()
@@ -2575,7 +2575,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
+        color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Text(
@@ -2707,7 +2707,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: Colors.grey.withOpacity(0.15)),
+                      border: Border.all(color: Colors.grey.withValues(alpha: 0.15)),
                     ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -2947,7 +2947,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                                   color: Colors.white,
                                   borderRadius: BorderRadius.circular(12),
                                   border: Border.all(
-                                      color: Colors.grey.withOpacity(0.2)),
+                                      color: Colors.grey.withValues(alpha: 0.2)),
                                 ),
                                 child: InkWell(
                                   borderRadius: BorderRadius.circular(12),
@@ -2964,7 +2964,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                                           padding: const EdgeInsets.all(8),
                                           decoration: BoxDecoration(
                                               color: (o['color'] as Color)
-                                                  .withOpacity(0.1),
+                                                  .withValues(alpha: 0.1),
                                               shape: BoxShape.circle),
                                           child: Icon(o['icon'] as IconData,
                                               color: o['color'] as Color,
@@ -3044,7 +3044,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
   }
 
   /// The contact name from this customer's most recent interaction that
-  /// recorded one ("… Contact: <name> …" in the audit description) — used to
+  /// recorded one ("… Contact: `<name>` …" in the audit description) — used to
   /// pre-fill "Person Spoken To" on the PTP form. Null if none on record.
   String? _lastContactPerson() {
     final store = context.read<AppStore>();
@@ -3270,7 +3270,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                   Container(
                       padding: const EdgeInsets.all(9),
                       decoration: BoxDecoration(
-                          color: const Color(0xFF0052CC).withOpacity(0.08),
+                          color: const Color(0xFF0052CC).withValues(alpha: 0.08),
                           shape: BoxShape.circle),
                       child: const Icon(Icons.add_task,
                           color: Color(0xFF0052CC), size: 18)),
@@ -3320,7 +3320,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                       label: const Text('Call Customer'),
                       selected: taskType == 'customerCall',
                       onSelected: (_) => setState(() => taskType = 'customerCall'),
-                      selectedColor: const Color(0xFF0052CC).withOpacity(0.15),
+                      selectedColor: const Color(0xFF0052CC).withValues(alpha: 0.15),
                       labelStyle: TextStyle(
                           fontSize: 12.5,
                           fontWeight: FontWeight.bold,
@@ -3335,7 +3335,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                       label: const Text('Physical Visit'),
                       selected: taskType == 'physicalVisit',
                       onSelected: (_) => setState(() => taskType = 'physicalVisit'),
-                      selectedColor: const Color(0xFF0052CC).withOpacity(0.15),
+                      selectedColor: const Color(0xFF0052CC).withValues(alpha: 0.15),
                       labelStyle: TextStyle(
                           fontSize: 12.5,
                           fontWeight: FontWeight.bold,
@@ -3375,7 +3375,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                                 color: Color(0xFF1B2B48))),
                         const SizedBox(height: 6),
                         DropdownButtonFormField<String>(
-                          value: priority,
+                          initialValue: priority,
                           decoration: const InputDecoration(
                               border: OutlineInputBorder(),
                               contentPadding: EdgeInsets.symmetric(
@@ -3419,7 +3419,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                                 horizontal: 12, vertical: 13),
                             decoration: BoxDecoration(
                                 border: Border.all(
-                                    color: Colors.grey.withOpacity(0.5)),
+                                    color: Colors.grey.withValues(alpha: 0.5)),
                                 borderRadius: BorderRadius.circular(4)),
                             child: Row(
                                 mainAxisAlignment:

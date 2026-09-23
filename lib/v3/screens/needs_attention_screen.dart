@@ -203,9 +203,9 @@ class _NeedsAttentionScreenState extends State<NeedsAttentionScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: active ? color.withOpacity(0.1) : Colors.white,
+                  color: active ? color.withValues(alpha: 0.1) : Colors.white,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: active ? color.withOpacity(0.4) : _border),
+                  border: Border.all(color: active ? color.withValues(alpha: 0.4) : _border),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -337,7 +337,7 @@ class _NeedsAttentionScreenState extends State<NeedsAttentionScreen> {
   // -------------------------------------------------------------------
   Widget _sectionHeader(String title, int count, Color color, IconData icon, VoidCallback onViewAll) {
     return Container(
-      color: color.withOpacity(0.06),
+      color: color.withValues(alpha: 0.06),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       child: Row(
         children: [
@@ -480,7 +480,7 @@ class _NeedsAttentionScreenState extends State<NeedsAttentionScreen> {
         decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: _border))),
         child: Row(
           children: [
-            CircleAvatar(radius: 16, backgroundColor: avatarColor.withOpacity(0.15), child: Text(avatarText, style: TextStyle(color: avatarColor, fontSize: 11, fontWeight: FontWeight.bold))),
+            CircleAvatar(radius: 16, backgroundColor: avatarColor.withValues(alpha: 0.15), child: Text(avatarText, style: TextStyle(color: avatarColor, fontSize: 11, fontWeight: FontWeight.bold))),
             const SizedBox(width: 10),
             Expanded(
               flex: 3,

@@ -120,7 +120,7 @@ class PtpListScreen extends StatelessWidget {
                                       const SizedBox(height: 6),
                                       Container(
                                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                        decoration: BoxDecoration(color: statusColor(p.status).withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
+                                        decoration: BoxDecoration(color: statusColor(p.status).withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)),
                                         child: Text(statusLabel(p.status), style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: statusColor(p.status))),
                                       ),
                                     ],

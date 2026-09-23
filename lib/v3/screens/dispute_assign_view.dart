@@ -85,10 +85,10 @@ class _DisputeAssignViewState extends State<DisputeAssignView> {
   Future<void> _pickPdf() async {
     setState(() => _busy = true);
     try {
-      final r = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['pdf'], withData: true);
-      final f = r?.files.single;
-      if (f != null && f.bytes != null) {
-        setState(() { _fileBytes = f.bytes; _fileName = f.name; });
+      final f = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: ['pdf']);
+      if (f != null) {
+        final bytes = await f.readAsBytes();
+        setState(() { _fileBytes = bytes; _fileName = f.name; });
       }
     } catch (_) {
       if (mounted) showAppMessage(context, message: 'Could not access files.');
@@ -163,7 +163,7 @@ class _DisputeAssignViewState extends State<DisputeAssignView> {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 8, vertical: 3),
                         decoration: BoxDecoration(
-                            color: kOrange.withOpacity(0.12),
+                            color: kOrange.withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(6)),
                         child: const Text('APPROVING DISPUTE',
                             style: TextStyle(
@@ -296,7 +296,7 @@ class _DisputeAssignViewState extends State<DisputeAssignView> {
                             ClipRRect(
                               borderRadius: BorderRadius.circular(8),
                               child: (_fileName ?? '').toLowerCase().endsWith('.pdf')
-                                  ? Container(width: 40, height: 40, color: kRed.withOpacity(0.1), child: const Icon(Icons.picture_as_pdf, color: kRed, size: 18))
+                                  ? Container(width: 40, height: 40, color: kRed.withValues(alpha: 0.1), child: const Icon(Icons.picture_as_pdf, color: kRed, size: 18))
                                   : Image.memory(_fileBytes!, width: 40, height: 40, fit: BoxFit.cover),
                             ),
                             const SizedBox(width: 10),

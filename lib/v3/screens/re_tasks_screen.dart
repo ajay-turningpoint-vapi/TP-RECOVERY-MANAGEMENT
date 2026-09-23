@@ -598,7 +598,7 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
                     return FilterChip(
                       label: Text(p, style: const TextStyle(fontSize: 11.5)),
                       selected: selected,
-                      selectedColor: _priorityColor(p).withOpacity(0.15),
+                      selectedColor: _priorityColor(p).withValues(alpha: 0.15),
                       checkmarkColor: _priorityColor(p),
                       onSelected: (v) {
                         setModalState(() {
@@ -707,7 +707,7 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
                   boxShadow: active
                       ? [
                           BoxShadow(
-                              color: color.withOpacity(0.15),
+                              color: color.withValues(alpha: 0.15),
                               blurRadius: 8,
                               offset: const Offset(0, 3))
                         ]
@@ -719,7 +719,7 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
                     Container(
                         padding: const EdgeInsets.all(6),
                         decoration: BoxDecoration(
-                            color: color.withOpacity(0.1),
+                            color: color.withValues(alpha: 0.1),
                             shape: BoxShape.circle),
                         child: Icon(icon, size: 15, color: color)),
                     const Spacer(),
@@ -834,7 +834,7 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
               Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                      color: item.color.withOpacity(0.1),
+                      color: item.color.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(10)),
                   child: Icon(item.icon, size: 18, color: item.color)),
               const SizedBox(width: 10),
@@ -846,7 +846,7 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
-                          color: _priorityColor(item.priority).withOpacity(0.1),
+                          color: _priorityColor(item.priority).withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(4)),
                       child: Text(item.priority,
                           style: TextStyle(

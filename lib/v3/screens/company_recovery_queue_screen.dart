@@ -124,7 +124,7 @@ class _CompanyRecoveryQueueScreenState extends State<CompanyRecoveryQueueScreen>
                                   child: ChoiceChip(
                                     label: Text(f, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
                                     selected: _quickFilter == f,
-                                    selectedColor: _blue.withOpacity(0.15),
+                                    selectedColor: _blue.withValues(alpha: 0.15),
                                     labelStyle: TextStyle(color: _quickFilter == f ? _blue : _muted),
                                     onSelected: (_) => setState(() => _quickFilter = f),
                                   ),
@@ -322,7 +322,7 @@ class _CompanyRecoveryQueueScreenState extends State<CompanyRecoveryQueueScreen>
                   const SizedBox(height: 4),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(color: stateColor.withOpacity(0.1), borderRadius: BorderRadius.circular(4)),
+                    decoration: BoxDecoration(color: stateColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(4)),
                     child: Text(state, style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: stateColor)),
                   ),
                 ],

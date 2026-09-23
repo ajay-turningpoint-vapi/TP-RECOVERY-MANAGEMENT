@@ -105,7 +105,7 @@ class AttentionDetailScreen extends StatelessWidget {
         children: [
           Container(
             width: double.infinity,
-            color: priorityColor.withOpacity(0.08),
+            color: priorityColor.withValues(alpha: 0.08),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             child: Row(
               children: [
@@ -114,7 +114,7 @@ class AttentionDetailScreen extends StatelessWidget {
                 Expanded(child: Text(bannerText, style: TextStyle(fontSize: 11.5, color: priorityColor, fontWeight: FontWeight.w600))),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(color: priorityColor.withOpacity(0.15), borderRadius: BorderRadius.circular(6)),
+                  decoration: BoxDecoration(color: priorityColor.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(6)),
                   child: Text(priorityLabel, style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: priorityColor)),
                 ),
               ],
@@ -202,7 +202,7 @@ class AttentionDetailScreen extends StatelessWidget {
             children: [
               Builder(builder: (_) {
                 final display = (s['fullName'] as String?) ?? (s['name'] as String);
-                return CircleAvatar(radius: 26, backgroundColor: _avatarColorFor(display).withOpacity(0.15), child: Text(_initialsFor(display), style: TextStyle(color: _avatarColorFor(display), fontSize: 16, fontWeight: FontWeight.bold)));
+                return CircleAvatar(radius: 26, backgroundColor: _avatarColorFor(display).withValues(alpha: 0.15), child: Text(_initialsFor(display), style: TextStyle(color: _avatarColorFor(display), fontSize: 16, fontWeight: FontWeight.bold)));
               }),
               const SizedBox(width: 12),
               Expanded(
@@ -280,7 +280,7 @@ class AttentionDetailScreen extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: color.withOpacity(0.1), shape: BoxShape.circle), child: Icon(icon, size: 14, color: color)),
+          Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: color.withValues(alpha: 0.1), shape: BoxShape.circle), child: Icon(icon, size: 14, color: color)),
           const SizedBox(height: 6),
           FittedBox(fit: BoxFit.scaleDown, child: Text(value, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: color))),
           const SizedBox(height: 3),
@@ -361,7 +361,7 @@ class AttentionDetailScreen extends StatelessWidget {
                       decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: _border))),
                       child: Row(
                         children: [
-                          CircleAvatar(radius: 13, backgroundColor: _avatarColorFor(c.name).withOpacity(0.15), child: Text(_initialsFor(c.name), style: TextStyle(color: _avatarColorFor(c.name), fontSize: 9, fontWeight: FontWeight.bold))),
+                          CircleAvatar(radius: 13, backgroundColor: _avatarColorFor(c.name).withValues(alpha: 0.15), child: Text(_initialsFor(c.name), style: TextStyle(color: _avatarColorFor(c.name), fontSize: 9, fontWeight: FontWeight.bold))),
                           const SizedBox(width: 8),
                           SizedBox(width: _custColName, child: Text(c.name, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: _dark), overflow: TextOverflow.ellipsis)),
                           const SizedBox(width: _custColGap),
@@ -415,7 +415,7 @@ class AttentionDetailScreen extends StatelessWidget {
             children: [
               Column(
                 children: [
-                  Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: e.color.withOpacity(0.12), shape: BoxShape.circle), child: Icon(e.icon, size: 13, color: e.color)),
+                  Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: e.color.withValues(alpha: 0.12), shape: BoxShape.circle), child: Icon(e.icon, size: 13, color: e.color)),
                   if (!isLast) Expanded(child: Container(width: 1.4, color: _border)),
                 ],
               ),
@@ -439,7 +439,7 @@ class AttentionDetailScreen extends StatelessWidget {
                       ),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(color: e.tagColor.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
+                        decoration: BoxDecoration(color: e.tagColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)),
                         child: Text(e.tag, style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: e.tagColor)),
                       ),
                     ],

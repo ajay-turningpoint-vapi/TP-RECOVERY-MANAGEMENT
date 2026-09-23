@@ -64,7 +64,7 @@ class MoreMenuScreen extends StatelessWidget {
                     children: [
                       Container(
                         padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(color: m.color.withOpacity(0.1), shape: BoxShape.circle),
+                        decoration: BoxDecoration(color: m.color.withValues(alpha: 0.1), shape: BoxShape.circle),
                         child: Icon(m.icon, color: m.color, size: 22),
                       ),
                       const SizedBox(height: 8),

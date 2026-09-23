@@ -283,7 +283,7 @@ class _ManagerExpectedVsActualScreenState extends State<ManagerExpectedVsActualS
         final (icon, color, value, label, sub) = c;
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-          decoration: BoxDecoration(color: color.withOpacity(0.05), borderRadius: BorderRadius.circular(14), border: Border.all(color: color.withOpacity(0.15))),
+          decoration: BoxDecoration(color: color.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(14), border: Border.all(color: color.withValues(alpha: 0.15))),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -341,7 +341,7 @@ class _ManagerExpectedVsActualScreenState extends State<ManagerExpectedVsActualS
                   barGroups: [
                     for (var i = 0; i < trend.length; i++)
                       BarChartGroupData(x: i, barRods: [
-                        BarChartRodData(toY: (((trend[i]['expected'] as num).toDouble()) - ((trend[i]['actual'] as num).toDouble())).clamp(0, chartMax), color: kRed.withOpacity(0.75), width: 14, borderRadius: BorderRadius.circular(3)),
+                        BarChartRodData(toY: (((trend[i]['expected'] as num).toDouble()) - ((trend[i]['actual'] as num).toDouble())).clamp(0, chartMax), color: kRed.withValues(alpha: 0.75), width: 14, borderRadius: BorderRadius.circular(3)),
                       ]),
                   ],
                 ),
@@ -419,7 +419,7 @@ class _ManagerExpectedVsActualScreenState extends State<ManagerExpectedVsActualS
 
   Widget _legendBar(Color color, String label) {
     return Row(mainAxisSize: MainAxisSize.min, children: [
-      Container(width: 8, height: 8, decoration: BoxDecoration(color: color.withOpacity(0.75), borderRadius: BorderRadius.circular(2))),
+      Container(width: 8, height: 8, decoration: BoxDecoration(color: color.withValues(alpha: 0.75), borderRadius: BorderRadius.circular(2))),
       const SizedBox(width: 5),
       Text(label, style: const TextStyle(fontSize: 9, color: kMuted, fontWeight: FontWeight.w600)),
     ]);
@@ -663,7 +663,7 @@ class _ManagerExpectedVsActualScreenState extends State<ManagerExpectedVsActualS
   Widget _footer(AppStore store) {
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: kBlue.withOpacity(0.06), borderRadius: BorderRadius.circular(10), border: Border.all(color: kBlue.withOpacity(0.15))),
+      decoration: BoxDecoration(color: kBlue.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(10), border: Border.all(color: kBlue.withValues(alpha: 0.15))),
       child: Row(
         children: [
           const Icon(Icons.info_outline, size: 15, color: kBlue),

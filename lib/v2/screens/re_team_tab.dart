@@ -127,7 +127,7 @@ class _ReTeamTabState extends State<ReTeamTab> {
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.grey.withOpacity(0.15)),
+                border: Border.all(color: Colors.grey.withValues(alpha: 0.15)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -239,7 +239,7 @@ class _ReTeamTabState extends State<ReTeamTab> {
                     )),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
-                  value: toName,
+                  initialValue: toName,
                   isExpanded: true,
                   decoration: const InputDecoration(labelText: 'Reassign To', border: OutlineInputBorder(), isDense: true),
                   items: otherSalesmen.map((n) => DropdownMenuItem(value: n, child: Text(nameFor(n)))).toList(),
@@ -310,7 +310,7 @@ class _ReTeamTabState extends State<ReTeamTab> {
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.grey.withOpacity(0.15)),
+              border: Border.all(color: Colors.grey.withValues(alpha: 0.15)),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,

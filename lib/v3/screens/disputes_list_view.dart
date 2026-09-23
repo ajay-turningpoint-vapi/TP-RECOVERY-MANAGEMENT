@@ -248,7 +248,7 @@ class _DisputesListViewState extends State<DisputesListView> {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                CircleAvatar(radius: 20, backgroundColor: avatarColorFor(d['customer']).withOpacity(0.15), child: Text(initialsFor(d['customer']), style: TextStyle(color: avatarColorFor(d['customer']), fontWeight: FontWeight.bold))),
+                CircleAvatar(radius: 20, backgroundColor: avatarColorFor(d['customer']).withValues(alpha: 0.15), child: Text(initialsFor(d['customer']), style: TextStyle(color: avatarColorFor(d['customer']), fontWeight: FontWeight.bold))),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
@@ -266,7 +266,7 @@ class _DisputesListViewState extends State<DisputesListView> {
                   children: [
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
+                      decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)),
                       child: Text(bucket, style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: color)),
                     ),
                     const SizedBox(height: 6),

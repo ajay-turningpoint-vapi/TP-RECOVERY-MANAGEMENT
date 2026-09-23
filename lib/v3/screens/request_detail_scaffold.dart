@@ -188,7 +188,7 @@ class RequestDetailScaffold extends StatelessWidget {
           Material(
             color: Colors.white,
             elevation: 1,
-            shadowColor: Colors.black.withOpacity(0.06),
+            shadowColor: Colors.black.withValues(alpha: 0.06),
             child: SafeArea(
               bottom: false,
               child: SizedBox(
@@ -227,14 +227,14 @@ class RequestDetailScaffold extends StatelessWidget {
           ),
           Container(
             width: double.infinity,
-            color: color.withOpacity(0.07),
+            color: color.withValues(alpha: 0.07),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 Container(
                   padding: const EdgeInsets.all(6),
-                  decoration: BoxDecoration(color: color.withOpacity(0.15), shape: BoxShape.circle),
+                  decoration: BoxDecoration(color: color.withValues(alpha: 0.15), shape: BoxShape.circle),
                   child: Icon(bannerIcon, size: 15, color: color),
                 ),
                 const SizedBox(width: 10),
@@ -271,7 +271,7 @@ class RequestDetailScaffold extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: Colors.white,
                   border: const Border(top: BorderSide(color: kBorder)),
-                  boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 12, offset: const Offset(0, -4))],
+                  boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 12, offset: const Offset(0, -4))],
                 ),
                 // Up to two actions sit side by side; three or more stack
                 // full-width so labels never get clipped.
@@ -330,7 +330,7 @@ class InfoCard extends StatelessWidget {
           color: tint ?? Colors.white,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: borderColor ?? kBorder),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8, offset: const Offset(0, 2))],
+          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 8, offset: const Offset(0, 2))],
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: children),
       );
@@ -394,7 +394,7 @@ class ActivityTimeline extends StatelessWidget {
             children: [
               Column(
                 children: [
-                  Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: e.color.withOpacity(0.12), shape: BoxShape.circle), child: Icon(e.icon, size: 13, color: e.color)),
+                  Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: e.color.withValues(alpha: 0.12), shape: BoxShape.circle), child: Icon(e.icon, size: 13, color: e.color)),
                   if (!isLast) Expanded(child: Container(width: 1.4, color: kBorder)),
                 ],
               ),
@@ -418,7 +418,7 @@ class ActivityTimeline extends StatelessWidget {
                       ),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(color: e.tagColor.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
+                        decoration: BoxDecoration(color: e.tagColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)),
                         child: Text(e.tag, style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: e.tagColor)),
                       ),
                     ],
@@ -470,10 +470,10 @@ class _AttachmentsSectionState extends State<AttachmentsSection> {
   Future<void> _pickDocument(AppStore store) async {
     setState(() => _busy = true);
     try {
-      final result = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['pdf'], withData: true);
-      final picked = result?.files.single;
-      if (picked != null && picked.bytes != null) {
-        store.addAttachment(widget.refId, picked.name, picked.bytes!);
+      final picked = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: ['pdf']);
+      if (picked != null) {
+        final bytes = await picked.readAsBytes();
+        store.addAttachment(widget.refId, picked.name, bytes);
       }
     } catch (_) {
       if (mounted) {
@@ -524,7 +524,7 @@ class _AttachmentsSectionState extends State<AttachmentsSection> {
                           : Container(
                               width: 40,
                               height: 40,
-                              color: kRed.withOpacity(0.1),
+                              color: kRed.withValues(alpha: 0.1),
                               child: const Icon(Icons.picture_as_pdf, color: kRed, size: 20),
                             ),
                     ),
@@ -749,10 +749,10 @@ class _ApproveRejectFormState extends State<_ApproveRejectForm> {
   Future<void> _pickPdf() async {
     setState(() => _busy = true);
     try {
-      final result = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['pdf'], withData: true);
-      final picked = result?.files.single;
-      if (picked != null && picked.bytes != null) {
-        setState(() => _files.add(_PendingFile(picked.name, picked.bytes!)));
+      final picked = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: ['pdf']);
+      if (picked != null) {
+        final bytes = await picked.readAsBytes();
+        setState(() => _files.add(_PendingFile(picked.name, bytes)));
       }
     } catch (_) {
       if (mounted) showAppMessage(context, message: 'Could not access files on this device.');
@@ -827,7 +827,7 @@ class _ApproveRejectFormState extends State<_ApproveRejectForm> {
             children: [
               Container(
                 width: 38, height: 38,
-                decoration: BoxDecoration(color: accent.withOpacity(0.12), shape: BoxShape.circle),
+                decoration: BoxDecoration(color: accent.withValues(alpha: 0.12), shape: BoxShape.circle),
                 child: Icon(isReject ? Icons.cancel_outlined : Icons.check_circle_outline, color: accent, size: 21),
               ),
               const SizedBox(width: 12),
@@ -873,7 +873,7 @@ class _ApproveRejectFormState extends State<_ApproveRejectForm> {
                             borderRadius: BorderRadius.circular(8),
                             child: isImage
                                 ? Image.memory(f.bytes, width: 38, height: 38, fit: BoxFit.cover)
-                                : Container(width: 38, height: 38, color: kRed.withOpacity(0.1), child: const Icon(Icons.picture_as_pdf, color: kRed, size: 18)),
+                                : Container(width: 38, height: 38, color: kRed.withValues(alpha: 0.1), child: const Icon(Icons.picture_as_pdf, color: kRed, size: 18)),
                           ),
                           const SizedBox(width: 10),
                           Expanded(child: Text(f.name, style: const TextStyle(fontSize: 11.5, color: kDark), maxLines: 1, overflow: TextOverflow.ellipsis)),
@@ -1009,9 +1009,9 @@ class TaskAttachmentThumbnail extends StatelessWidget {
           height: 90,
           width: 90,
           decoration: BoxDecoration(
-            color: const Color(0xFFDC2626).withOpacity(0.08),
+            color: const Color(0xFFDC2626).withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: const Color(0xFFDC2626).withOpacity(0.25)),
+            border: Border.all(color: const Color(0xFFDC2626).withValues(alpha: 0.25)),
           ),
           child: const Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -1047,7 +1047,7 @@ class TaskAttachmentThumbnail extends StatelessWidget {
             errorBuilder: (_, __, ___) => Container(
                   height: 90,
                   width: 90,
-                  color: kMuted.withOpacity(0.1),
+                  color: kMuted.withValues(alpha: 0.1),
                   child: const Icon(Icons.broken_image_outlined, color: kMuted),
                 )),
       ),

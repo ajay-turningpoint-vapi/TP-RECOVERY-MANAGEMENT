@@ -102,9 +102,9 @@ class _TasksScreenState extends State<TasksScreen> {
                         contentPadding: const EdgeInsets.symmetric(vertical: 10),
                         hintText: 'Search tasks, customers...',
                         hintStyle: const TextStyle(color: Color(0xFFA0AEC0), fontSize: 14),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.withOpacity(0.1))),
-                        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.withOpacity(0.1))),
-                        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.withOpacity(0.1))),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.withValues(alpha: 0.1))),
+                        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.withValues(alpha: 0.1))),
+                        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.withValues(alpha: 0.1))),
                       ),
                     ),
                   )
@@ -144,9 +144,9 @@ class _TasksScreenState extends State<TasksScreen> {
         decoration: BoxDecoration(
           color: isSelected ? const Color(0xFF0052CC) : Colors.white,
           borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: isSelected ? const Color(0xFF0052CC) : Colors.grey.withOpacity(0.2)),
+          border: Border.all(color: isSelected ? const Color(0xFF0052CC) : Colors.grey.withValues(alpha: 0.2)),
           boxShadow: isSelected ? [
-            BoxShadow(color: const Color(0xFF0052CC).withOpacity(0.2), blurRadius: 8, offset: const Offset(0, 4))
+            BoxShadow(color: const Color(0xFF0052CC).withValues(alpha: 0.2), blurRadius: 8, offset: const Offset(0, 4))
           ] : [],
         ),
         child: Row(
@@ -157,7 +157,7 @@ class _TasksScreenState extends State<TasksScreen> {
             const SizedBox(width: 8),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(color: isSelected ? Colors.white.withOpacity(0.25) : const Color(0xFFF8F9FB), borderRadius: BorderRadius.circular(12)),
+              decoration: BoxDecoration(color: isSelected ? Colors.white.withValues(alpha: 0.25) : const Color(0xFFF8F9FB), borderRadius: BorderRadius.circular(12)),
               child: Text(count.toString(), style: TextStyle(color: isSelected ? Colors.white : const Color(0xFF1B2B48), fontSize: 11, fontWeight: FontWeight.bold)),
             ),
           ],
@@ -239,9 +239,9 @@ class _TasksScreenState extends State<TasksScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.withOpacity(0.15)),
+        border: Border.all(color: Colors.grey.withValues(alpha: 0.15)),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10, offset: const Offset(0, 4)),
+          BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 10, offset: const Offset(0, 4)),
         ]
       ),
       child: Material(

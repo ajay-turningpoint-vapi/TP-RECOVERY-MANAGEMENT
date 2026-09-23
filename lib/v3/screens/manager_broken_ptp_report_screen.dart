@@ -225,7 +225,7 @@ class _ManagerBrokenPtpReportScreenState extends State<ManagerBrokenPtpReportScr
         final (icon, color, value, label, sub) = c;
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-          decoration: BoxDecoration(color: color.withOpacity(0.05), borderRadius: BorderRadius.circular(14), border: Border.all(color: color.withOpacity(0.15))),
+          decoration: BoxDecoration(color: color.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(14), border: Border.all(color: color.withValues(alpha: 0.15))),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -270,7 +270,7 @@ class _ManagerBrokenPtpReportScreenState extends State<ManagerBrokenPtpReportScr
                 ),
               ),
               lineBarsData: [
-                LineChartBarData(spots: [for (var i = 0; i < trend.length; i++) FlSpot(i.toDouble(), (trend[i]['count'] as num).toDouble())], isCurved: true, color: kRed, barWidth: 2.5, dotData: const FlDotData(show: true), belowBarData: BarAreaData(show: true, color: kRed.withOpacity(0.08))),
+                LineChartBarData(spots: [for (var i = 0; i < trend.length; i++) FlSpot(i.toDouble(), (trend[i]['count'] as num).toDouble())], isCurved: true, color: kRed, barWidth: 2.5, dotData: const FlDotData(show: true), belowBarData: BarAreaData(show: true, color: kRed.withValues(alpha: 0.08))),
               ],
             ),
           ),
@@ -437,7 +437,7 @@ class _ManagerBrokenPtpReportScreenState extends State<ManagerBrokenPtpReportScr
                   const SizedBox(width: 6),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                    decoration: BoxDecoration(color: _bucketColors[bucket]!.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
+                    decoration: BoxDecoration(color: _bucketColors[bucket]!.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)),
                     child: Text(bucket.split(' ').first, style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: _bucketColors[bucket])),
                   ),
                 ],
@@ -451,7 +451,7 @@ class _ManagerBrokenPtpReportScreenState extends State<ManagerBrokenPtpReportScr
   Widget _footer(AppStore store) {
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: kBlue.withOpacity(0.06), borderRadius: BorderRadius.circular(10), border: Border.all(color: kBlue.withOpacity(0.15))),
+      decoration: BoxDecoration(color: kBlue.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(10), border: Border.all(color: kBlue.withValues(alpha: 0.15))),
       child: Row(
         children: [
           const Icon(Icons.info_outline, size: 15, color: kBlue),

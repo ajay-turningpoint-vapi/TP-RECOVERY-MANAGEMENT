@@ -1,4 +1,4 @@
-package com.turningpoint.salesman_mobile
+package com.turningpointvapi.salesman_mobile
 
 import io.flutter.embedding.android.FlutterActivity
 

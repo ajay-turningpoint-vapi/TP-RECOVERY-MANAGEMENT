@@ -553,7 +553,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.grey.withOpacity(0.15)),
+          border: Border.all(color: Colors.grey.withValues(alpha: 0.15)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -638,7 +638,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     VoidCallback? onTap,
   }) {
     return Material(
-      color: Colors.white.withOpacity(0.14),
+      color: Colors.white.withValues(alpha: 0.14),
       borderRadius: BorderRadius.circular(14),
       child: InkWell(
         borderRadius: BorderRadius.circular(14),
@@ -647,7 +647,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           padding: const EdgeInsets.fromLTRB(14, 12, 10, 14),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: Colors.white.withOpacity(0.22)),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.22)),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -656,17 +656,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(icon, size: 14, color: Colors.white.withOpacity(0.9)),
+                  Icon(icon, size: 14, color: Colors.white.withValues(alpha: 0.9)),
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(label,
                         style: TextStyle(
-                            color: Colors.white.withOpacity(0.85),
+                            color: Colors.white.withValues(alpha: 0.85),
                             fontSize: 12,
                             height: 1.15,
                             fontWeight: FontWeight.w500)),
                   ),
-                  Icon(Icons.chevron_right, size: 18, color: Colors.white.withOpacity(0.75)),
+                  Icon(Icons.chevron_right, size: 18, color: Colors.white.withValues(alpha: 0.75)),
                 ],
               ),
               const SizedBox(height: 10),

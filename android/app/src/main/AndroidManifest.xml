@@ -20,7 +20,7 @@
          lib/v2/widgets/voice_translate_field.dart. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <application
-        android:label="Clock-TMS"
+        android:label="Clock RMS"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:allowBackup="false"

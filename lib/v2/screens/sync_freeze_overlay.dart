@@ -111,7 +111,7 @@ class _PendingSyncBanner extends StatelessWidget {
                     color: const Color(0xFF0F766E),
                     borderRadius: BorderRadius.circular(12),
                     boxShadow: [
-                      BoxShadow(color: Colors.black.withOpacity(0.22), blurRadius: 14, offset: const Offset(0, 4)),
+                      BoxShadow(color: Colors.black.withValues(alpha: 0.22), blurRadius: 14, offset: const Offset(0, 4)),
                     ],
                   ),
                   child: Row(
@@ -174,7 +174,7 @@ class _CachedDataBanner extends StatelessWidget {
                   color: const Color(0xFF1E293B),
                   borderRadius: BorderRadius.circular(12),
                   boxShadow: [
-                    BoxShadow(color: Colors.black.withOpacity(0.22), blurRadius: 14, offset: const Offset(0, 4)),
+                    BoxShadow(color: Colors.black.withValues(alpha: 0.22), blurRadius: 14, offset: const Offset(0, 4)),
                   ],
                 ),
                 child: Row(
@@ -250,7 +250,7 @@ class _SyncFailedBanner extends StatelessWidget {
                   borderRadius: BorderRadius.circular(14),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.22),
+                      color: Colors.black.withValues(alpha: 0.22),
                       blurRadius: 16,
                       offset: const Offset(0, 6),
                     ),
@@ -403,8 +403,8 @@ class _SyncCurtainState extends State<_SyncCurtain> with TickerProviderStateMixi
                   gradient: RadialGradient(
                     radius: 1.1,
                     colors: [
-                      _kNavy.withOpacity(0.58 * t),
-                      const Color(0xFF020617).withOpacity(0.78 * t),
+                      _kNavy.withValues(alpha: 0.58 * t),
+                      const Color(0xFF020617).withValues(alpha: 0.78 * t),
                     ],
                   ),
                 ),
@@ -433,16 +433,16 @@ class _SyncCurtainState extends State<_SyncCurtain> with TickerProviderStateMixi
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(26),
-        border: Border.all(color: Colors.white.withOpacity(0.7), width: 1),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.7), width: 1),
         boxShadow: [
           BoxShadow(
-            color: _kIndigo.withOpacity(0.28),
+            color: _kIndigo.withValues(alpha: 0.28),
             blurRadius: 44,
             spreadRadius: -6,
             offset: const Offset(0, 20),
           ),
           BoxShadow(
-            color: Colors.black.withOpacity(0.20),
+            color: Colors.black.withValues(alpha: 0.20),
             blurRadius: 18,
             offset: const Offset(0, 6),
           ),
@@ -536,7 +536,7 @@ class _Spinner extends StatelessWidget {
                 height: 66 + 14 * pulse,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: _kBlue.withOpacity(0.10 * (1 - pulse) + 0.04),
+                  color: _kBlue.withValues(alpha: 0.10 * (1 - pulse) + 0.04),
                 ),
               ),
               // Sweeping gradient ring.
@@ -582,7 +582,7 @@ class _Spinner extends StatelessWidget {
                       shape: BoxShape.circle,
                       color: _kIndigo,
                       boxShadow: [
-                        BoxShadow(color: _kIndigo.withOpacity(0.5), blurRadius: 6),
+                        BoxShadow(color: _kIndigo.withValues(alpha: 0.5), blurRadius: 6),
                       ],
                     ),
                   ),

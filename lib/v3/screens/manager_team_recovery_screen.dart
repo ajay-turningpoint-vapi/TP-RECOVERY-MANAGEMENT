@@ -275,7 +275,7 @@ class _ManagerTeamRecoveryScreenState extends State<ManagerTeamRecoveryScreen> {
           return Container(
             width: 118,
             padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(color: color.withOpacity(0.05), borderRadius: BorderRadius.circular(12), border: Border.all(color: color.withOpacity(0.15))),
+            decoration: BoxDecoration(color: color.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(12), border: Border.all(color: color.withValues(alpha: 0.15))),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -453,7 +453,7 @@ class _ManagerTeamRecoveryScreenState extends State<ManagerTeamRecoveryScreen> {
               width: _teamColSalesman,
               child: Row(
                 children: [
-                  CircleAvatar(radius: 15, backgroundColor: avatarColorFor(name).withOpacity(0.15), child: Text(initialsFor(name), style: TextStyle(color: avatarColorFor(name), fontSize: 10.5, fontWeight: FontWeight.bold))),
+                  CircleAvatar(radius: 15, backgroundColor: avatarColorFor(name).withValues(alpha: 0.15), child: Text(initialsFor(name), style: TextStyle(color: avatarColorFor(name), fontSize: 10.5, fontWeight: FontWeight.bold))),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Column(
@@ -617,7 +617,7 @@ class _ManagerTeamRecoveryScreenState extends State<ManagerTeamRecoveryScreen> {
             children: [
               Row(
                 children: [
-                  CircleAvatar(radius: 20, backgroundColor: avatarColorFor(name).withOpacity(0.15), child: Text(initialsFor(name), style: TextStyle(color: avatarColorFor(name), fontSize: 13, fontWeight: FontWeight.bold))),
+                  CircleAvatar(radius: 20, backgroundColor: avatarColorFor(name).withValues(alpha: 0.15), child: Text(initialsFor(name), style: TextStyle(color: avatarColorFor(name), fontSize: 13, fontWeight: FontWeight.bold))),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
@@ -643,7 +643,7 @@ class _ManagerTeamRecoveryScreenState extends State<ManagerTeamRecoveryScreen> {
                   Expanded(
                     child: Container(
                       padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(color: _processComplianceColor(compliance).withOpacity(0.06), borderRadius: BorderRadius.circular(10), border: Border.all(color: _processComplianceColor(compliance).withOpacity(0.2))),
+                      decoration: BoxDecoration(color: _processComplianceColor(compliance).withValues(alpha: 0.06), borderRadius: BorderRadius.circular(10), border: Border.all(color: _processComplianceColor(compliance).withValues(alpha: 0.2))),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -657,7 +657,7 @@ class _ManagerTeamRecoveryScreenState extends State<ManagerTeamRecoveryScreen> {
                   Expanded(
                     child: Container(
                       padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(color: _customerDifficultyColor(difficulty).withOpacity(0.06), borderRadius: BorderRadius.circular(10), border: Border.all(color: _customerDifficultyColor(difficulty).withOpacity(0.2))),
+                      decoration: BoxDecoration(color: _customerDifficultyColor(difficulty).withValues(alpha: 0.06), borderRadius: BorderRadius.circular(10), border: Border.all(color: _customerDifficultyColor(difficulty).withValues(alpha: 0.2))),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -699,7 +699,7 @@ class _ManagerTeamRecoveryScreenState extends State<ManagerTeamRecoveryScreen> {
   Widget _footer(BuildContext context, AppStore store) {
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: kBlue.withOpacity(0.06), borderRadius: BorderRadius.circular(10), border: Border.all(color: kBlue.withOpacity(0.15))),
+      decoration: BoxDecoration(color: kBlue.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(10), border: Border.all(color: kBlue.withValues(alpha: 0.15))),
       child: Row(
         children: [
           const Icon(Icons.info_outline, size: 15, color: kBlue),

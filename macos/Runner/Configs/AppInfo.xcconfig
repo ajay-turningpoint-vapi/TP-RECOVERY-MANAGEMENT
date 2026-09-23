@@ -8,7 +8,7 @@
 PRODUCT_NAME = salesman_mobile
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = com.turningpoint.salesmanMobile
+PRODUCT_BUNDLE_IDENTIFIER = com.turningpointvapi.salesmanMobile
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Copyright © 2026 com.turningpoint. All rights reserved.
+PRODUCT_COPYRIGHT = Copyright © 2026 com.turningpointvapi. All rights reserved.

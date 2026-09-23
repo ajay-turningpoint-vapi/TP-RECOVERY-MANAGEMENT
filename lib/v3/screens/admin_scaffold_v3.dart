@@ -99,7 +99,7 @@ Widget _tabHeader(
           children: [
             Container(
               padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(color: Colors.white.withOpacity(0.16), shape: BoxShape.circle),
+              decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.16), shape: BoxShape.circle),
               child: Icon(icon, color: Colors.white, size: 22),
             ),
             const SizedBox(width: 12),
@@ -235,7 +235,7 @@ class _AdminSyncTabState extends State<_AdminSyncTab> {
                 title: store.currentUserFullName,
                 subtitle: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(color: Colors.white.withOpacity(0.16), borderRadius: BorderRadius.circular(20)),
+                  decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.16), borderRadius: BorderRadius.circular(20)),
                   child: const Text('System Administrator', style: TextStyle(fontSize: 10.5, color: Colors.white, fontWeight: FontWeight.w600)),
                 ),
                 extra: Row(
@@ -274,7 +274,7 @@ class _AdminSyncTabState extends State<_AdminSyncTab> {
   Widget _headerStat(IconData icon, String value, String label, {Color? accent}) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-      decoration: BoxDecoration(color: Colors.white.withOpacity(0.14), borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(12)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -397,7 +397,7 @@ class _AdminSyncTabState extends State<_AdminSyncTab> {
   Widget _connectivityChip(String label, bool ok) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(color: (ok ? kGreen : kRed).withOpacity(0.1), borderRadius: BorderRadius.circular(20)),
+      decoration: BoxDecoration(color: (ok ? kGreen : kRed).withValues(alpha: 0.1), borderRadius: BorderRadius.circular(20)),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Icon(ok ? Icons.check_circle : Icons.cancel, size: 11, color: ok ? kGreen : kRed),
         const SizedBox(width: 4),
@@ -536,7 +536,7 @@ class _BranchHealthTileState extends State<_BranchHealthTile> {
         children: [
           Container(
             padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(color: statusColor.withOpacity(0.1), shape: BoxShape.circle),
+            decoration: BoxDecoration(color: statusColor.withValues(alpha: 0.1), shape: BoxShape.circle),
             child: Icon(Icons.apartment_rounded, size: 16, color: statusColor),
           ),
           const SizedBox(width: 12),
@@ -555,7 +555,7 @@ class _BranchHealthTileState extends State<_BranchHealthTile> {
           const SizedBox(width: 8),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(color: statusColor.withOpacity(0.1), borderRadius: BorderRadius.circular(20)),
+            decoration: BoxDecoration(color: statusColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(20)),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
               Icon(statusIcon, size: 12, color: statusColor),
               const SizedBox(width: 4),
@@ -573,7 +573,7 @@ class _BranchHealthTileState extends State<_BranchHealthTile> {
                     color: kBlue,
                     tooltip: 'Sync $name',
                     padding: EdgeInsets.zero,
-                    style: IconButton.styleFrom(backgroundColor: kBlue.withOpacity(0.08), shape: const CircleBorder()),
+                    style: IconButton.styleFrom(backgroundColor: kBlue.withValues(alpha: 0.08), shape: const CircleBorder()),
                     onPressed: busy ? null : () => _syncThisBranch(context, name),
                   ),
           ),
@@ -738,7 +738,7 @@ class _ResetPasswordCardState extends State<_ResetPasswordCard> {
     final store = context.watch<AppStore>();
     return InfoCard(children: [
       DropdownButtonFormField<String>(
-        value: _selectedId,
+        initialValue: _selectedId,
         isExpanded: true,
         decoration: const InputDecoration(
           labelText: 'Salesperson',

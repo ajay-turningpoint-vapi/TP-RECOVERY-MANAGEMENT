@@ -418,7 +418,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                             : (isDone ? const Color(0xFFF1F3F5) : Colors.white),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(16),
-                          side: BorderSide(color: Colors.grey.withOpacity(0.15)),
+                          side: BorderSide(color: Colors.grey.withValues(alpha: 0.15)),
                         ),
                         child: InkWell(
                           borderRadius: BorderRadius.circular(16),
@@ -494,7 +494,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                                                 children: [
                                                   Icon(isDone ? Icons.check_circle_outline : Icons.my_location, size: 12, color: const Color(0xFF5A6B87)),
                                                   const SizedBox(width: 4),
-                                                  Text(isDone ? 'Recorded: ' : 'Action: ', style: TextStyle(color: const Color(0xFF5A6B87).withOpacity(0.7), fontSize: 11)),
+                                                  Text(isDone ? 'Recorded: ' : 'Action: ', style: TextStyle(color: const Color(0xFF5A6B87).withValues(alpha: 0.7), fontSize: 11)),
                                                   Flexible(child: Text(c.primaryNextAction, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xFF1B2B48), fontSize: 11, fontWeight: FontWeight.bold))),
                                                 ],
                                               ),

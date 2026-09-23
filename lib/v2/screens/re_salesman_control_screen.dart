@@ -108,7 +108,7 @@ class ReSalesmanControlScreen extends StatelessWidget {
                         elevation: 0,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(16),
-                          side: BorderSide(color: Colors.grey.withOpacity(0.15)),
+                          side: BorderSide(color: Colors.grey.withValues(alpha: 0.15)),
                         ),
                         child: InkWell(
                           borderRadius: BorderRadius.circular(16),

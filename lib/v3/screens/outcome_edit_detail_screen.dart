@@ -168,7 +168,7 @@ class OutcomeEditDetailScreen extends StatelessWidget {
             children: [
               CircleAvatar(
                   radius: 24,
-                  backgroundColor: avatarColorFor(cust.name).withOpacity(0.15),
+                  backgroundColor: avatarColorFor(cust.name).withValues(alpha: 0.15),
                   child: Text(initialsFor(cust.name),
                       style: TextStyle(color: avatarColorFor(cust.name), fontSize: 15, fontWeight: FontWeight.bold))),
               const SizedBox(width: 14),
@@ -224,14 +224,14 @@ class OutcomeEditDetailScreen extends StatelessWidget {
             Container(
               margin: const EdgeInsets.only(bottom: 10),
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(color: _accent.withOpacity(0.12), borderRadius: BorderRadius.circular(6)),
+              decoration: BoxDecoration(color: _accent.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(6)),
               child: const Text('PROPOSED CHANGE', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: _accent, letterSpacing: 0.3)),
             ),
           ],
         ),
         InfoCard(
-          tint: _accent.withOpacity(0.04),
-          borderColor: _accent.withOpacity(0.25),
+          tint: _accent.withValues(alpha: 0.04),
+          borderColor: _accent.withValues(alpha: 0.25),
           children: [
             if (keys.isEmpty)
               const Text('No field changes were included in this request.', style: TextStyle(fontSize: 12, color: kMuted))

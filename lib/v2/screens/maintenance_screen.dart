@@ -27,7 +27,7 @@ class MaintenanceScreen extends StatelessWidget {
               Container(
                 width: 96,
                 height: 96,
-                decoration: BoxDecoration(color: _kAmber.withOpacity(0.14), shape: BoxShape.circle),
+                decoration: BoxDecoration(color: _kAmber.withValues(alpha: 0.14), shape: BoxShape.circle),
                 child: const Icon(Icons.construction_rounded, color: _kAmber, size: 48),
               ),
               const SizedBox(height: 28),
@@ -46,7 +46,7 @@ class MaintenanceScreen extends StatelessWidget {
               const SizedBox(height: 22),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                decoration: BoxDecoration(color: Colors.white.withOpacity(0.06), borderRadius: BorderRadius.circular(20)),
+                decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(20)),
                 child: const Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [

@@ -156,7 +156,7 @@ class _ReportFilterBar extends StatelessWidget {
     final safeValue = options.contains(value) ? value : options.first;
     return Row(
       children: [
-        Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: color.withOpacity(0.1), shape: BoxShape.circle), child: Icon(icon, size: 15, color: color)),
+        Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: color.withValues(alpha: 0.1), shape: BoxShape.circle), child: Icon(icon, size: 15, color: color)),
         const SizedBox(width: 10),
         Expanded(
           child: Column(
@@ -359,7 +359,7 @@ class _DailyRecoverySummaryReportState extends State<DailyRecoverySummaryReport>
                     children: [
                       Text(_shortRupee(amount), style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: isLast ? kBlue : kMuted)),
                       const SizedBox(height: 4),
-                      Container(height: barHeight, decoration: BoxDecoration(color: isLast ? kBlue : kBlue.withOpacity(0.35), borderRadius: BorderRadius.circular(6))),
+                      Container(height: barHeight, decoration: BoxDecoration(color: isLast ? kBlue : kBlue.withValues(alpha: 0.35), borderRadius: BorderRadius.circular(6))),
                       const SizedBox(height: 6),
                       Text(e['label'] as String, style: const TextStyle(fontSize: 9, color: kMuted)),
                     ],
@@ -387,7 +387,7 @@ class _DailyRecoverySummaryReportState extends State<DailyRecoverySummaryReport>
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 child: Row(
                   children: [
-                    CircleAvatar(radius: 15, backgroundColor: avatarColorFor(name).withOpacity(0.15), child: Text(initialsFor(name), style: TextStyle(color: avatarColorFor(name), fontSize: 10.5, fontWeight: FontWeight.bold))),
+                    CircleAvatar(radius: 15, backgroundColor: avatarColorFor(name).withValues(alpha: 0.15), child: Text(initialsFor(name), style: TextStyle(color: avatarColorFor(name), fontSize: 10.5, fontWeight: FontWeight.bold))),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Column(
@@ -400,7 +400,7 @@ class _DailyRecoverySummaryReportState extends State<DailyRecoverySummaryReport>
                     ),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(6)),
+                      decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(6)),
                       child: Text('$percent%', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: color)),
                     ),
                   ],
@@ -459,7 +459,7 @@ class _DailyRecoverySummaryReportState extends State<DailyRecoverySummaryReport>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(padding: const EdgeInsets.all(7), decoration: BoxDecoration(color: color.withOpacity(0.1), shape: BoxShape.circle), child: Icon(icon, size: 15, color: color)),
+            Container(padding: const EdgeInsets.all(7), decoration: BoxDecoration(color: color.withValues(alpha: 0.1), shape: BoxShape.circle), child: Icon(icon, size: 15, color: color)),
             const SizedBox(height: 8),
             Text(label, style: const TextStyle(fontSize: 10, color: kMuted, fontWeight: FontWeight.w600)),
             const SizedBox(height: 2),
@@ -613,7 +613,7 @@ class _SalesmanPerformanceReportState extends State<SalesmanPerformanceReport> {
                     color: kBlue,
                     barWidth: 2.5,
                     dotData: const FlDotData(show: true),
-                    belowBarData: BarAreaData(show: true, color: kBlue.withOpacity(0.08)),
+                    belowBarData: BarAreaData(show: true, color: kBlue.withValues(alpha: 0.08)),
                   ),
                 ],
               ),
@@ -687,7 +687,7 @@ class _SalesmanPerformanceReportState extends State<SalesmanPerformanceReport> {
               margin: const EdgeInsets.only(bottom: 10),
               child: InfoCard(children: [
                 Row(children: [
-                  CircleAvatar(radius: 16, backgroundColor: avatarColorFor(name).withOpacity(0.15), child: Text(initialsFor(displayName), style: TextStyle(color: avatarColorFor(name), fontSize: 11, fontWeight: FontWeight.bold))),
+                  CircleAvatar(radius: 16, backgroundColor: avatarColorFor(name).withValues(alpha: 0.15), child: Text(initialsFor(displayName), style: TextStyle(color: avatarColorFor(name), fontSize: 11, fontWeight: FontWeight.bold))),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Column(
@@ -700,7 +700,7 @@ class _SalesmanPerformanceReportState extends State<SalesmanPerformanceReport> {
                   ),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(color: bandColor.withOpacity(0.12), borderRadius: BorderRadius.circular(6)),
+                    decoration: BoxDecoration(color: bandColor.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(6)),
                     child: Text(band, style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: bandColor)),
                   ),
                   const SizedBox(width: 4),
@@ -800,7 +800,7 @@ class _SalesmanPerformanceReportState extends State<SalesmanPerformanceReport> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(padding: const EdgeInsets.all(7), decoration: BoxDecoration(color: color.withOpacity(0.1), shape: BoxShape.circle), child: Icon(icon, size: 15, color: color)),
+                Container(padding: const EdgeInsets.all(7), decoration: BoxDecoration(color: color.withValues(alpha: 0.1), shape: BoxShape.circle), child: Icon(icon, size: 15, color: color)),
                 const SizedBox(height: 8),
                 Text(label, style: const TextStyle(fontSize: 10, color: kMuted, fontWeight: FontWeight.w600)),
                 const SizedBox(height: 2),
@@ -975,7 +975,7 @@ class _SalesmanScoreDetailScreenState extends State<SalesmanScoreDetailScreen> {
             const Expanded(child: Text('Weighted Recovery Score', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: kNavy))),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(color: bandColor.withOpacity(0.12), borderRadius: BorderRadius.circular(20)),
+              decoration: BoxDecoration(color: bandColor.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(20)),
               child: Text('${breakdown['total'] ?? score}%', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w900, color: bandColor)),
             ),
           ]),
@@ -1009,12 +1009,12 @@ class _SalesmanScoreDetailScreenState extends State<SalesmanScoreDetailScreen> {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: bandColor.withOpacity(0.25)),
-        gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [bandColor.withOpacity(0.10), bandColor.withOpacity(0.02)]),
+        border: Border.all(color: bandColor.withValues(alpha: 0.25)),
+        gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [bandColor.withValues(alpha: 0.10), bandColor.withValues(alpha: 0.02)]),
       ),
       child: Row(
         children: [
-          CircleAvatar(radius: 24, backgroundColor: bandColor.withOpacity(0.18), child: Text(initialsFor(name), style: TextStyle(color: bandColor, fontSize: 15, fontWeight: FontWeight.w900))),
+          CircleAvatar(radius: 24, backgroundColor: bandColor.withValues(alpha: 0.18), child: Text(initialsFor(name), style: TextStyle(color: bandColor, fontSize: 15, fontWeight: FontWeight.w900))),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -1035,7 +1035,7 @@ class _SalesmanScoreDetailScreenState extends State<SalesmanScoreDetailScreen> {
                 const SizedBox(height: 6),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(color: bandColor.withOpacity(0.14), borderRadius: BorderRadius.circular(20)),
+                  decoration: BoxDecoration(color: bandColor.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(20)),
                   child: Text(band.toUpperCase(), style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900, color: bandColor, letterSpacing: 0.4)),
                 ),
               ],
@@ -1049,7 +1049,7 @@ class _SalesmanScoreDetailScreenState extends State<SalesmanScoreDetailScreen> {
               SizedBox(
                 width: 62,
                 height: 62,
-                child: CircularProgressIndicator(value: (score / 100).clamp(0.0, 1.0), strokeWidth: 6, backgroundColor: bandColor.withOpacity(0.15), valueColor: AlwaysStoppedAnimation(bandColor)),
+                child: CircularProgressIndicator(value: (score / 100).clamp(0.0, 1.0), strokeWidth: 6, backgroundColor: bandColor.withValues(alpha: 0.15), valueColor: AlwaysStoppedAnimation(bandColor)),
               ),
               Column(mainAxisSize: MainAxisSize.min, children: [
                 Text('$score', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900, color: bandColor, height: 1)),
@@ -1083,7 +1083,7 @@ class _SalesmanScoreDetailScreenState extends State<SalesmanScoreDetailScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: color.withOpacity(0.1), shape: BoxShape.circle), child: Icon(icon, size: 13, color: color)),
+                        Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: color.withValues(alpha: 0.1), shape: BoxShape.circle), child: Icon(icon, size: 13, color: color)),
                         const SizedBox(height: 8),
                         Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10, color: kMuted, fontWeight: FontWeight.w700)),
                         const SizedBox(height: 3),
@@ -1127,7 +1127,7 @@ class _SalesmanScoreDetailScreenState extends State<SalesmanScoreDetailScreen> {
   Widget _flagChip(String label, String value, Color color) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
-      decoration: BoxDecoration(color: color.withOpacity(0.08), borderRadius: BorderRadius.circular(8), border: Border.all(color: color.withOpacity(0.25))),
+      decoration: BoxDecoration(color: color.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(8), border: Border.all(color: color.withValues(alpha: 0.25))),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Text('$label ', style: const TextStyle(fontSize: 9.5, color: kMuted, fontWeight: FontWeight.w600)),
         Text(value, style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w900, color: color)),
@@ -1344,7 +1344,7 @@ class _PtpReportState extends State<PtpReport> {
                     color: kBlue,
                     barWidth: 2.5,
                     dotData: const FlDotData(show: true),
-                    belowBarData: BarAreaData(show: true, color: kBlue.withOpacity(0.08)),
+                    belowBarData: BarAreaData(show: true, color: kBlue.withValues(alpha: 0.08)),
                   ),
                 ],
               ),
@@ -1422,7 +1422,7 @@ class _PtpReportState extends State<PtpReport> {
             margin: const EdgeInsets.only(bottom: 10),
             child: InfoCard(children: [
               Row(children: [
-                CircleAvatar(radius: 16, backgroundColor: avatarColorFor(name).withOpacity(0.15), child: Text(initialsFor(name), style: TextStyle(color: avatarColorFor(name), fontSize: 11, fontWeight: FontWeight.bold))),
+                CircleAvatar(radius: 16, backgroundColor: avatarColorFor(name).withValues(alpha: 0.15), child: Text(initialsFor(name), style: TextStyle(color: avatarColorFor(name), fontSize: 11, fontWeight: FontWeight.bold))),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
@@ -1435,7 +1435,7 @@ class _PtpReportState extends State<PtpReport> {
                 ),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(color: bandColor.withOpacity(0.12), borderRadius: BorderRadius.circular(6)),
+                  decoration: BoxDecoration(color: bandColor.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(6)),
                   child: Text(band, style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: bandColor)),
                 ),
               ]),
@@ -1504,7 +1504,7 @@ class _PtpReportState extends State<PtpReport> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(padding: const EdgeInsets.all(7), decoration: BoxDecoration(color: color.withOpacity(0.1), shape: BoxShape.circle), child: Icon(icon, size: 15, color: color)),
+            Container(padding: const EdgeInsets.all(7), decoration: BoxDecoration(color: color.withValues(alpha: 0.1), shape: BoxShape.circle), child: Icon(icon, size: 15, color: color)),
             const SizedBox(height: 8),
             Text(label, style: const TextStyle(fontSize: 10, color: kMuted, fontWeight: FontWeight.w600)),
             const SizedBox(height: 2),
@@ -1735,7 +1735,7 @@ class _BrokenPtpReportState extends State<BrokenPtpReport> {
                     color: kRed,
                     barWidth: 2.5,
                     dotData: const FlDotData(show: true),
-                    belowBarData: BarAreaData(show: true, color: kRed.withOpacity(0.08)),
+                    belowBarData: BarAreaData(show: true, color: kRed.withValues(alpha: 0.08)),
                   ),
                 ],
               ),
@@ -1812,7 +1812,7 @@ class _BrokenPtpReportState extends State<BrokenPtpReport> {
             margin: const EdgeInsets.only(bottom: 10),
             child: InfoCard(children: [
               Row(children: [
-                CircleAvatar(radius: 16, backgroundColor: avatarColorFor(name).withOpacity(0.15), child: Text(initialsFor(name), style: TextStyle(color: avatarColorFor(name), fontSize: 11, fontWeight: FontWeight.bold))),
+                CircleAvatar(radius: 16, backgroundColor: avatarColorFor(name).withValues(alpha: 0.15), child: Text(initialsFor(name), style: TextStyle(color: avatarColorFor(name), fontSize: 11, fontWeight: FontWeight.bold))),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
@@ -1825,7 +1825,7 @@ class _BrokenPtpReportState extends State<BrokenPtpReport> {
                 ),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(color: bandColor.withOpacity(0.12), borderRadius: BorderRadius.circular(6)),
+                  decoration: BoxDecoration(color: bandColor.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(6)),
                   child: Text(band, style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: bandColor)),
                 ),
               ]),
@@ -1891,7 +1891,7 @@ class _BrokenPtpReportState extends State<BrokenPtpReport> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(padding: const EdgeInsets.all(7), decoration: BoxDecoration(color: color.withOpacity(0.1), shape: BoxShape.circle), child: Icon(icon, size: 15, color: color)),
+            Container(padding: const EdgeInsets.all(7), decoration: BoxDecoration(color: color.withValues(alpha: 0.1), shape: BoxShape.circle), child: Icon(icon, size: 15, color: color)),
             const SizedBox(height: 8),
             Text(label, style: const TextStyle(fontSize: 10, color: kMuted, fontWeight: FontWeight.w600)),
             const SizedBox(height: 2),
@@ -2168,7 +2168,7 @@ class _DisputeStatusReportState extends State<DisputeStatusReport> {
             padding: const EdgeInsets.symmetric(vertical: 6),
             child: Row(
               children: [
-                Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: kIndigo.withOpacity(0.1), shape: BoxShape.circle), child: Icon(_disputeReasonIcon(e.key), size: 15, color: kIndigo)),
+                Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: kIndigo.withValues(alpha: 0.1), shape: BoxShape.circle), child: Icon(_disputeReasonIcon(e.key), size: 15, color: kIndigo)),
                 const SizedBox(width: 10),
                 Expanded(child: Text(e.key, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: kDark))),
                 Column(
@@ -2229,7 +2229,7 @@ class _DisputeStatusReportState extends State<DisputeStatusReport> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  CircleAvatar(radius: 16, backgroundColor: avatarColorFor(d['customer']).withOpacity(0.15), child: Text(initialsFor(d['customer']), style: TextStyle(color: avatarColorFor(d['customer']), fontSize: 11, fontWeight: FontWeight.bold))),
+                  CircleAvatar(radius: 16, backgroundColor: avatarColorFor(d['customer']).withValues(alpha: 0.15), child: Text(initialsFor(d['customer']), style: TextStyle(color: avatarColorFor(d['customer']), fontSize: 11, fontWeight: FontWeight.bold))),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Column(
@@ -2249,7 +2249,7 @@ class _DisputeStatusReportState extends State<DisputeStatusReport> {
                       const SizedBox(height: 4),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(5)),
+                        decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(5)),
                         child: Text(bucket.toUpperCase(), style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: color)),
                       ),
                       const SizedBox(height: 4),
@@ -2281,7 +2281,7 @@ class _DisputeStatusReportState extends State<DisputeStatusReport> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(padding: const EdgeInsets.all(7), decoration: BoxDecoration(color: color.withOpacity(0.1), shape: BoxShape.circle), child: Icon(icon, size: 15, color: color)),
+            Container(padding: const EdgeInsets.all(7), decoration: BoxDecoration(color: color.withValues(alpha: 0.1), shape: BoxShape.circle), child: Icon(icon, size: 15, color: color)),
             const SizedBox(height: 8),
             Text(label, style: const TextStyle(fontSize: 10, color: kMuted, fontWeight: FontWeight.w600)),
             const SizedBox(height: 2),
@@ -2490,7 +2490,7 @@ class _AgeingReceivablesReportState extends State<AgeingReceivablesReport> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  CircleAvatar(radius: 16, backgroundColor: avatarColorFor(r.customer.name).withOpacity(0.15), child: Text(initialsFor(r.customer.name), style: TextStyle(color: avatarColorFor(r.customer.name), fontSize: 11, fontWeight: FontWeight.bold))),
+                  CircleAvatar(radius: 16, backgroundColor: avatarColorFor(r.customer.name).withValues(alpha: 0.15), child: Text(initialsFor(r.customer.name), style: TextStyle(color: avatarColorFor(r.customer.name), fontSize: 11, fontWeight: FontWeight.bold))),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Column(
@@ -2512,7 +2512,7 @@ class _AgeingReceivablesReportState extends State<AgeingReceivablesReport> {
                       const SizedBox(height: 4),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(5)),
+                        decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(5)),
                         child: Text(bucket, style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: color)),
                       ),
                     ],
@@ -2542,7 +2542,7 @@ class _AgeingReceivablesReportState extends State<AgeingReceivablesReport> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(padding: const EdgeInsets.all(7), decoration: BoxDecoration(color: color.withOpacity(0.1), shape: BoxShape.circle), child: Icon(icon, size: 15, color: color)),
+            Container(padding: const EdgeInsets.all(7), decoration: BoxDecoration(color: color.withValues(alpha: 0.1), shape: BoxShape.circle), child: Icon(icon, size: 15, color: color)),
             const SizedBox(height: 8),
             FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: Text(value, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: color))),
             const SizedBox(height: 2),
@@ -2696,7 +2696,7 @@ class _ExpectedVsActualCollectionReportState extends State<ExpectedVsActualColle
                     color: kGreen,
                     barWidth: 2.5,
                     dotData: const FlDotData(show: true),
-                    belowBarData: BarAreaData(show: true, color: kGreen.withOpacity(0.08)),
+                    belowBarData: BarAreaData(show: true, color: kGreen.withValues(alpha: 0.08)),
                   ),
                 ],
               ),
@@ -2770,7 +2770,7 @@ class _ExpectedVsActualCollectionReportState extends State<ExpectedVsActualColle
             margin: const EdgeInsets.only(bottom: 10),
             child: InfoCard(children: [
               Row(children: [
-                CircleAvatar(radius: 16, backgroundColor: avatarColorFor(name).withOpacity(0.15), child: Text(initialsFor(name), style: TextStyle(color: avatarColorFor(name), fontSize: 11, fontWeight: FontWeight.bold))),
+                CircleAvatar(radius: 16, backgroundColor: avatarColorFor(name).withValues(alpha: 0.15), child: Text(initialsFor(name), style: TextStyle(color: avatarColorFor(name), fontSize: 11, fontWeight: FontWeight.bold))),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
@@ -2783,7 +2783,7 @@ class _ExpectedVsActualCollectionReportState extends State<ExpectedVsActualColle
                 ),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(color: bandColor.withOpacity(0.12), borderRadius: BorderRadius.circular(6)),
+                  decoration: BoxDecoration(color: bandColor.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(6)),
                   child: Text(band, style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: bandColor)),
                 ),
               ]),
@@ -2843,7 +2843,7 @@ class _ExpectedVsActualCollectionReportState extends State<ExpectedVsActualColle
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  CircleAvatar(radius: 16, backgroundColor: avatarColorFor(c.name).withOpacity(0.15), child: Text(initialsFor(c.name), style: TextStyle(color: avatarColorFor(c.name), fontSize: 11, fontWeight: FontWeight.bold))),
+                  CircleAvatar(radius: 16, backgroundColor: avatarColorFor(c.name).withValues(alpha: 0.15), child: Text(initialsFor(c.name), style: TextStyle(color: avatarColorFor(c.name), fontSize: 11, fontWeight: FontWeight.bold))),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Column(
@@ -2861,7 +2861,7 @@ class _ExpectedVsActualCollectionReportState extends State<ExpectedVsActualColle
                       const SizedBox(height: 4),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(5)),
+                        decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(5)),
                         child: Text(variance >= 0 ? 'Full' : _rupee.format(variance), style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: color)),
                       ),
                     ],
@@ -2891,7 +2891,7 @@ class _ExpectedVsActualCollectionReportState extends State<ExpectedVsActualColle
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(padding: const EdgeInsets.all(7), decoration: BoxDecoration(color: color.withOpacity(0.1), shape: BoxShape.circle), child: Icon(icon, size: 15, color: color)),
+            Container(padding: const EdgeInsets.all(7), decoration: BoxDecoration(color: color.withValues(alpha: 0.1), shape: BoxShape.circle), child: Icon(icon, size: 15, color: color)),
             const SizedBox(height: 8),
             Text(label, style: const TextStyle(fontSize: 10, color: kMuted, fontWeight: FontWeight.w600)),
             const SizedBox(height: 2),
@@ -3040,7 +3040,7 @@ class _NoFollowUpAccountsReportState extends State<NoFollowUpAccountsReport> {
                     color: kBlue,
                     barWidth: 2.5,
                     dotData: const FlDotData(show: true),
-                    belowBarData: BarAreaData(show: true, color: kBlue.withOpacity(0.08)),
+                    belowBarData: BarAreaData(show: true, color: kBlue.withValues(alpha: 0.08)),
                   ),
                 ],
               ),
@@ -3063,7 +3063,7 @@ class _NoFollowUpAccountsReportState extends State<NoFollowUpAccountsReport> {
                 decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: kBorder)),
                 child: Column(
                   children: [
-                    Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: color.withOpacity(0.1), shape: BoxShape.circle), child: Icon(icon, size: 14, color: color)),
+                    Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: color.withValues(alpha: 0.1), shape: BoxShape.circle), child: Icon(icon, size: 14, color: color)),
                     const SizedBox(height: 6),
                     Text(p, style: const TextStyle(fontSize: 10, color: kDark, fontWeight: FontWeight.w600)),
                     Text('${priorityCounts[p]}', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: color)),
@@ -3092,7 +3092,7 @@ class _NoFollowUpAccountsReportState extends State<NoFollowUpAccountsReport> {
               decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: kBorder)),
               child: Row(
                 children: [
-                  CircleAvatar(radius: 16, backgroundColor: avatarColorFor(c.name).withOpacity(0.15), child: Text(initialsFor(c.name), style: TextStyle(color: avatarColorFor(c.name), fontSize: 11, fontWeight: FontWeight.bold))),
+                  CircleAvatar(radius: 16, backgroundColor: avatarColorFor(c.name).withValues(alpha: 0.15), child: Text(initialsFor(c.name), style: TextStyle(color: avatarColorFor(c.name), fontSize: 11, fontWeight: FontWeight.bold))),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Column(
@@ -3110,7 +3110,7 @@ class _NoFollowUpAccountsReportState extends State<NoFollowUpAccountsReport> {
                       const SizedBox(height: 4),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(5)),
+                        decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(5)),
                         child: Text(priority, style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: color)),
                       ),
                     ],
@@ -3137,7 +3137,7 @@ class _NoFollowUpAccountsReportState extends State<NoFollowUpAccountsReport> {
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 child: Row(
                   children: [
-                    CircleAvatar(radius: 14, backgroundColor: avatarColorFor(name).withOpacity(0.15), child: Text(initialsFor(name), style: TextStyle(color: avatarColorFor(name), fontSize: 10, fontWeight: FontWeight.bold))),
+                    CircleAvatar(radius: 14, backgroundColor: avatarColorFor(name).withValues(alpha: 0.15), child: Text(initialsFor(name), style: TextStyle(color: avatarColorFor(name), fontSize: 10, fontWeight: FontWeight.bold))),
                     const SizedBox(width: 10),
                     Expanded(child: Text(name, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: kDark))),
                     Text('${accounts.length} accounts', style: const TextStyle(fontSize: 11.5, color: kMuted, fontWeight: FontWeight.w600)),
@@ -3178,7 +3178,7 @@ class _NoFollowUpAccountsReportState extends State<NoFollowUpAccountsReport> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(padding: const EdgeInsets.all(7), decoration: BoxDecoration(color: color.withOpacity(0.1), shape: BoxShape.circle), child: Icon(icon, size: 15, color: color)),
+            Container(padding: const EdgeInsets.all(7), decoration: BoxDecoration(color: color.withValues(alpha: 0.1), shape: BoxShape.circle), child: Icon(icon, size: 15, color: color)),
             const SizedBox(height: 8),
             Text(label, style: const TextStyle(fontSize: 10, color: kMuted, fontWeight: FontWeight.w600)),
             const SizedBox(height: 2),
@@ -3255,7 +3255,7 @@ class _RecoveryTargetVsActualReportState extends State<RecoveryTargetVsActualRep
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(padding: const EdgeInsets.all(7), decoration: BoxDecoration(color: color.withOpacity(0.1), shape: BoxShape.circle), child: Icon(icon, size: 15, color: color)),
+            Container(padding: const EdgeInsets.all(7), decoration: BoxDecoration(color: color.withValues(alpha: 0.1), shape: BoxShape.circle), child: Icon(icon, size: 15, color: color)),
             const SizedBox(height: 8),
             Text(label, style: const TextStyle(fontSize: 10, color: kMuted, fontWeight: FontWeight.w600)),
             const SizedBox(height: 2),

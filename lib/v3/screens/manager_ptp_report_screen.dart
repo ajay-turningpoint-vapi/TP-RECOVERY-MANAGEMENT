@@ -256,7 +256,7 @@ class _ManagerPtpReportScreenState extends State<ManagerPtpReportScreen> {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(color: kBlue.withOpacity(0.08), borderRadius: BorderRadius.circular(10), border: Border.all(color: kBlue.withOpacity(0.25))),
+      decoration: BoxDecoration(color: kBlue.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(10), border: Border.all(color: kBlue.withValues(alpha: 0.25))),
       child: Row(
         children: [
           const Icon(Icons.filter_alt, size: 15, color: kBlue),
@@ -349,7 +349,7 @@ class _ManagerPtpReportScreenState extends State<ManagerPtpReportScreen> {
         final (icon, color, value, label, sub) = c;
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-          decoration: BoxDecoration(color: color.withOpacity(0.05), borderRadius: BorderRadius.circular(14), border: Border.all(color: color.withOpacity(0.15))),
+          decoration: BoxDecoration(color: color.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(14), border: Border.all(color: color.withValues(alpha: 0.15))),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -781,7 +781,7 @@ class _ManagerPtpReportScreenState extends State<ManagerPtpReportScreen> {
             const SizedBox(width: 6),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-              decoration: BoxDecoration(color: statusColor.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
+              decoration: BoxDecoration(color: statusColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)),
               child: Text(statusLabel, style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: statusColor)),
             ),
             const SizedBox(width: 6),
@@ -853,7 +853,7 @@ class _ManagerPtpReportScreenState extends State<ManagerPtpReportScreen> {
   Widget _footer(AppStore store) {
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: kBlue.withOpacity(0.06), borderRadius: BorderRadius.circular(10), border: Border.all(color: kBlue.withOpacity(0.15))),
+      decoration: BoxDecoration(color: kBlue.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(10), border: Border.all(color: kBlue.withValues(alpha: 0.15))),
       child: Row(
         children: [
           const Icon(Icons.info_outline, size: 15, color: kBlue),

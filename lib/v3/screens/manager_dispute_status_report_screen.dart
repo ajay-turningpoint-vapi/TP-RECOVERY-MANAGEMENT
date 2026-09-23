@@ -268,7 +268,7 @@ class _ManagerDisputeStatusReportScreenState extends State<ManagerDisputeStatusR
         final (icon, color, value, label, sub) = c;
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-          decoration: BoxDecoration(color: color.withOpacity(0.05), borderRadius: BorderRadius.circular(14), border: Border.all(color: color.withOpacity(0.15))),
+          decoration: BoxDecoration(color: color.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(14), border: Border.all(color: color.withValues(alpha: 0.15))),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -336,7 +336,7 @@ class _ManagerDisputeStatusReportScreenState extends State<ManagerDisputeStatusR
               padding: const EdgeInsets.symmetric(vertical: 6),
               child: Row(
                 children: [
-                  Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: kIndigo.withOpacity(0.1), shape: BoxShape.circle), child: Icon(_reasonIcon(e.key), size: 15, color: kIndigo)),
+                  Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: kIndigo.withValues(alpha: 0.1), shape: BoxShape.circle), child: Icon(_reasonIcon(e.key), size: 15, color: kIndigo)),
                   const SizedBox(width: 10),
                   Expanded(child: Text(e.key, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: kDark))),
                   Column(
@@ -369,7 +369,7 @@ class _ManagerDisputeStatusReportScreenState extends State<ManagerDisputeStatusR
               width: 92,
               child: Container(
                 padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(color: color.withOpacity(0.05), borderRadius: BorderRadius.circular(12), border: Border.all(color: color.withOpacity(0.15))),
+                decoration: BoxDecoration(color: color.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(12), border: Border.all(color: color.withValues(alpha: 0.15))),
                 child: Column(
                   children: [
                     Text(e.key, textAlign: TextAlign.center, style: const TextStyle(fontSize: 9, color: kMuted, fontWeight: FontWeight.w600)),
@@ -471,7 +471,7 @@ class _ManagerDisputeStatusReportScreenState extends State<ManagerDisputeStatusR
                     const SizedBox(width: 6),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                      decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
+                      decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)),
                       child: Text(bucket, style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: color)),
                     ),
                   ],
@@ -541,7 +541,7 @@ class _ManagerDisputeStatusReportScreenState extends State<ManagerDisputeStatusR
   Widget _footer(AppStore store) {
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: kBlue.withOpacity(0.06), borderRadius: BorderRadius.circular(10), border: Border.all(color: kBlue.withOpacity(0.15))),
+      decoration: BoxDecoration(color: kBlue.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(10), border: Border.all(color: kBlue.withValues(alpha: 0.15))),
       child: Row(
         children: [
           const Icon(Icons.info_outline, size: 15, color: kBlue),

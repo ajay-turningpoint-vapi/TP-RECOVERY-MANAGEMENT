@@ -173,7 +173,7 @@ class _ManagerReportsScreenState extends State<ManagerReportsScreen> {
                           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
                           child: Row(
                             children: [
-                              Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(10)), child: Icon(icon, size: 18, color: color)),
+                              Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)), child: Icon(icon, size: 18, color: color)),
                               const SizedBox(width: 12),
                               Expanded(
                                 child: Column(
@@ -208,9 +208,9 @@ class _ManagerReportsScreenState extends State<ManagerReportsScreen> {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.06),
+        color: color.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.15)),
+        border: Border.all(color: color.withValues(alpha: 0.15)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -219,7 +219,7 @@ class _ManagerReportsScreenState extends State<ManagerReportsScreen> {
             width: 28,
             height: 28,
             alignment: Alignment.center,
-            decoration: BoxDecoration(color: color.withOpacity(0.14), shape: BoxShape.circle),
+            decoration: BoxDecoration(color: color.withValues(alpha: 0.14), shape: BoxShape.circle),
             child: Icon(icon, color: color, size: 15),
           ),
           const SizedBox(height: 10),

@@ -246,7 +246,7 @@ class _ManagerAlertsRemindersScreenState extends State<ManagerAlertsRemindersScr
           return Container(
             width: 118,
             padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(color: color.withOpacity(0.05), borderRadius: BorderRadius.circular(12), border: Border.all(color: color.withOpacity(0.15))),
+            decoration: BoxDecoration(color: color.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(12), border: Border.all(color: color.withValues(alpha: 0.15))),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -298,7 +298,7 @@ class _ManagerAlertsRemindersScreenState extends State<ManagerAlertsRemindersScr
                   const SizedBox(width: 6),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                    decoration: BoxDecoration(color: selected ? Colors.white.withOpacity(0.2) : kPurple.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+                    decoration: BoxDecoration(color: selected ? Colors.white.withValues(alpha: 0.2) : kPurple.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
                     child: Text('$count', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: selected ? Colors.white : kPurple)),
                   ),
                 ],
@@ -354,7 +354,7 @@ class _ManagerAlertsRemindersScreenState extends State<ManagerAlertsRemindersScr
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: item.color.withOpacity(0.1), shape: BoxShape.circle), child: Icon(item.icon, color: item.color, size: 18)),
+            Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: item.color.withValues(alpha: 0.1), shape: BoxShape.circle), child: Icon(item.icon, color: item.color, size: 18)),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -397,10 +397,10 @@ class _ManagerAlertsRemindersScreenState extends State<ManagerAlertsRemindersScr
   Widget _notificationsCard(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(color: kPurple.withOpacity(0.06), borderRadius: BorderRadius.circular(14), border: Border.all(color: kPurple.withOpacity(0.15))),
+      decoration: BoxDecoration(color: kPurple.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(14), border: Border.all(color: kPurple.withValues(alpha: 0.15))),
       child: Row(
         children: [
-          Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: kPurple.withOpacity(0.12), shape: BoxShape.circle), child: const Icon(Icons.notifications_none, color: kPurple, size: 18)),
+          Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: kPurple.withValues(alpha: 0.12), shape: BoxShape.circle), child: const Icon(Icons.notifications_none, color: kPurple, size: 18)),
           const SizedBox(width: 12),
           Expanded(
             child: Column(

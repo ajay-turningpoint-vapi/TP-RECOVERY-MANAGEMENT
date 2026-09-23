@@ -95,7 +95,7 @@ class _ReApprovalsTabState extends State<ReApprovalsTab> with SingleTickerProvid
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.grey.withOpacity(0.15)),
+            border: Border.all(color: Colors.grey.withValues(alpha: 0.15)),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -179,7 +179,7 @@ class _ReApprovalsTabState extends State<ReApprovalsTab> with SingleTickerProvid
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.grey.withOpacity(0.15)),
+            border: Border.all(color: Colors.grey.withValues(alpha: 0.15)),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -304,7 +304,7 @@ class _ReApprovalsTabState extends State<ReApprovalsTab> with SingleTickerProvid
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFF57C00).withOpacity(0.3)),
+        border: Border.all(color: const Color(0xFFF57C00).withValues(alpha: 0.3)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -350,7 +350,7 @@ class _ReApprovalsTabState extends State<ReApprovalsTab> with SingleTickerProvid
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.withOpacity(0.15)),
+        border: Border.all(color: Colors.grey.withValues(alpha: 0.15)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -442,7 +442,7 @@ class _ReApprovalsTabState extends State<ReApprovalsTab> with SingleTickerProvid
                   const Text('Select Resolution Agent', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 6),
                   DropdownButtonFormField<String>(
-                    value: selectedSalesman,
+                    initialValue: selectedSalesman,
                     isExpanded: true,
                     // s['name'] is really the salesman's user id (used
                     // throughout the app to match Customer.assignedSalesmanId
@@ -621,7 +621,7 @@ class _ReApprovalsTabState extends State<ReApprovalsTab> with SingleTickerProvid
                   const Text('Assign Info Gathering To', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 6),
                   DropdownButtonFormField<String>(
-                    value: selectedSalesman,
+                    initialValue: selectedSalesman,
                     isExpanded: true,
                     // s['name'] is really the salesman's user id (used
                     // throughout the app to match Customer.assignedSalesmanId
@@ -740,7 +740,7 @@ class _ReApprovalsTabState extends State<ReApprovalsTab> with SingleTickerProvid
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.grey.withOpacity(0.15)),
+            border: Border.all(color: Colors.grey.withValues(alpha: 0.15)),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,

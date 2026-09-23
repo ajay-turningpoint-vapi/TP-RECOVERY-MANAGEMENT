@@ -85,7 +85,7 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              CircleAvatar(radius: 22, backgroundColor: avatarColorFor(salesmanDisplay).withOpacity(0.15), child: Text(initialsFor(salesmanDisplay), style: TextStyle(color: avatarColorFor(salesmanDisplay), fontWeight: FontWeight.bold))),
+              CircleAvatar(radius: 22, backgroundColor: avatarColorFor(salesmanDisplay).withValues(alpha: 0.15), child: Text(initialsFor(salesmanDisplay), style: TextStyle(color: avatarColorFor(salesmanDisplay), fontWeight: FontWeight.bold))),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
@@ -524,7 +524,7 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              CircleAvatar(radius: 22, backgroundColor: avatarColorFor(customer.name).withOpacity(0.15), child: Text(initialsFor(customer.name), style: TextStyle(color: avatarColorFor(customer.name), fontWeight: FontWeight.bold))),
+              CircleAvatar(radius: 22, backgroundColor: avatarColorFor(customer.name).withValues(alpha: 0.15), child: Text(initialsFor(customer.name), style: TextStyle(color: avatarColorFor(customer.name), fontWeight: FontWeight.bold))),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
@@ -836,7 +836,7 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               DropdownButtonFormField<String>(
-                value: selectedSalesman,
+                initialValue: selectedSalesman,
                 isExpanded: true,
                 items: store.salesmen.map<DropdownMenuItem<String>>((s) => DropdownMenuItem(value: s['name'], child: Text((s['fullName'] as String?) ?? s['name'], overflow: TextOverflow.ellipsis))).toList(),
                 onChanged: (v) { if (v != null) setState(() => selectedSalesman = v); },
@@ -951,7 +951,7 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               DropdownButtonFormField<String>(
-                value: selectedSalesman,
+                initialValue: selectedSalesman,
                 isExpanded: true,
                 items: store.salesmen.map<DropdownMenuItem<String>>((s) => DropdownMenuItem(value: s['name'], child: Text((s['fullName'] as String?) ?? s['name'], overflow: TextOverflow.ellipsis))).toList(),
                 onChanged: (v) { if (v != null) setState(() => selectedSalesman = v); },

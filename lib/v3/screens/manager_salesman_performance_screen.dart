@@ -319,7 +319,7 @@ class _ManagerSalesmanPerformanceScreenState extends State<ManagerSalesmanPerfor
         final (icon, color, value, label, sub) = c;
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-          decoration: BoxDecoration(color: color.withOpacity(0.05), borderRadius: BorderRadius.circular(14), border: Border.all(color: color.withOpacity(0.15))),
+          decoration: BoxDecoration(color: color.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(14), border: Border.all(color: color.withValues(alpha: 0.15))),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -421,9 +421,9 @@ class _ManagerSalesmanPerformanceScreenState extends State<ManagerSalesmanPerfor
               padding: const EdgeInsets.symmetric(vertical: 6),
               child: Row(
                 children: [
-                  CircleAvatar(radius: 11, backgroundColor: valueColor.withOpacity(0.15), child: Text('$rank', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: valueColor))),
+                  CircleAvatar(radius: 11, backgroundColor: valueColor.withValues(alpha: 0.15), child: Text('$rank', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: valueColor))),
                   const SizedBox(width: 8),
-                  CircleAvatar(radius: 14, backgroundColor: avatarColorFor(name).withOpacity(0.15), child: Text(initialsFor(name), style: TextStyle(color: avatarColorFor(name), fontSize: 9.5, fontWeight: FontWeight.bold))),
+                  CircleAvatar(radius: 14, backgroundColor: avatarColorFor(name).withValues(alpha: 0.15), child: Text(initialsFor(name), style: TextStyle(color: avatarColorFor(name), fontSize: 9.5, fontWeight: FontWeight.bold))),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Column(
@@ -489,7 +489,7 @@ class _ManagerSalesmanPerformanceScreenState extends State<ManagerSalesmanPerfor
               ),
               lineBarsData: [
                 LineChartBarData(spots: [for (var i = 0; i < trend.length; i++) FlSpot(i.toDouble(), (trend[i]['expected'] as num).toDouble())], isCurved: true, color: kPurple, barWidth: 2, dashArray: [6, 4], dotData: const FlDotData(show: true)),
-                LineChartBarData(spots: [for (var i = 0; i < trend.length; i++) FlSpot(i.toDouble(), (trend[i]['actual'] as num).toDouble())], isCurved: true, color: kGreen, barWidth: 2.5, dotData: const FlDotData(show: true), belowBarData: BarAreaData(show: true, color: kGreen.withOpacity(0.08))),
+                LineChartBarData(spots: [for (var i = 0; i < trend.length; i++) FlSpot(i.toDouble(), (trend[i]['actual'] as num).toDouble())], isCurved: true, color: kGreen, barWidth: 2.5, dotData: const FlDotData(show: true), belowBarData: BarAreaData(show: true, color: kGreen.withValues(alpha: 0.08))),
               ],
             ),
           ),
@@ -537,7 +537,7 @@ class _ManagerSalesmanPerformanceScreenState extends State<ManagerSalesmanPerfor
                 padding: const EdgeInsets.symmetric(vertical: 7),
                 child: Row(
                   children: [
-                    CircleAvatar(radius: 13, backgroundColor: avatarColorFor(name).withOpacity(0.15), child: Text(initialsFor(name), style: TextStyle(color: avatarColorFor(name), fontSize: 9.5, fontWeight: FontWeight.bold))),
+                    CircleAvatar(radius: 13, backgroundColor: avatarColorFor(name).withValues(alpha: 0.15), child: Text(initialsFor(name), style: TextStyle(color: avatarColorFor(name), fontSize: 9.5, fontWeight: FontWeight.bold))),
                     const SizedBox(width: 8),
                     Expanded(child: Text(name, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: kDark))),
                     _badge('Process: $compliance', _processComplianceColor(compliance)),
@@ -557,7 +557,7 @@ class _ManagerSalesmanPerformanceScreenState extends State<ManagerSalesmanPerfor
   Widget _badge(String text, Color color) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-      decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
+      decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)),
       child: Text(text, style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: color)),
     );
   }
@@ -577,7 +577,7 @@ class _ManagerSalesmanPerformanceScreenState extends State<ManagerSalesmanPerfor
             children: [
               Row(
                 children: [
-                  CircleAvatar(radius: 18, backgroundColor: avatarColorFor(name).withOpacity(0.15), child: Text(initialsFor(name), style: TextStyle(color: avatarColorFor(name), fontSize: 12, fontWeight: FontWeight.bold))),
+                  CircleAvatar(radius: 18, backgroundColor: avatarColorFor(name).withValues(alpha: 0.15), child: Text(initialsFor(name), style: TextStyle(color: avatarColorFor(name), fontSize: 12, fontWeight: FontWeight.bold))),
                   const SizedBox(width: 12),
                   Expanded(child: Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: kNavy))),
                 ],
@@ -588,7 +588,7 @@ class _ManagerSalesmanPerformanceScreenState extends State<ManagerSalesmanPerfor
                   Expanded(
                     child: Container(
                       padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(color: _processComplianceColor(compliance).withOpacity(0.06), borderRadius: BorderRadius.circular(10), border: Border.all(color: _processComplianceColor(compliance).withOpacity(0.2))),
+                      decoration: BoxDecoration(color: _processComplianceColor(compliance).withValues(alpha: 0.06), borderRadius: BorderRadius.circular(10), border: Border.all(color: _processComplianceColor(compliance).withValues(alpha: 0.2))),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -602,7 +602,7 @@ class _ManagerSalesmanPerformanceScreenState extends State<ManagerSalesmanPerfor
                   Expanded(
                     child: Container(
                       padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(color: _customerDifficultyColor(difficulty).withOpacity(0.06), borderRadius: BorderRadius.circular(10), border: Border.all(color: _customerDifficultyColor(difficulty).withOpacity(0.2))),
+                      decoration: BoxDecoration(color: _customerDifficultyColor(difficulty).withValues(alpha: 0.06), borderRadius: BorderRadius.circular(10), border: Border.all(color: _customerDifficultyColor(difficulty).withValues(alpha: 0.2))),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -730,7 +730,7 @@ class _ManagerSalesmanPerformanceScreenState extends State<ManagerSalesmanPerfor
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         children: [
-          CircleAvatar(radius: 15, backgroundColor: avatarColorFor(name).withOpacity(0.15), child: Text(initialsFor(name), style: TextStyle(color: avatarColorFor(name), fontSize: 10.5, fontWeight: FontWeight.bold))),
+          CircleAvatar(radius: 15, backgroundColor: avatarColorFor(name).withValues(alpha: 0.15), child: Text(initialsFor(name), style: TextStyle(color: avatarColorFor(name), fontSize: 10.5, fontWeight: FontWeight.bold))),
           const SizedBox(width: 10),
           Expanded(
             flex: 4,
@@ -783,7 +783,7 @@ class _ManagerSalesmanPerformanceScreenState extends State<ManagerSalesmanPerfor
       children: [
         Row(
           children: [
-            Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: kPurple.withOpacity(0.1), shape: BoxShape.circle), child: const Icon(Icons.calendar_month_outlined, size: 15, color: kPurple)),
+            Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: kPurple.withValues(alpha: 0.1), shape: BoxShape.circle), child: const Icon(Icons.calendar_month_outlined, size: 15, color: kPurple)),
             const SizedBox(width: 8),
             const Text('Summary', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5, color: kNavy)),
           ],
@@ -815,7 +815,7 @@ class _ManagerSalesmanPerformanceScreenState extends State<ManagerSalesmanPerfor
   Widget _footer(AppStore store) {
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: kBlue.withOpacity(0.06), borderRadius: BorderRadius.circular(10), border: Border.all(color: kBlue.withOpacity(0.15))),
+      decoration: BoxDecoration(color: kBlue.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(10), border: Border.all(color: kBlue.withValues(alpha: 0.15))),
       child: Row(
         children: [
           const Icon(Icons.info_outline, size: 15, color: kBlue),

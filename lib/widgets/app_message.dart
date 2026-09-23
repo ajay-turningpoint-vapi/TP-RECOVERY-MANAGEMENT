@@ -115,7 +115,7 @@ void showGlobalError(String message, {String? title}) {
     }
     showDialog<void>(
       context: navigator.context,
-      barrierColor: Colors.black.withOpacity(0.45),
+      barrierColor: Colors.black.withValues(alpha: 0.45),
       builder: (_) => _AppMessageDialog(
         message: message,
         type: AppMessageType.error,
@@ -145,7 +145,7 @@ Future<void> _showAppMessageDialog(
 }) {
   return showDialog<void>(
     context: context,
-    barrierColor: Colors.black.withOpacity(0.45),
+    barrierColor: Colors.black.withValues(alpha: 0.45),
     builder: (dialogContext) => _AppMessageDialog(
       message: message,
       type: type,
@@ -245,7 +245,7 @@ class _AppMessageDialogState extends State<_AppMessageDialog>
                             height: 84 + 40 * t,
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              color: accent.withOpacity(0.22 * (1 - t)),
+                              color: accent.withValues(alpha: 0.22 * (1 - t)),
                             ),
                           );
                         },
@@ -258,7 +258,7 @@ class _AppMessageDialogState extends State<_AppMessageDialog>
                           gradient: LinearGradient(
                             begin: Alignment.topLeft,
                             end: Alignment.bottomRight,
-                            colors: [accentSoft, accentSoft.withOpacity(0.55)],
+                            colors: [accentSoft, accentSoft.withValues(alpha: 0.55)],
                           ),
                         ),
                         child: isSyncing
@@ -306,7 +306,7 @@ class _AppMessageDialogState extends State<_AppMessageDialog>
                       gradient: LinearGradient(colors: [accent, accentDark]),
                       boxShadow: [
                         BoxShadow(
-                          color: accent.withOpacity(0.35),
+                          color: accent.withValues(alpha: 0.35),
                           blurRadius: 16,
                           offset: const Offset(0, 6),
                         ),

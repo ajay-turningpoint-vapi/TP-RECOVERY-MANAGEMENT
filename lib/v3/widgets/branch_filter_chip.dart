@@ -17,8 +17,8 @@ class BranchFilterChip extends StatelessWidget {
     if (options.length <= 2) return const SizedBox.shrink(); // only one real branch
 
     final fg = dark ? Colors.white : const Color(0xFF64748B);
-    final bg = dark ? Colors.white.withOpacity(0.14) : Colors.white;
-    final border = dark ? Colors.white.withOpacity(0.25) : const Color(0xFFE2E8F0);
+    final bg = dark ? Colors.white.withValues(alpha: 0.14) : Colors.white;
+    final border = dark ? Colors.white.withValues(alpha: 0.25) : const Color(0xFFE2E8F0);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),

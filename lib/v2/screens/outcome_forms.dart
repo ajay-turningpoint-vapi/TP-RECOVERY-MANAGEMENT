@@ -423,8 +423,8 @@ class _PtpOutcomeFormState extends State<PtpOutcomeForm> {
       fillColor: Colors.white,
       suffixIcon: suffixIcon,
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey.withOpacity(0.3))),
-      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey.withOpacity(0.3))),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey.withValues(alpha: 0.3))),
+      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey.withValues(alpha: 0.3))),
       focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF0052CC))),
     );
   }
@@ -494,7 +494,7 @@ class _PtpOutcomeFormState extends State<PtpOutcomeForm> {
                       },
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                        decoration: BoxDecoration(border: Border.all(color: Colors.grey.withOpacity(0.3)), borderRadius: BorderRadius.circular(8)),
+                        decoration: BoxDecoration(border: Border.all(color: Colors.grey.withValues(alpha: 0.3)), borderRadius: BorderRadius.circular(8)),
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
@@ -520,7 +520,7 @@ class _PtpOutcomeFormState extends State<PtpOutcomeForm> {
                       },
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                        decoration: BoxDecoration(border: Border.all(color: Colors.grey.withOpacity(0.3)), borderRadius: BorderRadius.circular(8)),
+                        decoration: BoxDecoration(border: Border.all(color: Colors.grey.withValues(alpha: 0.3)), borderRadius: BorderRadius.circular(8)),
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
@@ -546,7 +546,7 @@ class _PtpOutcomeFormState extends State<PtpOutcomeForm> {
           DropdownButtonFormField<String>(
             dropdownColor: Colors.white,
             style: const TextStyle(color: Color(0xFF1B2B48), fontSize: 14),
-            value: _mode,
+            initialValue: _mode,
             decoration: _getInputDeco('Select mode'),
             items: ['Phone Call', 'WhatsApp'].map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),
             onChanged: (v) => setState(() => _mode = v!),
@@ -799,7 +799,7 @@ class _InternalActionFormState extends State<InternalActionForm> {
           DropdownButtonFormField<String>(
             dropdownColor: Colors.white,
             style: const TextStyle(color: Color(0xFF1B2B48), fontSize: 16),
-            value: _dependency,
+            initialValue: _dependency,
             decoration: const InputDecoration(labelText: 'Required Dependency'),
             items: [
               'Updated Ledger Required',
@@ -869,7 +869,7 @@ class _AttachmentPreview extends StatelessWidget {
       top: 6,
       right: 6,
       child: Material(
-        color: Colors.black.withOpacity(0.55),
+        color: Colors.black.withValues(alpha: 0.55),
         shape: const CircleBorder(),
         child: InkWell(
           customBorder: const CircleBorder(),
@@ -1060,7 +1060,7 @@ class _UnableToCommitFormState extends State<UnableToCommitForm> {
           DropdownButtonFormField<String>(
             dropdownColor: Colors.white,
             style: const TextStyle(color: Color(0xFF1B2B48), fontSize: 16),
-            value: _reason,
+            initialValue: _reason,
             decoration: const InputDecoration(labelText: 'Structured Reason'),
             items: [
               'Cash flow problem',

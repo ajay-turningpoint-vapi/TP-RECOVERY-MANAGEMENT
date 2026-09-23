@@ -117,7 +117,7 @@ class DisputeDetailsView extends StatelessWidget {
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 8, vertical: 3),
                             decoration: BoxDecoration(
-                                color: kOrange.withOpacity(0.12),
+                                color: kOrange.withValues(alpha: 0.12),
                                 borderRadius: BorderRadius.circular(6)),
                             child: Text(
                                 (d['statusDetail'] ?? status)
@@ -138,7 +138,7 @@ class DisputeDetailsView extends StatelessWidget {
                             CircleAvatar(
                                 radius: 22,
                                 backgroundColor: avatarColorFor(customer.name)
-                                    .withOpacity(0.15),
+                                    .withValues(alpha: 0.15),
                                 child: Text(initialsFor(customer.name),
                                     style: TextStyle(
                                         color: avatarColorFor(customer.name),
@@ -492,7 +492,7 @@ class DisputeDetailsView extends StatelessWidget {
           Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                  color: color.withOpacity(0.1), shape: BoxShape.circle),
+                  color: color.withValues(alpha: 0.1), shape: BoxShape.circle),
               child: Icon(icon, size: 15, color: color)),
           const SizedBox(width: 8),
           Expanded(
@@ -542,9 +542,9 @@ class DisputeDetailsView extends StatelessWidget {
                 constraints: const BoxConstraints(maxWidth: 280),
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                 decoration: BoxDecoration(
-                    color: c.withOpacity(0.08),
+                    color: c.withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: c.withOpacity(0.25))),
+                    border: Border.all(color: c.withValues(alpha: 0.25))),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -709,7 +709,7 @@ class DisputeDetailsView extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               DropdownButtonFormField<String>(
-                value: selectedSalesman,
+                initialValue: selectedSalesman,
                 isExpanded: true,
                 items: store.salesmen
                     .map<DropdownMenuItem<String>>((s) => DropdownMenuItem(

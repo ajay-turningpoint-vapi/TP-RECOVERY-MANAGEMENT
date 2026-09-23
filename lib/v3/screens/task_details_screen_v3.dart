@@ -117,7 +117,7 @@ class TaskDetailsScreenV3 extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              CircleAvatar(radius: 22, backgroundColor: avatarColorFor(customer.name).withOpacity(0.15), child: Text(initialsFor(customer.name), style: TextStyle(color: avatarColorFor(customer.name), fontWeight: FontWeight.bold))),
+              CircleAvatar(radius: 22, backgroundColor: avatarColorFor(customer.name).withValues(alpha: 0.15), child: Text(initialsFor(customer.name), style: TextStyle(color: avatarColorFor(customer.name), fontWeight: FontWeight.bold))),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
@@ -210,7 +210,7 @@ class TaskDetailsScreenV3 extends StatelessWidget {
               Container(
                 constraints: const BoxConstraints(maxWidth: 280),
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                decoration: BoxDecoration(color: c.withOpacity(0.08), borderRadius: BorderRadius.circular(10), border: Border.all(color: c.withOpacity(0.25))),
+                decoration: BoxDecoration(color: c.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(10), border: Border.all(color: c.withValues(alpha: 0.25))),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [

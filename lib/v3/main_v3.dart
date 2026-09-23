@@ -202,7 +202,7 @@ class _SessionRestoringScreen extends StatelessWidget {
             SizedBox(
               width: 28,
               height: 28,
-              child: CircularProgressIndicator(strokeWidth: 2.5, valueColor: AlwaysStoppedAnimation(Colors.white.withOpacity(0.85))),
+              child: CircularProgressIndicator(strokeWidth: 2.5, valueColor: AlwaysStoppedAnimation(Colors.white.withValues(alpha: 0.85))),
             ),
           ],
         ),

@@ -254,7 +254,7 @@ class _ManagerDailyRecoverySummaryScreenState extends State<ManagerDailyRecovery
         final (icon, color, value, label, sub) = c;
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-          decoration: BoxDecoration(color: color.withOpacity(0.05), borderRadius: BorderRadius.circular(14), border: Border.all(color: color.withOpacity(0.15))),
+          decoration: BoxDecoration(color: color.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(14), border: Border.all(color: color.withValues(alpha: 0.15))),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -323,7 +323,7 @@ class _ManagerDailyRecoverySummaryScreenState extends State<ManagerDailyRecovery
                   color: kGreen,
                   barWidth: 2.5,
                   dotData: const FlDotData(show: true),
-                  belowBarData: BarAreaData(show: true, color: kGreen.withOpacity(0.08)),
+                  belowBarData: BarAreaData(show: true, color: kGreen.withValues(alpha: 0.08)),
                 ),
               ],
             ),
@@ -559,7 +559,7 @@ class _ManagerDailyRecoverySummaryScreenState extends State<ManagerDailyRecovery
   Widget _footer(AppStore store, DateTime now) {
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: kBlue.withOpacity(0.06), borderRadius: BorderRadius.circular(10), border: Border.all(color: kBlue.withOpacity(0.15))),
+      decoration: BoxDecoration(color: kBlue.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(10), border: Border.all(color: kBlue.withValues(alpha: 0.15))),
       child: Row(
         children: [
           const Icon(Icons.info_outline, size: 15, color: kBlue),

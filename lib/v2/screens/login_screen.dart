@@ -112,7 +112,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                     ),
                     borderRadius: BorderRadius.circular(24),
                     boxShadow: [
-                      BoxShadow(color: const Color(0xFF0052CC).withOpacity(0.3), blurRadius: 20, offset: const Offset(0, 8)),
+                      BoxShadow(color: const Color(0xFF0052CC).withValues(alpha: 0.3), blurRadius: 20, offset: const Offset(0, 8)),
                     ],
                   ),
                   child: const Icon(Icons.shield_outlined, color: Colors.white, size: 40),
@@ -152,7 +152,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
           color: Colors.white,
           borderRadius: BorderRadius.circular(20),
           boxShadow: [
-            BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 24, offset: const Offset(0, 8)),
+            BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 24, offset: const Offset(0, 8)),
           ],
         ),
         child: Column(

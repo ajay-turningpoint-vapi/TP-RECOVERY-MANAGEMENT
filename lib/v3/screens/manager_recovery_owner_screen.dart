@@ -194,7 +194,7 @@ class _ManagerRecoveryOwnerScreenState extends State<ManagerRecoveryOwnerScreen>
           return Container(
             width: 118,
             padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(color: color.withOpacity(0.05), borderRadius: BorderRadius.circular(12), border: Border.all(color: color.withOpacity(0.15))),
+            decoration: BoxDecoration(color: color.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(12), border: Border.all(color: color.withValues(alpha: 0.15))),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -298,7 +298,7 @@ class _ManagerRecoveryOwnerScreenState extends State<ManagerRecoveryOwnerScreen>
               width: _ownerColName,
               child: Row(
                 children: [
-                  CircleAvatar(radius: 15, backgroundColor: avatarColorFor(name).withOpacity(0.15), child: Text(initialsFor(name), style: TextStyle(color: avatarColorFor(name), fontSize: 10.5, fontWeight: FontWeight.bold))),
+                  CircleAvatar(radius: 15, backgroundColor: avatarColorFor(name).withValues(alpha: 0.15), child: Text(initialsFor(name), style: TextStyle(color: avatarColorFor(name), fontSize: 10.5, fontWeight: FontWeight.bold))),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Column(
@@ -308,7 +308,7 @@ class _ManagerRecoveryOwnerScreenState extends State<ManagerRecoveryOwnerScreen>
                         Container(
                           margin: const EdgeInsets.only(top: 2),
                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                          decoration: BoxDecoration(color: kBlue.withOpacity(0.08), borderRadius: BorderRadius.circular(4)),
+                          decoration: BoxDecoration(color: kBlue.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(4)),
                           child: const Text('Salesman', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: kBlue)),
                         ),
                       ],
@@ -366,7 +366,7 @@ class _ManagerRecoveryOwnerScreenState extends State<ManagerRecoveryOwnerScreen>
             children: [
               Row(
                 children: [
-                  CircleAvatar(radius: 20, backgroundColor: avatarColorFor(name).withOpacity(0.15), child: Text(initialsFor(name), style: TextStyle(color: avatarColorFor(name), fontSize: 13, fontWeight: FontWeight.bold))),
+                  CircleAvatar(radius: 20, backgroundColor: avatarColorFor(name).withValues(alpha: 0.15), child: Text(initialsFor(name), style: TextStyle(color: avatarColorFor(name), fontSize: 13, fontWeight: FontWeight.bold))),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(

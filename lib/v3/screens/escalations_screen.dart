@@ -113,7 +113,7 @@ class _EscalationsScreenState extends State<EscalationsScreen> with SingleTicker
     return Container(
           margin: const EdgeInsets.only(bottom: 14),
           padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: color.withOpacity(0.25), width: 1.4)),
+          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: color.withValues(alpha: 0.25), width: 1.4)),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -123,7 +123,7 @@ class _EscalationsScreenState extends State<EscalationsScreen> with SingleTicker
                   Row(children: [
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
+                      decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)),
                       child: Text(e.level == 'L4' ? 'L4 · MANAGEMENT ATTENTION' : (e.level == 'L3' ? 'L3 · RE CONTROL' : 'L2 · RE SUPERVISION'), style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: color)),
                     ),
                   ]),

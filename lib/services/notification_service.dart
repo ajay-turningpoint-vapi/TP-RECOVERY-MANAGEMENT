@@ -30,7 +30,7 @@ class NotificationService {
     // generic icon, which is what showed up here before this existed.
     const androidSettings = AndroidInitializationSettings('@drawable/ic_notif_alert');
     const iosSettings = DarwinInitializationSettings(requestAlertPermission: false, requestBadgePermission: false, requestSoundPermission: false);
-    await _plugin.initialize(const InitializationSettings(android: androidSettings, iOS: iosSettings));
+    await _plugin.initialize(settings: const InitializationSettings(android: androidSettings, iOS: iosSettings));
     await _plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()?.createNotificationChannel(_channel);
     _initialized = true;
   }
@@ -57,10 +57,10 @@ class NotificationService {
   Future<void> show({required int id, required String title, required String body, String icon = 'ic_notif_alert', bool bigText = false}) async {
     if (!_initialized) await init();
     await _plugin.show(
-      id,
-      title,
-      body,
-      NotificationDetails(
+      id: id,
+      title: title,
+      body: body,
+      notificationDetails: NotificationDetails(
         android: AndroidNotificationDetails(
           _channelId,
           'TP-RMS Alerts',

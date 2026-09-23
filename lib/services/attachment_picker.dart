@@ -40,8 +40,7 @@ Future<XFile?> pickEvidenceFile(BuildContext context) async {
   );
   if (choice == null) return null;
   if (choice == 'pdf') {
-    final r = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['pdf'], withData: true);
-    final f = r?.files.isNotEmpty == true ? r!.files.first : null;
+    final f = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: ['pdf']);
     if (f == null) return null;
     final name = f.name.trim().isNotEmpty ? f.name.trim() : 'document.pdf';
     // The picker's own cached path is best — a real file means XFile.name
@@ -51,11 +50,12 @@ Future<XFile?> pickEvidenceFile(BuildContext context) async {
     if (f.path != null && f.path!.isNotEmpty && File(f.path!).existsSync()) {
       return XFile(f.path!, mimeType: 'application/pdf');
     }
-    if (f.bytes == null) return null;
+    final bytes = await f.readAsBytes();
+    if (bytes.isEmpty) return null;
     final dir = Directory('${Directory.systemTemp.path}/tp_evidence/${DateTime.now().millisecondsSinceEpoch}');
     await dir.create(recursive: true);
     final tmp = File('${dir.path}/$name');
-    await tmp.writeAsBytes(f.bytes!);
+    await tmp.writeAsBytes(bytes);
     return XFile(tmp.path, mimeType: 'application/pdf');
   }
   return ImagePicker().pickImage(

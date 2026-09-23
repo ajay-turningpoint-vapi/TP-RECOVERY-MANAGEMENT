@@ -54,7 +54,7 @@ class OutcomeEditReviewScreen extends StatelessWidget {
         InfoCard(children: [
           Row(
             children: [
-              CircleAvatar(radius: 24, backgroundColor: avatarColorFor(customer.name).withOpacity(0.15), child: Text(initialsFor(customer.name), style: TextStyle(color: avatarColorFor(customer.name), fontSize: 15, fontWeight: FontWeight.bold))),
+              CircleAvatar(radius: 24, backgroundColor: avatarColorFor(customer.name).withValues(alpha: 0.15), child: Text(initialsFor(customer.name), style: TextStyle(color: avatarColorFor(customer.name), fontSize: 15, fontWeight: FontWeight.bold))),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(

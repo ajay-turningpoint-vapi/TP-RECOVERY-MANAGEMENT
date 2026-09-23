@@ -224,7 +224,7 @@ class ApprovalsListScreen extends StatelessWidget {
                                         children: [
                                           Container(
                                             padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                                            decoration: BoxDecoration(color: item.color.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
+                                            decoration: BoxDecoration(color: item.color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)),
                                             child: Text(item.type, style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: item.color)),
                                           ),
                                           if (item.critical) ...[

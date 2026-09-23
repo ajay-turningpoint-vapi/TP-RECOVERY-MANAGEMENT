@@ -225,7 +225,7 @@ class _ManagerDashboardScreenState extends State<ManagerDashboardScreen> {
               children: [
                 Container(
                   padding: const EdgeInsets.all(6),
-                  decoration: BoxDecoration(color: c.color.withOpacity(0.1), shape: BoxShape.circle),
+                  decoration: BoxDecoration(color: c.color.withValues(alpha: 0.1), shape: BoxShape.circle),
                   child: Icon(c.icon, color: c.color, size: 15),
                 ),
                 const SizedBox(width: 8),
@@ -338,7 +338,7 @@ class _ManagerDashboardScreenState extends State<ManagerDashboardScreen> {
                     color: _green,
                     barWidth: 2.5,
                     dotData: const FlDotData(show: true),
-                    belowBarData: BarAreaData(show: true, color: _green.withOpacity(0.08)),
+                    belowBarData: BarAreaData(show: true, color: _green.withValues(alpha: 0.08)),
                   ),
                 ],
               ),
@@ -497,7 +497,7 @@ class _ManagerDashboardScreenState extends State<ManagerDashboardScreen> {
                   children: [
                     Container(
                       padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(color: t.color.withOpacity(0.1), shape: BoxShape.circle),
+                      decoration: BoxDecoration(color: t.color.withValues(alpha: 0.1), shape: BoxShape.circle),
                       child: Icon(t.icon, color: t.color, size: 16),
                     ),
                     const SizedBox(height: 6),
@@ -605,7 +605,7 @@ class _ManagerDashboardScreenState extends State<ManagerDashboardScreen> {
               alignment: Alignment.centerRight,
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(color: scoreColor.withOpacity(0.12), borderRadius: BorderRadius.circular(20)),
+                decoration: BoxDecoration(color: scoreColor.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(20)),
                 child: Text(scoreLabel, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: scoreColor)),
               ),
             ),
@@ -698,7 +698,7 @@ class _ManagerDashboardScreenState extends State<ManagerDashboardScreen> {
                     padding: const EdgeInsets.symmetric(vertical: 8),
                     child: Row(
                       children: [
-                        Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: r.color.withOpacity(0.1), shape: BoxShape.circle), child: Icon(r.icon, color: r.color, size: 16)),
+                        Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: r.color.withValues(alpha: 0.1), shape: BoxShape.circle), child: Icon(r.icon, color: r.color, size: 16)),
                         const SizedBox(width: 10),
                         Expanded(
                           child: Column(
@@ -747,7 +747,7 @@ class _ManagerDashboardScreenState extends State<ManagerDashboardScreen> {
                   decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: _border)),
                   child: Row(
                     children: [
-                      Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: a.color.withOpacity(0.1), shape: BoxShape.circle), child: Icon(a.icon, color: a.color, size: 17)),
+                      Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: a.color.withValues(alpha: 0.1), shape: BoxShape.circle), child: Icon(a.icon, color: a.color, size: 17)),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Column(

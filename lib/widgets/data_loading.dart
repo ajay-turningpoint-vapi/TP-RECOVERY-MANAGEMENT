@@ -49,7 +49,7 @@ class LoadingAppBarStrip extends StatelessWidget implements PreferredSizeWidget 
       child: busy
           ? LinearProgressIndicator(
               minHeight: 3,
-              backgroundColor: color.withOpacity(0.2),
+              backgroundColor: color.withValues(alpha: 0.2),
               valueColor: AlwaysStoppedAnimation(color),
             )
           : const SizedBox.shrink(),
