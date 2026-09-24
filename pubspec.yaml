@@ -58,7 +58,7 @@ dependencies:
   # Pinned to 6.5.1: 6.6+ needs js ^0.7.1 (conflicts with
   # flutter_secure_storage's js ^0.6.3), and 7.x's Android build.gradle
   # assumes newer AGP than this project's AGP 7.3.0.
-  speech_to_text: 6.5.1
+  speech_to_text: ^7.0.0
 
   # Local cache (last-known customers/tasks/ptps/etc. for offline cold
   # starts) + the offline write queue (pending outcome/PTP/dispute/etc.

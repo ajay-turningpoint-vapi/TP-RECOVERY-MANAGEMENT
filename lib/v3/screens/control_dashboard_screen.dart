@@ -10,6 +10,7 @@ import 'package:salesman_mobile/v3/screens/ptp_list_screen.dart';
 import 'package:salesman_mobile/v3/screens/escalations_screen.dart';
 import 'package:salesman_mobile/v3/screens/approvals_list_screen.dart';
 import 'package:salesman_mobile/v3/screens/report_detail_screens.dart' show SalesmanScoreDetailScreen;
+import 'package:salesman_mobile/v3/screens/re_salesmen_list_screen.dart';
 import 'package:salesman_mobile/widgets/data_loading.dart' show DataLoadingBar;
 
 const _bg = Color(0xFFF7F8FA);
@@ -380,7 +381,10 @@ class _ControlDashboardScreenState extends State<ControlDashboardScreen> {
               const Expanded(child: Text('Salesmen Performance', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14.5, color: _dark))),
               if (all.length >= 10)
                 GestureDetector(
-                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NeedsAttentionScreen())),
+                  // Was pointing at NeedsAttentionScreen — a copy-paste bug
+                  // from the section above (same "View All ›" snippet),
+                  // never actually a salesmen list at all.
+                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ReSalesmenListScreen())),
                   child: const Text('View All  ›', style: TextStyle(color: Color(0xFF2563EB), fontSize: 12, fontWeight: FontWeight.bold)),
                 ),
             ],
