@@ -233,7 +233,7 @@ class _ReSalesmenListScreenState extends State<ReSalesmenListScreen> {
               children: [
                 Row(
                   children: [
-                    CircleAvatar(radius: 18, backgroundColor: avatarColorFor(name).withOpacity(0.15), child: Text(initialsFor(name), style: TextStyle(color: avatarColorFor(name), fontSize: 12, fontWeight: FontWeight.bold))),
+                    CircleAvatar(radius: 18, backgroundColor: avatarColorFor(name).withValues(alpha:0.15), child: Text(initialsFor(name), style: TextStyle(color: avatarColorFor(name), fontSize: 12, fontWeight: FontWeight.bold))),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Column(
@@ -296,7 +296,7 @@ class _ReSalesmenListScreenState extends State<ReSalesmenListScreen> {
         child: Container(
           width: double.infinity,
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          decoration: BoxDecoration(color: kBlue.withOpacity(0.08), borderRadius: BorderRadius.circular(10)),
+          decoration: BoxDecoration(color: kBlue.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(10)),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,

@@ -197,7 +197,7 @@ class _ActionTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
         margin: const EdgeInsets.only(bottom: 8),
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey.withOpacity(0.15))),
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey.withValues(alpha: 0.15))),
         // See profile_screen.dart's _ActionTile — a newer Flutter throws
         // without a real Material ancestor for ListTile's background/ink.
         child: Material(
