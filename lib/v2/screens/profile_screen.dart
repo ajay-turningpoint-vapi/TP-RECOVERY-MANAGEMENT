@@ -564,24 +564,32 @@ class _ActionTile extends StatelessWidget {
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: Colors.grey.withValues(alpha: 0.15)),
         ),
-        child: ListTile(
-          dense: true,
-          visualDensity: const VisualDensity(horizontal: 0, vertical: -4),
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 14, vertical: 0),
-          leading: Container(
-            padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(color: iconBg, shape: BoxShape.circle),
-            child: Icon(icon, color: iconColor, size: 16),
+        // A newer Flutter enforces that ListTile needs a real Material
+        // ancestor for its background/ink splash to render — without this,
+        // it throws "ListTile background color or ink splashes may be
+        // invisible" (previously just a silent debug warning, now a real
+        // uncaught exception that surfaced the global error dialog).
+        child: Material(
+          type: MaterialType.transparency,
+          child: ListTile(
+            dense: true,
+            visualDensity: const VisualDensity(horizontal: 0, vertical: -4),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 14, vertical: 0),
+            leading: Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(color: iconBg, shape: BoxShape.circle),
+              child: Icon(icon, color: iconColor, size: 16),
+            ),
+            title: Text(label,
+                style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13.5,
+                    color: labelColor)),
+            trailing: const Icon(Icons.arrow_forward_ios,
+                size: 13, color: Color(0xFFA0AEC0)),
+            onTap: onTap,
           ),
-          title: Text(label,
-              style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 13.5,
-                  color: labelColor)),
-          trailing: const Icon(Icons.arrow_forward_ios,
-              size: 13, color: Color(0xFFA0AEC0)),
-          onTap: onTap,
         ),
       );
 }

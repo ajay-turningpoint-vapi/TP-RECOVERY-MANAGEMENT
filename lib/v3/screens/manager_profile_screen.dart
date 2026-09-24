@@ -197,13 +197,18 @@ class _ActionTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
         margin: const EdgeInsets.only(bottom: 8),
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey.withValues(alpha: 0.15))),
-        child: ListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-          leading: Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: iconBg, shape: BoxShape.circle), child: Icon(icon, color: iconColor, size: 18)),
-          title: Text(label, style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: labelColor)),
-          trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: Color(0xFFA0AEC0)),
-          onTap: onTap,
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey.withOpacity(0.15))),
+        // See profile_screen.dart's _ActionTile — a newer Flutter throws
+        // without a real Material ancestor for ListTile's background/ink.
+        child: Material(
+          type: MaterialType.transparency,
+          child: ListTile(
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+            leading: Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: iconBg, shape: BoxShape.circle), child: Icon(icon, color: iconColor, size: 18)),
+            title: Text(label, style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: labelColor)),
+            trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: Color(0xFFA0AEC0)),
+            onTap: onTap,
+          ),
         ),
       );
 }
