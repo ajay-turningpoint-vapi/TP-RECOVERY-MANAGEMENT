@@ -78,8 +78,9 @@ class _NeedsAttentionScreenState extends State<NeedsAttentionScreen> {
     // Shared filter for the customer-centric problem queues below.
     final q = _query.toLowerCase();
     bool custMatches(Customer c) {
-      if (_branchFilter != 'All Branches' && c.branch != _branchFilter)
+      if (_branchFilter != 'All Branches' && c.branch != _branchFilter) {
         return false;
+      }
       if (q.isEmpty) return true;
       return c.name.toLowerCase().contains(q) ||
           store
