@@ -240,6 +240,9 @@ class _Customer360ScreenState extends State<Customer360Screen> {
     // don't. Deriving it from the real role means no call site can ever
     // reintroduce this gap.
     final effectiveReadOnly = widget.readOnly || store.userRole == 'MANAGEMENT';
+    // One open task per customer: the RE can't stack another on top.
+    final hasOpenTask = store.tasks.any((t) =>
+        t.customerId == currentCustomer.id && t.status != TaskStatus.completed);
 
     return DefaultTabController(
       length: 3,
@@ -393,19 +396,27 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                                 ? const Color(0xFFDC2626)
                                 : const Color(0xFF0052CC),
                             foregroundColor: Colors.white,
+                            disabledBackgroundColor: Colors.grey[400],
+                            disabledForegroundColor: Colors.white,
                             shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(8)),
                             elevation: 0,
                           ),
-                          onPressed: () => _showCreateTaskDialog(
-                              context, store, currentCustomer),
-                          child: const Row(
+                          onPressed: hasOpenTask
+                              ? null
+                              : () => _showCreateTaskDialog(
+                                  context, store, currentCustomer),
+                          child: Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Icon(Icons.add_task, size: 18),
-                              SizedBox(width: 6),
-                              Text('CREATE TASK',
-                                  style: TextStyle(
+                              Icon(hasOpenTask ? Icons.task_alt : Icons.add_task,
+                                  size: 18),
+                              const SizedBox(width: 6),
+                              Text(
+                                  hasOpenTask
+                                      ? 'TASK ALREADY EXISTS'
+                                      : 'CREATE TASK',
+                                  style: const TextStyle(
                                       fontWeight: FontWeight.bold,
                                       fontSize: 13)),
                             ],

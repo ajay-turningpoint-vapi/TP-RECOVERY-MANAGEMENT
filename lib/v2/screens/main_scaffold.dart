@@ -26,7 +26,9 @@ class _MainScaffoldState extends State<MainScaffold> {
 
   @override
   Widget build(BuildContext context) {
-    final openTasks = context.watch<AppStore>().myOpenTaskCount;
+    final store = context.watch<AppStore>();
+    final openTasks = store.myOpenTaskCount;
+    final dueCustomers = store.myCustomers.length;
     return Scaffold(
       body: InitialDataLoader(child: _pages[_currentIndex]),
       bottomNavigationBar: BottomNavigationBar(
@@ -54,8 +56,13 @@ class _MainScaffoldState extends State<MainScaffold> {
             ),
             label: 'Tasks',
           ),
-          const BottomNavigationBarItem(
-            icon: Icon(Icons.people),
+          BottomNavigationBarItem(
+            icon: Badge(
+              isLabelVisible: dueCustomers > 0,
+              label: Text(dueCustomers > 99 ? '99+' : '$dueCustomers'),
+              backgroundColor: const Color(0xFF0052CC),
+              child: const Icon(Icons.people),
+            ),
             label: 'Customers',
           ),
           const BottomNavigationBarItem(

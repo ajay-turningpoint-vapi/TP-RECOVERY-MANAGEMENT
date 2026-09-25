@@ -333,10 +333,28 @@ class AppStore extends ChangeNotifier {
   List<AppTask> get myTasks =>
       userRole == 'SALESPERSON' ? tasks.where((t) => t.ownerId == currentSalesmanId).toList() : visibleTasks;
 
-  /// Open (not-completed) tasks the signed-in salesperson owns — drives the
-  /// count bubble on the bottom-nav Tasks icon.
+  /// Routine "call this customer" tasks the server keeps per customer
+  /// (the single Recovery task and post-outcome follow-ups). Salesmen work
+  /// these through Start Recovery, so they're kept out of the Tasks tab.
+  static const _routineCallSources = {
+    'Recovery',
+    'Recovery Reconcile',
+    'Record Outcome',
+    'Daily Snapshot',
+    'Task Completion Guard',
+  };
+  static bool isRoutineRecoveryCall(AppTask t) =>
+      t.type == TaskType.customerCall && _routineCallSources.contains(t.source);
+
+  /// The salesperson's real to-dos: [myTasks] without the routine calls that
+  /// Start Recovery already covers. Other roles see [myTasks] unchanged.
+  List<AppTask> get myTodoTasks =>
+      userRole == 'SALESPERSON' ? myTasks.where((t) => !isRoutineRecoveryCall(t)).toList() : myTasks;
+
+  /// Open (not-completed) to-do tasks the signed-in salesperson owns — drives
+  /// the count bubble on the bottom-nav Tasks icon.
   int get myOpenTaskCount =>
-      myTasks.where((t) => t.status != TaskStatus.completed).length;
+      myTodoTasks.where((t) => t.status != TaskStatus.completed).length;
 
   // ─────────────────────────────────────────────────────────────────────
   // Branch filter — a single global scope an RE / Manager sets once (from

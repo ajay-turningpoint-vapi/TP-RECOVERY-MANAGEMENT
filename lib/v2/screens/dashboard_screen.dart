@@ -4,11 +4,10 @@ import 'package:intl/intl.dart';
 import 'package:salesman_mobile/v2/stores/app_store.dart';
 import 'package:salesman_mobile/v2/screens/customer_360_screen.dart';
 import 'package:salesman_mobile/v2/screens/customer_list_screen.dart';
-import 'package:salesman_mobile/v2/screens/tasks_screen.dart';
 import 'package:salesman_mobile/v2/widgets/recovery_score_breakdown.dart';
 import 'package:salesman_mobile/v2/models/task.dart';
-import 'package:salesman_mobile/v2/models/ptp.dart';
 import 'package:salesman_mobile/v2/models/customer.dart';
+import 'package:salesman_mobile/v2/models/ptp.dart';
 import 'package:salesman_mobile/widgets/app_message.dart';
 
 // Indian digit grouping (₹1,23,456 not ₹123,456) — the plain
@@ -16,7 +15,8 @@ import 'package:salesman_mobile/widgets/app_message.dart';
 // all, so a lakh-plus figure read as one long undifferentiated run of
 // digits instead of the lakh/crore grouping every other real-money screen
 // in this app already uses.
-final _rupee = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
+final _rupee =
+    NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -35,8 +35,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final now = DateTime.now();
     final map = <String, double>{};
     for (final p in store.ptps) {
-      if (p.status != PtpStatus.scheduled && p.status != PtpStatus.pendingVerification) continue;
-      if (p.promiseDate.year != now.year || p.promiseDate.month != now.month || p.promiseDate.day != now.day) continue;
+      if (p.status != PtpStatus.scheduled &&
+          p.status != PtpStatus.pendingVerification) continue;
+      if (p.promiseDate.year != now.year ||
+          p.promiseDate.month != now.month ||
+          p.promiseDate.day != now.day) continue;
       map[p.customerId] = (map[p.customerId] ?? 0) + p.amountPromised;
     }
     return map;
@@ -57,7 +60,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
     // whole portfolio regardless of activity, which used to make nearly
     // every resolved customer look "done today" right after that sync ran.
     final done = store.myCustomers
-        .where((c) => c.currentRecoveryState == 'Waiting / Monitoring' && store.recoveryDoneTodayCustomerIds.contains(c.id) && !seen.contains(c.id))
+        .where((c) =>
+            c.currentRecoveryState == 'Waiting / Monitoring' &&
+            store.recoveryDoneTodayCustomerIds.contains(c.id) &&
+            !seen.contains(c.id))
         .toList();
     return [...actionable, ...done];
   }
@@ -101,14 +107,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final myRecoveryTargetPct =
         monthTierPct[(DateTime.now().month - 1) % monthTierPct.length];
     final myRecoveryTarget = myTotalOverdue * myRecoveryTargetPct;
-    final myPtpDueTodayAmount = store.ptps.where((p) {
+    final myPtpsDueToday = store.ptps.where((p) {
       final now = DateTime.now();
-      return (p.status == PtpStatus.scheduled || p.status == PtpStatus.pendingVerification) &&
+      return (p.status == PtpStatus.scheduled ||
+              p.status == PtpStatus.pendingVerification) &&
           p.promiseDate.year == now.year &&
           p.promiseDate.month == now.month &&
           p.promiseDate.day == now.day &&
           store.myCustomers.any((c) => c.id == p.customerId);
-    }).fold(0.0, (s, p) => s + p.amountPromised);
+    }).toList();
+    final myPtpDueTodayAmount =
+        myPtpsDueToday.fold(0.0, (s, p) => s + p.amountPromised);
+    // Actual recovery so far — same primitive the Recovery Target report
+    // uses: amount received on kept / partially-kept PTPs of my customers.
+    final myCustomerIds = store.myCustomers.map((c) => c.id).toSet();
+    final myRecovered = store.ptps
+        .where((p) =>
+            (p.status == PtpStatus.kept ||
+                p.status == PtpStatus.partiallyKept) &&
+            myCustomerIds.contains(p.customerId))
+        .fold<double>(0.0, (s, p) => s + (p.amountReceived ?? 0));
+    final aboveTarget = myRecovered >= myRecoveryTarget;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8F9FB),
@@ -161,48 +180,56 @@ class _DashboardScreenState extends State<DashboardScreen> {
               Row(
                 children: [
                   Expanded(
-                    child: _buildStatCard(
-                      context,
-                      'Total Outstanding',
-                      _rupee.format(myTotalOutstanding),
-                      Icons.account_balance_wallet_outlined,
-                      const Color(0xFF0052CC),
-                      const Color(0xFFE3EDFB),
-                      onTap: () {
-                        final list = [...store.myCustomers]
-                          ..sort((a, b) => b.totalOutstanding.compareTo(a.totalOutstanding));
-                        Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                builder: (_) => CustomerListScreen(
-                                    title: 'Total Outstanding',
-                                    customers: list,
-                                    sortControlsView: true)));
-                      },
+                    // Same 1.8 aspect ratio as the grid cards below.
+                    child: AspectRatio(
+                      aspectRatio: 1.8,
+                      child: _buildStatCard(
+                        context,
+                        'Total Outstanding',
+                        _rupee.format(myTotalOutstanding),
+                        Icons.account_balance_wallet_outlined,
+                        const Color(0xFF0052CC),
+                        const Color(0xFFE3EDFB),
+                        onTap: () {
+                          final list = [...store.myCustomers]..sort((a, b) =>
+                              b.totalOutstanding.compareTo(a.totalOutstanding));
+                          Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (_) => CustomerListScreen(
+                                      title: 'Total Outstanding',
+                                      customers: list,
+                                      sortControlsView: true)));
+                        },
+                      ),
                     ),
                   ),
                   const SizedBox(width: 10),
                   Expanded(
-                    child: _buildStatCard(
-                      context,
-                      'Total Overdue',
-                      _rupee.format(myTotalOverdue),
-                      Icons.currency_rupee,
-                      const Color(0xFFE53935),
-                      const Color(0xFFFDECEC),
-                      onTap: () {
-                        final list = store.myCustomers
-                            .where((c) => c.totalDue > 0)
-                            .toList()
-                          ..sort((a, b) => b.totalDue.compareTo(a.totalDue));
-                        Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                builder: (_) => CustomerListScreen(
-                                    title: 'Total Overdue',
-                                    customers: list,
-                                    overdueView: true)));
-                      },
+                    // Same 1.8 aspect ratio as the grid cards below.
+                    child: AspectRatio(
+                      aspectRatio: 1.8,
+                      child: _buildStatCard(
+                        context,
+                        'Total Overdue',
+                        _rupee.format(myTotalOverdue),
+                        Icons.currency_rupee,
+                        const Color(0xFFE53935),
+                        const Color(0xFFFDECEC),
+                        onTap: () {
+                          final list = store.myCustomers
+                              .where((c) => c.totalDue > 0)
+                              .toList()
+                            ..sort((a, b) => b.totalDue.compareTo(a.totalDue));
+                          Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (_) => CustomerListScreen(
+                                      title: 'Total Overdue',
+                                      customers: list,
+                                      overdueView: true)));
+                        },
+                      ),
                     ),
                   ),
                 ],
@@ -244,43 +271,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   }),
                   _buildStatCard(
                     context,
-                    'PTP Due Today',
-                    store.ptps
-                        .where((p) {
-                          final now = DateTime.now();
-                          return (p.status == PtpStatus.scheduled || p.status == PtpStatus.pendingVerification) &&
-                              p.promiseDate.year == now.year &&
-                              p.promiseDate.month == now.month &&
-                              p.promiseDate.day == now.day &&
-                              store.myCustomers
-                                  .any((c) => c.id == p.customerId);
-                        })
-                        .length
-                        .toString(),
-                    Icons.calendar_today_outlined,
-                    const Color(0xFFFBC02D),
-                    const Color(0xFFFFF9C4),
-                    tag: 'Action Required',
-                    tagColor: const Color(0xFFFFF9C4),
-                    tagTextColor: const Color(0xFFF57F17),
-                    onTap: () {
-                      final amountByCustomer = _ptpDueTodayAmountByCustomer(store);
-                      final filtered = store.myCustomers
-                          .where((c) => amountByCustomer.containsKey(c.id))
-                          .toList();
-                      Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (_) => CustomerListScreen(
-                                  title: 'PTP Due Today',
-                                  customers: filtered,
-                                  highlightAmountByCustomerId: amountByCustomer,
-                                  highlightAmountLabel: 'PTP DUE TODAY',
-                                  sortControlsView: true)));
-                    },
-                  ),
-                  _buildStatCard(
-                    context,
                     'Broken PTP',
                     myBrokenPtpCount.toString(),
                     Icons.broken_image_outlined,
@@ -305,34 +295,56 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                   _buildStatCard(
                     context,
-                    'Tasks Due Today',
-                    store.myTasks
-                        .where((t) {
-                          // Match the My Tasks screen's "Today" bucket exactly
-                          // (not yet overdue, still due before midnight) so
-                          // tapping this card lands on a list with the same
-                          // count.
-                          final now = DateTime.now();
-                          final endOfToday = DateTime(
-                              now.year, now.month, now.day, 23, 59, 59);
-                          return t.status != TaskStatus.completed &&
-                              !t.deadline.isBefore(now) &&
-                              t.deadline.isBefore(endOfToday);
-                        })
-                        .length
-                        .toString(),
-                    Icons.assignment_outlined,
-                    const Color(0xFF8E24AA),
-                    const Color(0xFFF3E5F5),
-                    tag: 'Stay On Track',
-                    tagColor: const Color(0xFFF3E5F5),
-                    tagTextColor: const Color(0xFF7B1FA2),
+                    'Physical Visits',
+                    myPhysicalVisitDueCount.toString(),
+                    Icons.directions_walk,
+                    const Color(0xFF00897B),
+                    const Color(0xFFE0F2F1),
                     onTap: () {
+                      final filtered = store.myCustomers
+                          .where((c) =>
+                              myPhysicalVisitCustomerIds.contains(c.id) ||
+                              c.primaryNextAction.contains('Physical Visit'))
+                          .toList();
                       Navigator.push(
                           context,
                           MaterialPageRoute(
-                              builder: (_) =>
-                                  const TasksScreen(initialFilter: 'Today')));
+                              builder: (_) => CustomerListScreen(
+                                  title: 'Physical Visits',
+                                  customers: filtered,
+                                  sortControlsView: true)));
+                    },
+                  ),
+                  _buildStatCard(
+                    context,
+                    'Total Collected',
+                    _rupee.format(myRecovered),
+                    Icons.payments_outlined,
+                    const Color(0xFF2E7D32),
+                    const Color(0xFFE8F5E9),
+                    onTap: () {
+                      final amountByCustomer = <String, double>{};
+                      for (final p in store.ptps) {
+                        if ((p.status == PtpStatus.kept ||
+                                p.status == PtpStatus.partiallyKept) &&
+                            myCustomerIds.contains(p.customerId)) {
+                          amountByCustomer[p.customerId] =
+                              (amountByCustomer[p.customerId] ?? 0) +
+                                  (p.amountReceived ?? 0);
+                        }
+                      }
+                      final filtered = store.myCustomers
+                          .where((c) => amountByCustomer.containsKey(c.id))
+                          .toList();
+                      Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => CustomerListScreen(
+                                  title: 'Total Collected',
+                                  customers: filtered,
+                                  highlightAmountByCustomerId: amountByCustomer,
+                                  highlightAmountLabel: 'COLLECTED',
+                                  sortControlsView: true)));
                     },
                   ),
                 ],
@@ -351,34 +363,58 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   children: [
                     IntrinsicHeight(
                       child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Expanded(
-                          child: _blueMetricChip(
-                            label: 'Recovery Target',
-                            value: _rupee.format(myRecoveryTarget),
-                            icon: Icons.track_changes,
-                            onTap: () {
-                              final filtered = store.myCustomers.where((c) => c.totalDue > 0).toList();
-                              Navigator.push(context, MaterialPageRoute(builder: (_) => CustomerListScreen(title: 'Recovery Target Today', customers: filtered)));
-                            },
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Expanded(
+                            child: _blueMetricChip(
+                              label: 'Recovery Target',
+                              value: _rupee.format(myRecoveryTarget),
+                              icon: Icons.track_changes,
+                              trailing: _targetStatusIcon(aboveTarget),
+                              onTap: () {
+                                final filtered = store.myCustomers
+                                    .where((c) => c.totalDue > 0)
+                                    .toList();
+                                Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                        builder: (_) => CustomerListScreen(
+                                            title: 'Recovery Target Today',
+                                            customers: filtered)));
+                              },
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: _blueMetricChip(
-                            label: 'PTP Due Today',
-                            value: _rupee.format(myPtpDueTodayAmount),
-                            icon: Icons.handshake_outlined,
-                            onTap: () {
-                              final amountByCustomer = _ptpDueTodayAmountByCustomer(store);
-                              final filtered = store.myCustomers.where((c) => amountByCustomer.containsKey(c.id)).toList();
-                              Navigator.push(context, MaterialPageRoute(builder: (_) => CustomerListScreen(title: 'PTP Due Today', customers: filtered, highlightAmountByCustomerId: amountByCustomer, highlightAmountLabel: 'PTP DUE TODAY', sortControlsView: true)));
-                            },
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: _blueMetricChip(
+                              label: 'PTP Due Today',
+                              value: _rupee.format(myPtpDueTodayAmount),
+                              icon: Icons.handshake_outlined,
+                              trailing: _countPill(
+                                  '${myPtpsDueToday.length} ${myPtpsDueToday.length == 1 ? 'PTP' : 'PTPs'}'),
+                              onTap: () {
+                                final amountByCustomer =
+                                    _ptpDueTodayAmountByCustomer(store);
+                                final filtered = store.myCustomers
+                                    .where((c) =>
+                                        amountByCustomer.containsKey(c.id))
+                                    .toList();
+                                Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                        builder: (_) => CustomerListScreen(
+                                            title: 'PTP Due Today',
+                                            customers: filtered,
+                                            highlightAmountByCustomerId:
+                                                amountByCustomer,
+                                            highlightAmountLabel:
+                                                'PTP DUE TODAY',
+                                            sortControlsView: true)));
+                              },
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
+                        ],
+                      ),
                     ),
                     const SizedBox(height: 12),
                     const Text('Financial data updated 10:56 AM',
@@ -404,7 +440,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     builder: (_) => Customer360Screen(
                                         customer: next, recoveryQueue: true)));
                           } else {
-                            showAppMessage(context, message: 'All assigned customers have been processed. Excellent work!');
+                            showAppMessage(context,
+                                message:
+                                    'All assigned customers have been processed. Excellent work!');
                           }
                         },
                         child: const Text('START RECOVERY',
@@ -416,64 +454,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     )
                   ],
                 ),
-              ),
-              const SizedBox(height: 32),
-
-              // Today's Priorities — same real data and tap-through navigation
-              // as the old list rows below, just as cards (matching the top
-              // grid's _buildStatCard) instead of a list.
-              const Text("Today's Priorities",
-                  style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF1B2B48))),
-              const SizedBox(height: 16),
-              GridView.count(
-                crossAxisCount: 2,
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                mainAxisSpacing: 10,
-                crossAxisSpacing: 10,
-                childAspectRatio: 1.8,
-                children: [
-                  _buildStatCard(
-                    context,
-                    'Physical Visits',
-                    myPhysicalVisitDueCount.toString(),
-                    Icons.directions_walk,
-                    const Color(0xFF00897B),
-                    const Color(0xFFE0F2F1),
-                    onTap: () {
-                      final filtered = store.myCustomers
-                          .where((c) =>
-                              myPhysicalVisitCustomerIds.contains(c.id) ||
-                              c.primaryNextAction.contains('Physical Visit'))
-                          .toList();
-                      Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (_) => CustomerListScreen(
-                                  title: 'Physical Visits',
-                                  customers: filtered,
-                                  sortControlsView: true)));
-                    },
-                  ),
-                  _buildStatCard(
-                    context,
-                    'Due Customers',
-                    store.myCustomers.length.toString(),
-                    Icons.people_outline,
-                    const Color(0xFF1E88E5),
-                    const Color(0xFFE3F2FD),
-                    onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => CustomerListScreen(
-                                title: 'Due Customers',
-                                customers: store.myCustomers,
-                                sortControlsView: true))),
-                  ),
-                ],
               ),
             ],
           ),
@@ -594,7 +574,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
-                            color: title == 'Broken PTP' || title == 'Total Overdue'
+                            color: title == 'Broken PTP' ||
+                                    title == 'Total Overdue'
                                 ? const Color(0xFFE53935)
                                 : (title == 'Tasks Due Today'
                                     ? const Color(0xFF8E24AA)
@@ -635,6 +616,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     required String label,
     required String value,
     required IconData icon,
+    Widget? trailing,
     VoidCallback? onTap,
   }) {
     return Material(
@@ -656,7 +638,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(icon, size: 14, color: Colors.white.withValues(alpha: 0.9)),
+                  Icon(icon,
+                      size: 14, color: Colors.white.withValues(alpha: 0.9)),
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(label,
@@ -666,18 +649,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             height: 1.15,
                             fontWeight: FontWeight.w500)),
                   ),
-                  Icon(Icons.chevron_right, size: 18, color: Colors.white.withValues(alpha: 0.75)),
+                  Icon(Icons.chevron_right,
+                      size: 18, color: Colors.white.withValues(alpha: 0.75)),
                 ],
               ),
-              const SizedBox(height: 10),
-              FittedBox(
-                fit: BoxFit.scaleDown,
+              if (trailing != null) ...[
+                const SizedBox(height: 6),
+                Align(alignment: Alignment.centerLeft, child: trailing)
+              ],
+              const SizedBox(height: 6),
+              Align(
                 alignment: Alignment.centerLeft,
-                child: Text(value,
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 22,
-                        fontWeight: FontWeight.w800)),
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(value,
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800)),
+                ),
               ),
             ],
           ),
@@ -686,4 +677,40 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  /// Small coloured badge: green up-trend when recovery is at/above the
+  /// target, red down-trend when below it.
+  Widget _targetStatusIcon(bool above) {
+    final color = above ? const Color(0xFF2E7D32) : const Color(0xFFE53935);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(3),
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          child: Icon(above ? Icons.trending_up : Icons.trending_down,
+              size: 12, color: Colors.white),
+        ),
+        const SizedBox(width: 6),
+        Text(above ? 'Above target' : 'Below target',
+            style: const TextStyle(
+                color: Colors.white,
+                fontSize: 11.5,
+                fontWeight: FontWeight.w700)),
+      ],
+    );
+  }
+
+  Widget _countPill(String text) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+          color: const Color(0xFFFBC02D),
+          borderRadius: BorderRadius.circular(999)),
+      child: Text(text,
+          style: const TextStyle(
+              color: Color(0xFF3E2C00),
+              fontSize: 11,
+              fontWeight: FontWeight.w800)),
+    );
+  }
 }

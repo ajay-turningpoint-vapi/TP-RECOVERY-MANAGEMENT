@@ -18,7 +18,10 @@ class EscalationsScreen extends StatefulWidget {
   // "L4 Management Attention") land directly on its own level instead of
   // always opening on L2.
   final int initialTabIndex;
-  const EscalationsScreen({super.key, this.initialTabIndex = 0});
+  // When set, shows just this one case (full details + Escalate Further /
+  // Resolve) instead of the tabbed list.
+  final String? focusCaseId;
+  const EscalationsScreen({super.key, this.initialTabIndex = 0, this.focusCaseId});
 
   @override
   State<EscalationsScreen> createState() => _EscalationsScreenState();
@@ -42,6 +45,31 @@ class _EscalationsScreenState extends State<EscalationsScreen> with SingleTicker
   @override
   Widget build(BuildContext context) {
     final store = context.watch<AppStore>();
+    if (widget.focusCaseId != null) {
+      final matches = store.visibleEscalationCases.where((c) => c.id == widget.focusCaseId);
+      return Scaffold(
+        backgroundColor: _bg,
+        appBar: AppBar(
+          title: const Text('Escalation Details', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: _dark)),
+          backgroundColor: Colors.white,
+          elevation: 0,
+          foregroundColor: _dark,
+        ),
+        body: Column(
+          children: [
+            const DataLoadingBar(),
+            Expanded(
+              child: matches.isEmpty
+                  ? const Center(child: Text('This escalation is no longer available.', style: TextStyle(color: _muted)))
+                  : ListView(
+                      padding: const EdgeInsets.all(16),
+                      children: [_caseCard(context, matches.first, levelColor(matches.first.level), store)],
+                    ),
+            ),
+          ],
+        ),
+      );
+    }
     final open = store.openEscalationCases;
     final l2 = open.where((e) => e.level == 'L2').toList();
     final l3 = open.where((e) => e.level == 'L3').toList();

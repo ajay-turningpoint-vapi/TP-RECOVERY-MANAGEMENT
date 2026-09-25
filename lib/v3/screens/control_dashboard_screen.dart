@@ -7,8 +7,6 @@ import 'package:salesman_mobile/v3/screens/needs_attention_screen.dart';
 import 'package:salesman_mobile/v3/screens/five_pm_control_screen.dart';
 import 'package:salesman_mobile/v3/screens/company_recovery_queue_screen.dart';
 import 'package:salesman_mobile/v3/screens/ptp_list_screen.dart';
-import 'package:salesman_mobile/v3/screens/escalations_screen.dart';
-import 'package:salesman_mobile/v3/screens/approvals_list_screen.dart';
 import 'package:salesman_mobile/v3/screens/report_detail_screens.dart' show SalesmanScoreDetailScreen;
 import 'package:salesman_mobile/v3/screens/re_salesmen_list_screen.dart';
 import 'package:salesman_mobile/widgets/data_loading.dart' show DataLoadingBar;
@@ -289,78 +287,40 @@ class _ControlDashboardScreenState extends State<ControlDashboardScreen> {
   // Needs Your Attention
   // -------------------------------------------------------------------
   Widget _buildAttentionSection(BuildContext context, AppStore store) {
-    // Overdue tasks, broken PTPs, underperforming salesmen, "no next
-    // action" and the pending-approvals queue are all handled in RE Tasks
-    // now — what's left on the dashboard's attention row is the RE-owned
-    // escalation ladder, its critical-approvals shortcut, and ownerless
-    // accounts (no salesman assigned, so the RE works these directly).
-    final tiles = [
-      _AttentionTileData(Icons.warning_amber_rounded, const Color(0xFFDC2626), '${store.criticalApprovalsCount}', 'Critical\nApprovals', 'High priority',
-          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ApprovalsListScreen(onlyCritical: true)))),
-      _AttentionTileData(Icons.priority_high, const Color(0xFF9333EA), '${store.openEscalationCases.length}', 'Escalations', 'L2 / L3 / L4',
-          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const EscalationsScreen()))),
-    ];
-    final visibleAttentionCount = tiles.fold(0, (s, t) => s + int.parse(t.value));
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            const Text('Needs Your Attention', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14.5, color: _dark)),
-            const SizedBox(width: 6),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-              // Pill, not a fixed circle — a 3-digit count clipped inside a
-              // circle (which can only size to a square).
-              decoration: BoxDecoration(color: const Color(0xFFEF4444), borderRadius: BorderRadius.circular(999)),
-              constraints: const BoxConstraints(minWidth: 20),
-              alignment: Alignment.center,
-              child: Text(
-                visibleAttentionCount > 999 ? '999+' : '$visibleAttentionCount',
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold, height: 1.1),
+    const amber = Color(0xFFD97706);
+    return Material(
+      color: const Color(0xFFFFF7E6),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: const BorderSide(color: Color(0xFFF59E0B), width: 1.2),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NeedsAttentionScreen())),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: const BoxDecoration(color: Color(0xFFFDE7B0), shape: BoxShape.circle),
+                child: const Icon(Icons.warning_amber_rounded, color: amber, size: 22),
               ),
-            ),
-            const Spacer(),
-            GestureDetector(
-              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NeedsAttentionScreen())),
-              child: const Text('View All  ›', style: TextStyle(color: Color(0xFF2563EB), fontSize: 12, fontWeight: FontWeight.bold)),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        SizedBox(
-          height: 134,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 1),
-            physics: const BouncingScrollPhysics(),
-            itemCount: tiles.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 8),
-            itemBuilder: (_, i) => SizedBox(width: 150, child: _attentionTile(tiles[i])),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Needs Your Attention', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5, color: Color(0xFF92400E))),
+                    SizedBox(height: 2),
+                    Text('Review customers that need your action', style: TextStyle(fontSize: 11.5, color: Color(0xFFB45309))),
+                  ],
+                ),
+              ),
+              const Text('View All', style: TextStyle(color: amber, fontSize: 12, fontWeight: FontWeight.bold)),
+              const Icon(Icons.chevron_right, color: amber, size: 20),
+            ],
           ),
-        ),
-      ],
-    );
-  }
-
-  Widget _attentionTile(_AttentionTileData t) {
-    return InkWell(
-      onTap: t.onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: Container(
-        height: 134,
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 12),
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: _border)),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Icon(t.icon, color: t.color, size: 18),
-            Text(t.value, style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900, color: t.color)),
-            Text(t.label, textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 9, color: _dark, fontWeight: FontWeight.w600, height: 1.2)),
-            FittedBox(fit: BoxFit.scaleDown, child: Text(t.tag, style: TextStyle(fontSize: 8.5, color: t.color, fontWeight: FontWeight.bold))),
-          ],
         ),
       ),
     );
@@ -540,14 +500,4 @@ class _StatCardData {
   final Color subColor;
   final VoidCallback? onTap;
   _StatCardData(this.icon, this.color, this.label, this.value, this.sub, this.subColor, {this.onTap});
-}
-
-class _AttentionTileData {
-  final IconData icon;
-  final Color color;
-  final String value;
-  final String label;
-  final String tag;
-  final VoidCallback? onTap;
-  _AttentionTileData(this.icon, this.color, this.value, this.label, this.tag, {this.onTap});
 }

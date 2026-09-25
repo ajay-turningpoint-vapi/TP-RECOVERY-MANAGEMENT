@@ -29,7 +29,7 @@ class _TasksScreenState extends State<TasksScreen> {
     final now = DateTime.now();
     final endOfToday = DateTime(now.year, now.month, now.day, 23, 59, 59);
 
-    final allTasks = store.myTasks;
+    final allTasks = store.myTodoTasks;
     final notCompleted = allTasks.where((t) => t.status != TaskStatus.completed);
     // Overdue means "deadline already passed" (time-aware, not just "was
     // due before today") — a task due 5 minutes ago is overdue right now,
@@ -112,7 +112,22 @@ class _TasksScreenState extends State<TasksScreen> {
               ),
             ),
             const Divider(height: 1, color: Color(0xFFEDF2F7)),
-            
+            if (store.userRole == 'SALESPERSON')
+              Container(
+                color: const Color(0xFFE3EDFB),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: const Row(
+                  children: [
+                    Icon(Icons.info_outline, size: 14, color: Color(0xFF0052CC)),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text('Customer calls are in Start Recovery on Home.',
+                          style: TextStyle(fontSize: 11.5, color: Color(0xFF0052CC), fontWeight: FontWeight.w600)),
+                    ),
+                  ],
+                ),
+              ),
+
             // List
             Expanded(
               child: displayedTasks.isEmpty 
