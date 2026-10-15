@@ -125,16 +125,16 @@ class _NeedsAttentionScreenState extends State<NeedsAttentionScreen> {
 
     final tabs = <_TabData>[
       _TabData('All ($total)', null, null, 0),
+      _TabData('High Risk (${highRisk.length})', Icons.warning_amber_rounded,
+          _red, 14),
+      _TabData('Escalations (${escalations.length})', Icons.priority_high,
+          _purple, 12),
       _TabData('No Next Action (${noNextAction.length})', Icons.help_outline,
           _amber, 9),
       _TabData(
           'Stalled (${stalled.length})', Icons.hourglass_bottom, _amber, 10),
-      _TabData('Escalations (${escalations.length})', Icons.priority_high,
-          _purple, 12),
       _TabData('Ownerless (${ownerless.length})', Icons.person_off_outlined,
           _pink, 13),
-      _TabData('High Risk (${highRisk.length})', Icons.warning_amber_rounded,
-          _red, 14),
     ];
 
     return Scaffold(

@@ -7,7 +7,6 @@ import 'package:salesman_mobile/v2/stores/app_store.dart';
 import 'package:salesman_mobile/v2/models/customer.dart';
 import 'package:salesman_mobile/v2/models/task.dart';
 import 'package:salesman_mobile/v2/models/ptp.dart';
-import 'package:salesman_mobile/v2/models/outcome_edit_request.dart';
 import 'package:salesman_mobile/v2/screens/customer_360_screen.dart';
 import 'package:salesman_mobile/v3/screens/request_detail_scaffold.dart';
 import 'package:salesman_mobile/widgets/app_message.dart';
@@ -17,7 +16,7 @@ import 'package:salesman_mobile/services/attachment_picker.dart';
 
 final _rupee = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
 
-enum TaskKind { realTask, visitReview, noCall, overdueTarget, dispute, ptpCorrection, outcomeEdit, ptpMissed, paymentClaim }
+enum TaskKind { realTask, visitReview, noCall, overdueTarget, dispute, ptpCorrection, ptpMissed, paymentClaim }
 
 // overdueTarget used to be salesman-level (a "review this salesman" item
 // with no specific account attached) — now customer-level, pointing at the
@@ -25,6 +24,10 @@ enum TaskKind { realTask, visitReview, noCall, overdueTarget, dispute, ptpCorrec
 // re_tasks_screen.dart §5), same as every other real problem in this
 // queue. noCall stays salesman-level (never generated as a real item
 // today, kept for the view's own sake).
+/// Default RE review deadline for anything a salesman raises (dispute, PTP
+/// correction, outcome edit, payment claim): 9 PM the day it was raised.
+DateTime _reviewDeadlineFor(DateTime raisedOn) => DateTime(raisedOn.year, raisedOn.month, raisedOn.day, 21);
+
 bool _isSalesmanLevel(TaskKind k) => k == TaskKind.noCall;
 
 class UnifiedTaskDetailScreen extends StatelessWidget {
@@ -144,32 +147,45 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
     final target = owned.first;
     final reasonController = TextEditingController();
     DateTime deadline = DateTime.now().add(const Duration(days: 1));
+    XFile? attachmentFile;
     showDialog(
       context: context,
       builder: (dialogCtx) => StatefulBuilder(builder: (context, setState) {
         return AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: const Text('Assign Task', style: TextStyle(fontWeight: FontWeight.bold)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Highest-priority account: ${target.name}', style: const TextStyle(fontSize: 12, color: kMuted)),
-              const SizedBox(height: 12),
-              TextField(controller: reasonController, decoration: const InputDecoration(hintText: 'Task instruction', border: OutlineInputBorder())),
-              const SizedBox(height: 12),
-              InkWell(
-                onTap: () async {
-                  final picked = await showDatePicker(context: context, initialDate: deadline, firstDate: DateTime.now(), lastDate: DateTime.now().add(const Duration(days: 30)));
-                  if (picked != null) setState(() => deadline = picked);
-                },
-                child: Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(border: Border.all(color: Colors.grey), borderRadius: BorderRadius.circular(8)),
-                  child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(DateFormat('dd MMM yyyy').format(deadline)), const Icon(Icons.calendar_today, size: 16)]),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Highest-priority account: ${target.name}', style: const TextStyle(fontSize: 12, color: kMuted)),
+                const SizedBox(height: 12),
+                TextField(controller: reasonController, decoration: const InputDecoration(hintText: 'Task instruction', border: OutlineInputBorder())),
+                const SizedBox(height: 12),
+                InkWell(
+                  onTap: () async {
+                    final picked = await showDatePicker(context: context, initialDate: deadline, firstDate: DateTime.now(), lastDate: DateTime.now().add(const Duration(days: 30)));
+                    if (picked != null) setState(() => deadline = picked);
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(border: Border.all(color: Colors.grey), borderRadius: BorderRadius.circular(8)),
+                    child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(DateFormat('dd MMM yyyy').format(deadline)), const Icon(Icons.calendar_today, size: 16)]),
+                  ),
                 ),
-              ),
-            ],
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(foregroundColor: attachmentFile != null ? kGreen : null),
+                  onPressed: () async {
+                    final file = await pickEvidenceFile(context);
+                    if (file != null) setState(() => attachmentFile = file);
+                  },
+                  icon: Icon(attachmentFile != null ? Icons.check : Icons.attach_file),
+                  label: Text(attachmentFile != null ? 'Attached: ${attachmentFile!.name}' : 'Attach Image / PDF (optional)'),
+                ),
+              ],
+            ),
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('Cancel')),
@@ -179,7 +195,13 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
                 if (reasonController.text.trim().isEmpty) return;
                 final navigator = Navigator.of(context);
                 try {
-                  await store.assignManagementInstruction(target.id, s['name'], reasonController.text.trim(), deadline);
+                  String? attachmentPath;
+                  if (attachmentFile != null) {
+                    final bytes = await attachmentFile!.readAsBytes();
+                    attachmentPath = await store.apiClient
+                        .uploadAttachment(bytes, filename: attachmentFile!.name, contentType: attachmentFile!.mimeType ?? 'image/jpeg');
+                  }
+                  await store.assignManagementInstruction(target.id, s['name'], reasonController.text.trim(), deadline, attachmentPath: attachmentPath);
                   if (dialogCtx.mounted) Navigator.pop(dialogCtx);
                   showAppMessageAfter(navigator, message: 'Task assigned to ${(s['fullName'] as String?) ?? s['name']}.');
                 } catch (e) {
@@ -209,7 +231,7 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
     AppTask? task;
     Map<String, dynamic>? dispute;
     PromiseToPay? ptp;
-    OutcomeEditRequest? outcomeEdit;
+    DateTime? dueDate; // shown in the Due bar; null (e.g. overdueTarget) hides it
     String? extraAttachmentPath; // evidence carried on a non-task record (payment claim, dispute…)
 
     switch (kind) {
@@ -221,6 +243,7 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
         color = priority == 'HIGH' ? kRed : (priority == 'MEDIUM' ? kOrange : kBlue);
         bannerIcon = taskTypeIcon(task.type);
         bannerText = task.isOverdue ? 'This task is overdue — action is required.' : 'Due ${DateFormat('dd MMM, hh:mm a').format(task.deadline)}.';
+        dueDate = task.deadline;
         description = friendlyTaskReason(task.reason);
         if (task.type == TaskType.paymentVerification) {
           final claim = store.paymentClaims.cast<Map<String, dynamic>?>().firstWhere((p) => p != null && p['customer'] == customer.name, orElse: () => null);
@@ -275,6 +298,7 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
         color = kPurple;
         bannerIcon = Icons.location_on_outlined;
         bannerText = 'The salesman closed this physical visit without recording an outcome.';
+        dueDate = task.deadline;
         description = friendlyTaskReason(task.reason);
         actionOptions = [
           _ActionOption(Icons.call_outlined, kBlue, 'Call Salesman', 'Ask them what happened on the visit.', () => contactActions(context, store.salesmanPhone(customer.assignedSalesmanId.isNotEmpty ? customer.assignedSalesmanId : task!.ownerId))),
@@ -295,6 +319,7 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
         // RE approves.
         final needsVerification = status == 'Awaiting Verification';
         bannerText = needsVerification ? 'Resolution complete — verify against BUSY before closing.' : 'This dispute is awaiting your approval decision.';
+        dueDate = _reviewDeadlineFor((dispute['raisedDate'] as DateTime?) ?? DateTime.now());
         description = dispute['reason'];
         actionOptions = needsVerification
             ? [
@@ -333,6 +358,7 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
         color = kTeal;
         bannerIcon = Icons.swap_horiz;
         bannerText = 'Salesperson requested a correction to this PTP commitment.';
+        dueDate = _reviewDeadlineFor(ptp.correctionRequestedDate ?? ptp.promiseDate);
         description = ptp.correctionReason ?? '-';
         actionOptions = [
           _ActionOption(Icons.check_circle_outline, kGreen, 'Approve Correction', 'Update the PTP to the requested amount/date.', () {
@@ -361,47 +387,11 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
           }),
         ];
         break;
-      case TaskKind.outcomeEdit:
-        final req = store.outcomeEditRequests.firstWhere((r) => r.id == refId, orElse: () => store.outcomeEditRequests.first);
-        outcomeEdit = req;
-        customer = store.customers.firstWhere((c) => c.id == req.customerId, orElse: () => store.customers.first);
-        subtitle = 'Outcome Edit Request';
-        priority = 'LOW';
-        color = kPink;
-        bannerIcon = Icons.edit_note;
-        bannerText = 'Salesperson requested an edit to a recorded outcome\'s values.';
-        description = 'Edit ${req.outcomeKind} outcome — ${req.editReason}';
-        actionOptions = [
-          _ActionOption(Icons.check_circle_outline, kGreen, 'Approve Edit', 'Apply the edited values and re-run side effects.', () {
-            _decideWithEvidence(context, refId: refId, title: 'Approve Outcome Edit', accent: kGreen, submitLabel: 'Approve', action: (result) async {
-            final navigator = Navigator.of(context);
-            try {
-              await store.approveOutcomeEdit(req.id);
-              navigator.pop();
-              showAppMessageAfter(navigator, message: 'Outcome edit approved and applied.');
-            } catch (e) {
-              showAppMessageAfter(navigator, message: 'Could not approve: $e', isError: true);
-            }
-            });
-          }),
-          _ActionOption(Icons.cancel_outlined, kRed, 'Reject Edit', 'Keep the recorded values unchanged.', () {
-            _decideWithEvidence(context, refId: refId, title: 'Reject Outcome Edit', accent: kRed, submitLabel: 'Reject', action: (result) async {
-            final navigator = Navigator.of(context);
-            try {
-              await store.rejectOutcomeEdit(req.id, result.note.isEmpty ? 'Not justified' : result.note);
-              navigator.pop();
-              showAppMessageAfter(navigator, message: 'Outcome edit rejected.');
-            } catch (e) {
-              showAppMessageAfter(navigator, message: 'Could not reject: $e', isError: true);
-            }
-            });
-          }),
-        ];
-        break;
       case TaskKind.ptpMissed:
         ptp = store.ptps.firstWhere((p) => p.id == refId, orElse: () => store.ptps.first);
         customer = store.customers.firstWhere((c) => c.id == ptp!.customerId, orElse: () => store.customers.first);
         subtitle = 'PTP Missed';
+        dueDate = ptp.promiseDate;
         priority = 'HIGH';
         color = kRed;
         bannerIcon = Icons.event_busy;
@@ -427,10 +417,15 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
         bannerIcon = Icons.receipt_long_outlined;
         bannerText =
             'The salesperson logged a payment the customer says they made. Check it against BUSY / with the operator, then confirm or reject — nothing moves until you do.';
-        description = claim == null
-            ? '-'
-            : 'Claimed ${_rupee.format((claim['amount'] as num).toDouble())}'
-                ' · Ref: ${claim['reference'] ?? '-'} · ${claim['date'] ?? ''}';
+        dueDate = _reviewDeadlineFor((claim?['claimDateRaw'] as DateTime?) ?? DateTime.now());
+        // Just the claimed amount — the salesman is already shown
+        // separately as "Salesman" below, and a real reference (when the
+        // salesperson gave one) shows as its own line via claim['reference'].
+        description = claim == null ? '-' : 'Claimed ${_rupee.format((claim['amount'] as num).toDouble())}';
+        final claimReference = (claim?['reference'] as String?);
+        if (claimReference != null && claimReference.isNotEmpty) {
+          description += '\nReference: $claimReference';
+        }
         extraAttachmentPath = claim?['attachmentPath'] as String?;
         actionOptions = claim == null
             ? []
@@ -503,7 +498,7 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
     final overdueInvoices = customer.invoices.where((i) => (i['status'] as String).toLowerCase().contains('overdue')).length;
     final notes = store.notesForItem(refId);
     final attachments = store.attachmentsForItem(refId);
-    final requestDetail = _requestDetailSection(store, kind, task: task, ptp: ptp, dispute: dispute, outcomeEdit: outcomeEdit);
+    final requestDetail = _requestDetailSection(store, kind, task: task, ptp: ptp, dispute: dispute);
     final events = customer.auditHistory.reversed
         .map((a) => TimelineEvent(icon: Icons.history, color: kMuted, title: a.type, subtitle: a.description, date: a.timestamp, tag: a.actor, tagColor: kBlue))
         .take(5)
@@ -518,6 +513,7 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
       priorityLabel: '$priority PRIORITY',
       color: color,
       bannerIcon: bannerIcon,
+      dueDate: dueDate,
       actions: actionOptions.map(_actionButton).toList(),
       children: [
         InfoCard(children: [
@@ -1163,24 +1159,8 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
     AppTask? task,
     PromiseToPay? ptp,
     Map<String, dynamic>? dispute,
-    OutcomeEditRequest? outcomeEdit,
   }) {
     switch (kind) {
-      case TaskKind.outcomeEdit:
-        if (outcomeEdit == null) return const [];
-        return [
-          const SizedBox(height: 18),
-          const SectionLabel('REQUEST DETAILS'),
-          InfoCard(children: [
-            KeyValueRow('Outcome type', outcomeEdit.outcomeKind),
-            KeyValueRow('Requested by', store.salesmanDisplayName(outcomeEdit.salesmanId)),
-            KeyValueRow('Requested on', DateFormat('dd MMM yyyy, hh:mm a').format(outcomeEdit.requestedAt)),
-            KeyValueRow('Reason given', outcomeEdit.editReason.isEmpty ? '—' : outcomeEdit.editReason),
-          ]),
-          const SizedBox(height: 12),
-          const SectionLabel('REQUESTED CHANGE  (CURRENT → NEW)'),
-          _diffCard(outcomeEdit.originalPayload, outcomeEdit.requestedPayload),
-        ];
       case TaskKind.ptpCorrection:
         if (ptp == null) return const [];
         final curMode = ptp.paymentMode;

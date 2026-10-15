@@ -171,20 +171,17 @@ async function getAuditHistoryPage(id, user, { cursor, limit } = {}) {
  */
 /**
  * The actual write side of recording an outcome — factored out of
- * recordOutcome so requestOutcome edit's "NoAnswerReplacement" kind can
- * apply the exact same logic once an RE approves it (see
- * outcomeEditService.js). `user` is whoever the outcome is being recorded
- * for (the acting salesperson normally; still the original salesperson,
- * not the approving RE, when called from an approved edit request — every
- * task this creates must stay owned by them).
+ * recordOutcome so the same-day self-service "replace a recorded No
+ * Answer" path (`replacingNoAnswer: true` on the normal record-outcome
+ * call — see app_store.dart's `recordOutcome`) can apply the exact same
+ * logic as a fresh outcome. `user` is whoever the outcome is being
+ * recorded for — always the acting salesperson.
  */
 async function applyOutcome(conn, customer, user, { nextAction, reason, details, ptpAmountValue, ptpDate, ptpMode, attachmentPath, replacingNoAnswer, followUpAt }) {
   const customerId = customer.id;
 
-  // `replacingNoAnswer` is now only used by the RE-approved stale-edit
-  // path (outcomeEditService) — the salesman client records a plain new
-  // outcome instead. Guard it against being hit once the customer has
-  // moved on to a different recorded outcome (a stale client, a replay).
+  // Guard against being hit once the customer has moved on to a different
+  // recorded outcome (a stale client, a replay).
   if (replacingNoAnswer && !(customer.primaryNextAction === 'Call Customer' && customer.reasonForAction === 'No Answer')) {
     throw new ValidationError('No recorded No Answer outcome to replace for this customer');
   }
@@ -319,7 +316,14 @@ async function applyOutcome(conn, customer, user, { nextAction, reason, details,
   } else if (nextAction === 'Verification Pending') {
     const amountMatch = /₹?\s*([\d,.]+)/.exec(details);
     const amount = amountMatch ? Number(amountMatch[1].replace(/,/g, '')) : 0;
-    await paymentClaimRepository.insert({ customerId, amount, claimDate: new Date(), reference: `Claimed by ${user.fullName} — no reference given`, status: 'Awaiting Verification', attachmentPath }, conn);
+    // The salesperson's own reference/UPI/UTR note, when they gave one —
+    // sent from the client as "Amount: ₹X Ref: <note>". No canned filler
+    // when they left it blank — null just means the RE screen shows
+    // nothing beyond the amount and the salesman (already recorded
+    // separately as the claim's raiser), instead of a fabricated line.
+    const refMatch = /Ref:\s*(.+)$/s.exec(details);
+    const reference = refMatch ? refMatch[1].trim() : null;
+    await paymentClaimRepository.insert({ customerId, amount, claimDate: new Date(), reference, status: 'Awaiting Verification', attachmentPath }, conn);
   } else if (nextAction === 'Call Customer' && reason === 'No Answer') {
     // A No Answer keeps ONE recurring call task, re-due every 2 hours —
     // deliberately its own faster cadence, not the same-day-6PM default
@@ -441,6 +445,7 @@ async function maybeEscalateCustomerRefused(customerId, user, { reason, details 
     ownerId: customer.assignedSalesmanId,
     deadline: addDays(new Date(), 3),
     moneyAtRisk: customer.totalDue,
+    cause: 'CustomerRefused',
   });
 }
 
@@ -480,6 +485,7 @@ async function maybeEscalateNonContact(customerId, user, nonContactEscalate) {
     ownerId: customer.assignedSalesmanId,
     deadline: addDays(new Date(), 3),
     moneyAtRisk: customer.totalDue,
+    cause: 'NonContact',
   });
 }
 

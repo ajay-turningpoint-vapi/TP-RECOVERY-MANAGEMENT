@@ -396,15 +396,12 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                       final ptpEditRow = widget.todaysRecoveryView &&
                           !hasOpenPhysicalVisit &&
                           canEditPtp;
-                      final editPending =
-                          (isDone || ptpEditRow) && store.hasPendingOutcomeEdit(c.id);
                       // Edit is offered from here for exactly two recorded
                       // outcomes: a No Answer (re-record what really happened)
                       // and a scheduled PTP (adjust amount/date, via RE).
                       // Every other outcome is final here — ask the RE. A
                       // Physical Visit taking over supersedes both.
                       final showOutcomeAction = (isDone || ptpEditRow) &&
-                          !editPending &&
                           !hasOpenPhysicalVisit &&
                           (c.isPendingNoAnswerEdit || canEditPtp);
                       final ptpPartial = ptpEditRow &&
@@ -528,7 +525,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                                       ],
                                     ],
                                   ),
-                                  if (hasOpenPhysicalVisit && !editPending) ...[
+                                  if (hasOpenPhysicalVisit) ...[
                                     const SizedBox(height: 10),
                                     const Divider(height: 1, color: Color(0xFFEDF2F7)),
                                     const SizedBox(height: 8),
@@ -576,11 +573,11 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                                       ],
                                     ),
                                   ],
-                                  if (!hasOpenPhysicalVisit && (editPending || showOutcomeAction)) ...[
+                                  if (!hasOpenPhysicalVisit && showOutcomeAction) ...[
                                     const SizedBox(height: 10),
                                     const Divider(height: 1, color: Color(0xFFEDF2F7)),
                                     const SizedBox(height: 8),
-                                    if (ptpEditRow && !editPending && !c.isPendingNoAnswerEdit) ...[
+                                    if (ptpEditRow && !c.isPendingNoAnswerEdit) ...[
                                       Row(
                                         children: [
                                           const Icon(Icons.hourglass_bottom, size: 14, color: Color(0xFF0052CC)),
@@ -596,15 +593,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                                       ),
                                       const SizedBox(height: 8),
                                     ],
-                                    if (editPending)
-                                      Container(
-                                        width: double.infinity,
-                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                                        decoration: BoxDecoration(color: const Color(0xFFFFF7ED), borderRadius: BorderRadius.circular(8)),
-                                        child: const Text('Outcome edit pending — awaiting RE review.',
-                                            style: TextStyle(fontSize: 11.5, color: Color(0xFFC2410C), fontWeight: FontWeight.w600)),
-                                      )
-                                    else if (c.isPendingNoAnswerEdit)
+                                    if (c.isPendingNoAnswerEdit)
                                       Align(
                                         alignment: Alignment.centerLeft,
                                         child: OutlinedButton.icon(

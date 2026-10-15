@@ -8,8 +8,6 @@ import 'package:salesman_mobile/v2/models/ptp.dart';
 import 'package:salesman_mobile/v2/models/escalation_case.dart';
 import 'package:salesman_mobile/v2/models/notification_item.dart';
 import 'package:salesman_mobile/v2/models/control_snapshot.dart';
-import 'package:salesman_mobile/v2/models/outcome_correction_request.dart';
-import 'package:salesman_mobile/v2/models/outcome_edit_request.dart';
 import 'package:salesman_mobile/services/api_client.dart';
 import 'package:salesman_mobile/services/notification_service.dart';
 import 'package:salesman_mobile/services/realtime_client.dart';
@@ -118,6 +116,32 @@ class AppStore extends ChangeNotifier {
   // blocked, so this only ever matters for other roles.
   bool maintenanceMode = false;
   DateTime? maintenanceSince;
+
+  // Single-device login (server: authService.js bumps session_version on
+  // every fresh login/password change) — non-null the instant an SSE
+  // 'session-revoked' push for THIS account arrives with a sessionVersion
+  // that isn't this device's own (see ApiClient.sessionVersion). A screen
+  // watching this shows the message as a dialog, then the user lands back
+  // on Sign In — not silent until this device's next API call happens to
+  // 401, but the moment the other device logs in.
+  String? forcedLogoutMessage;
+
+  Future<void> _handleSessionRevoked(String message) async {
+    forcedLogoutMessage = message;
+    isLoggedIn = false;
+    _branchFilter = kAllBranches;
+    _stopRealtime();
+    _stopPendingActionWatch();
+    isSyncing = false;
+    notifyListeners();
+    await apiClient.logout();
+  }
+
+  /// Called by the screen that showed [forcedLogoutMessage] once the user
+  /// has dismissed it, so it doesn't reappear on the next Sign In attempt.
+  void clearForcedLogoutMessage() {
+    forcedLogoutMessage = null;
+  }
 
   void _handleMaintenanceMode() {
     if (maintenanceMode) return;
@@ -327,24 +351,46 @@ class AppStore extends ChangeNotifier {
       ? customers.where((c) => c.address != null || c.assignedSalesmanId == currentSalesmanId).toList()
       : visibleCustomers;
 
+  /// When this salesperson's financial data was last actually refreshed
+  /// from BUSY — the real max of every owned customer's own
+  /// `financialFreshness` (customerRepository.js's `busy_last_synced_at`),
+  /// not a fixed/hardcoded label. Null only when they own no customers yet.
+  DateTime? get myFinancialFreshness {
+    DateTime? latest;
+    for (final c in myCustomers) {
+      if (latest == null || c.financialFreshness.isAfter(latest)) latest = c.financialFreshness;
+    }
+    return latest;
+  }
+
   /// Same portfolio-isolation rule applied to tasks: a Salesperson's "My
   /// Tasks" must show only tasks owned by them, not every task company-wide.
   /// RE/Management see every task, narrowed to the selected branch.
   List<AppTask> get myTasks =>
       userRole == 'SALESPERSON' ? tasks.where((t) => t.ownerId == currentSalesmanId).toList() : visibleTasks;
 
-  /// Routine "call this customer" tasks the server keeps per customer
-  /// (the single Recovery task and post-outcome follow-ups). Salesmen work
-  /// these through Start Recovery, so they're kept out of the Tasks tab.
-  static const _routineCallSources = {
-    'Recovery',
+  /// Legacy source strings from retired task-writers — never created live
+  /// any more (recoveryTaskService adopts and renames any straggler to
+  /// 'Recovery' the next time it drives that customer), so these have no
+  /// server-side isRoutine signal of their own and stay always-routine.
+  static const _legacyRoutineCallSources = {
     'Recovery Reconcile',
     'Record Outcome',
     'Daily Snapshot',
     'Task Completion Guard',
   };
-  static bool isRoutineRecoveryCall(AppTask t) =>
-      t.type == TaskType.customerCall && _routineCallSources.contains(t.source);
+  /// Routine "call this customer" tasks the server keeps per customer —
+  /// kept out of the Tasks tab because Start Recovery already covers them.
+  /// A 'Recovery'-source task defers to the server's own isRoutine flag:
+  /// true for a nightly/reconcile-sweep retarget (still routine), false
+  /// when a specific event (a payment claim rejected, a PTP broken, a
+  /// dispute decided, …) just drove it — that one the salesperson needs to
+  /// see as a real to-do, not silently folded into the Start Recovery queue.
+  static bool isRoutineRecoveryCall(AppTask t) {
+    if (t.type != TaskType.customerCall) return false;
+    if (t.source == 'Recovery') return t.isRoutine;
+    return _legacyRoutineCallSources.contains(t.source);
+  }
 
   /// The salesperson's real to-dos: [myTasks] without the routine calls that
   /// Start Recovery already covers. Other roles see [myTasks] unchanged.
@@ -355,6 +401,22 @@ class AppStore extends ChangeNotifier {
   /// the count bubble on the bottom-nav Tasks icon.
   int get myOpenTaskCount =>
       myTodoTasks.where((t) => t.status != TaskStatus.completed).length;
+
+  /// The salesperson's own open real to-do task for one customer, if any —
+  /// a physical visit, a dispute-clarification reply, a payment-verification
+  /// follow-up, etc. (never the hidden routine Recovery call). When this is
+  /// non-null, Customer 360 routes Record Outcome through that task's
+  /// Details screen instead of opening the outcome sheet directly, however
+  /// the salesman got here — that task is the one sanctioned place to
+  /// record it.
+  AppTask? openTodoTaskFor(String customerId) {
+    for (final t in myTodoTasks) {
+      if (t.customerId == customerId && t.status != TaskStatus.completed && t.status != TaskStatus.closed) {
+        return t;
+      }
+    }
+    return null;
+  }
 
   // ─────────────────────────────────────────────────────────────────────
   // Branch filter — a single global scope an RE / Manager sets once (from
@@ -542,13 +604,29 @@ class AppStore extends ChangeNotifier {
     if (c.serverDaysSinceLastFollowUp != null) return c.serverDaysSinceLastFollowUp!;
     DateTime? last;
     for (final a in c.auditHistory) {
+      // System-authored rows (an auto-created recovery task, the reconcile
+      // sweep, …) aren't the salesperson doing anything — counting them
+      // made every account look "touched today" the moment an automatic
+      // job ran, regardless of whether a human ever acted.
+      if (a.actor == 'System') continue;
       if (last == null || a.timestamp.isAfter(last)) last = a.timestamp;
     }
     for (final t in tasks.where((t) => t.customerId == c.id)) {
-      final ts = t.completedAt ?? t.deadline;
+      // Only a task's actual completion is real evidence of contact — its
+      // deadline is just a future due date, not proof anyone acted.
+      if (t.completedAt == null) continue;
+      final ts = t.completedAt!;
       if (last == null || ts.isAfter(last)) last = ts;
     }
-    if (last == null) return c.oldestOverdueDays;
+    if (last == null) {
+      // No real activity ever. A customer who owes nothing needs no
+      // follow-up (0, fine); a customer WITH real overdue exposure and
+      // zero genuine contact is the textbook "no follow-up" case —
+      // oldestOverdueDays was a misleading proxy that made a salesperson
+      // who's done nothing at all look "recently touched" on every
+      // account that merely went overdue a few days ago.
+      return c.totalDue > 0 ? 999999 : 0;
+    }
     final days = DateTime.now().difference(last).inDays;
     return days < 0 ? 0 : days;
   }
@@ -680,7 +758,6 @@ class AppStore extends ChangeNotifier {
   int get pendingTaskExtensionCount => (_dashboardReport['pendingTaskExtensionCount'] as int?) ?? 0;
   int get needsAttentionBadgeCount =>
       _branchActive ? totalOpenTaskItemsCount : (_dashboardReport['needsAttentionBadgeCount'] as int?) ?? 0;
-  int get pendingOutcomeCorrectionCount => pendingOutcomeCorrections.length;
 
   /// The logged-in salesperson's own explainable Recovery Score breakdown
   /// (RMS-05), computed server-side (see scoringService.computeRecoveryScoreComponents).
@@ -709,7 +786,6 @@ class AppStore extends ChangeNotifier {
         salesmenOverdueTargetsCount +
         disputesAwaitingReviewCount +
         ptpCorrectionRequests.length +
-        pendingOutcomeEditCount +
         pendingPaymentClaimCount +
         unescalatedBrokenPtps;
   }
@@ -877,66 +953,6 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Outcome Correction Requests (spec §20 analogue for recorded outcomes —
-  // a salesperson cannot silently rewrite an already-recorded outcome; it
-  // goes through real RE approval via the API, same pattern as PTP
-  // corrections. Server-authoritative — see outcomeCorrectionService.js.
-  List<OutcomeCorrectionRequest> outcomeCorrectionRequests = [];
-
-  List<OutcomeCorrectionRequest> get pendingOutcomeCorrections => outcomeCorrectionRequests
-      .where((r) => r.status == 'Pending' && _inBranch(customerBranchOf(r.customerId)))
-      .toList();
-
-  Future<void> _refreshOutcomeCorrectionsFromApi() async {
-    final raw = await apiClient.getOutcomeCorrections();
-    _applyOutcomeCorrections(raw);
-    unawaited(_cacheList('outcomeCorrections', raw));
-  }
-
-  void _applyOutcomeCorrections(List<dynamic> raw) {
-    final customerNames = {for (final c in customers) c.id: c.name};
-    outcomeCorrectionRequests = raw.map((json) {
-      final r = json as Map<String, dynamic>;
-      return OutcomeCorrectionRequest.fromJson(r, customerName: customerNames[r['customerId']] ?? r['customerId'] as String);
-    }).toList();
-  }
-
-  Future<void> requestOutcomeCorrection(String customerId, String requestedOutcome, String requestedReason, String note) async {
-    await apiClient.requestOutcomeCorrection(customerId, {
-      'requestedOutcome': requestedOutcome,
-      'requestedReason': requestedReason,
-      'requestNote': note,
-    });
-    await _refreshOutcomeCorrectionsFromApi();
-    await _refreshOneCustomerFromApi(customerId);
-    notifyListeners();
-  }
-
-  Future<void> approveOutcomeCorrection(String id) async {
-    final req = outcomeCorrectionRequests.firstWhere((r) => r.id == id);
-    await apiClient.approveOutcomeCorrection(id);
-    await _refreshOutcomeCorrectionsFromApi();
-    await _refreshOneCustomerFromApi(req.customerId);
-    notifyListeners();
-  }
-
-  Future<void> rejectOutcomeCorrection(String id, String reason) async {
-    await apiClient.rejectOutcomeCorrection(id, reason);
-    await _refreshOutcomeCorrectionsFromApi();
-    notifyListeners();
-  }
-
-  // Outcome Edit Requests — edit a recorded outcome's own fields (PTP
-  // amount/date/mode, dispute amount/reason, …) with RE approval before it
-  // applies. Server-authoritative — see outcomeEditService.js.
-  List<OutcomeEditRequest> outcomeEditRequests = [];
-
-  List<OutcomeEditRequest> get pendingOutcomeEdits => outcomeEditRequests
-      .where((r) => r.status == 'Pending' && _inBranch(customerBranchOf(r.customerId)))
-      .toList();
-
-  int get pendingOutcomeEditCount => pendingOutcomeEdits.length;
-
   /// Payment claims ("Payment Already Made") a salesman raised that still
   /// need the RE to verify (or fail) against BUSY. Branch-scoped.
   List<Map<String, dynamic>> get pendingPaymentClaims => visiblePaymentClaims
@@ -945,14 +961,11 @@ class AppStore extends ChangeNotifier {
   int get pendingPaymentClaimCount => pendingPaymentClaims.length;
 
   /// Every pending "salesperson asked for a decision" item across the app —
-  /// disputes awaiting review, PTP correction requests, outcome edit
-  /// requests, outcome correction requests, and payment-claim
+  /// disputes awaiting review, PTP correction requests, and payment-claim
   /// verifications — see ApprovalsListScreen, which this count matches.
   int get pendingApprovalsCount =>
       visibleDisputes.where((d) => disputeNeedsReActionStatuses.contains(d['status'])).length +
       ptpCorrectionRequests.length +
-      pendingOutcomeEdits.length +
-      pendingOutcomeCorrections.length +
       pendingPaymentClaims.length;
 
   /// Subset of [pendingApprovalsCount] already flagged high-priority or
@@ -968,54 +981,7 @@ class AppStore extends ChangeNotifier {
 
     return visibleDisputes.where((d) => disputeNeedsReActionStatuses.contains(d['status']) && d['priority'] == 'High').length +
         ptpCorrectionRequests.where((p) => escalated(p.customerId)).length +
-        pendingOutcomeEdits.where((r) => escalated(r.customerId)).length +
-        pendingOutcomeCorrections.where((r) => escalated(r.customerId)).length +
         pendingPaymentClaims.where((p) => escalated('${p['customerCode']}')).length;
-  }
-
-  bool hasPendingOutcomeEdit(String customerId) =>
-      outcomeEditRequests.any((r) => r.customerId == customerId && r.status == 'Pending');
-
-  Future<void> _refreshOutcomeEditsFromApi() async {
-    final raw = await apiClient.getOutcomeEdits();
-    _applyOutcomeEdits(raw);
-    unawaited(_cacheList('outcomeEdits', raw));
-  }
-
-  void _applyOutcomeEdits(List<dynamic> raw) {
-    final customerNames = {for (final c in customers) c.id: c.name};
-    outcomeEditRequests = raw.map((json) {
-      final r = json as Map<String, dynamic>;
-      return OutcomeEditRequest.fromJson(r, customerName: customerNames[r['customerId']] ?? r['customerId'] as String);
-    }).toList();
-  }
-
-  Future<void> requestOutcomeEdit(String customerId, Map<String, dynamic> body) async {
-    await apiClient.requestOutcomeEdit(customerId, body);
-    await _refreshOutcomeEditsFromApi();
-    await _refreshOneCustomerFromApi(customerId);
-    notifyListeners();
-  }
-
-  Future<void> approveOutcomeEdit(String id) async {
-    final req = outcomeEditRequests.firstWhere((r) => r.id == id);
-    await apiClient.approveOutcomeEdit(id);
-    await _refreshOutcomeEditsFromApi();
-    await _refreshOneCustomerFromApi(req.customerId);
-    await _refreshPtpsFromApi();
-    await _refreshDisputesFromApi();
-    await _refreshPaymentClaimsFromApi();
-    await _refreshTasksFromApi();
-    // An approved NoAnswerReplacement changes recoveryDoneTodayCount's
-    // underlying audit trail — keep the dashboard card in sync.
-    await _refreshReportsFromApi();
-    notifyListeners();
-  }
-
-  Future<void> rejectOutcomeEdit(String id, String reason) async {
-    await apiClient.rejectOutcomeEdit(id, reason);
-    await _refreshOutcomeEditsFromApi();
-    notifyListeners();
   }
 
   // Dynamic urgent counts
@@ -1156,10 +1122,6 @@ class AppStore extends ChangeNotifier {
       if (rawNotifications != null) _applyNotifications(rawNotifications as Map<String, dynamic>, notifyOs: false);
       final rawSalesmen = await _localDb.getList('salesmen', currentSalesmanId);
       if (rawSalesmen != null) salesmen = (rawSalesmen as List<dynamic>).cast<Map<String, dynamic>>();
-      final rawCorrections = await _localDb.getList('outcomeCorrections', currentSalesmanId);
-      if (rawCorrections != null) _applyOutcomeCorrections(rawCorrections as List<dynamic>);
-      final rawEdits = await _localDb.getList('outcomeEdits', currentSalesmanId);
-      if (rawEdits != null) _applyOutcomeEdits(rawEdits as List<dynamic>);
       final rawReport = await _localDb.getList('dashboardReport', currentSalesmanId);
       if (rawReport != null) _dashboardReport = rawReport as Map<String, dynamic>;
       final rawTrends = await _localDb.getList('trends', currentSalesmanId);
@@ -1256,6 +1218,16 @@ class AppStore extends ChangeNotifier {
       case 'notification':
         _refreshNotificationsFromApi().then((_) => notifyListeners()).catchError((_) {});
         break;
+      case 'session-revoked':
+        final newVersion = e.data['sessionVersion'] as int?;
+        // Self-check against this device's OWN current token — without
+        // it, the device that just logged in would receive the echo of
+        // its own login (its SSE stream can connect before this push
+        // finishes fanning out) and immediately log itself back out.
+        if (newVersion != null && newVersion != apiClient.sessionVersion) {
+          unawaited(_handleSessionRevoked('This account was signed in on another device, so you were signed out here.'));
+        }
+        break;
       case 'maintenance':
         final enabled = e.data['enabled'] as bool? ?? false;
         final since = e.data['since'] as String?;
@@ -1298,8 +1270,6 @@ class AppStore extends ChangeNotifier {
       await maybe('disputes', _refreshDisputesFromApi);
       await maybe('paymentClaims', _refreshPaymentClaimsFromApi);
       await maybe('escalations', _refreshEscalationsFromApi);
-      await maybe('outcomeEdits', _refreshOutcomeEditsFromApi);
-      await maybe('outcomeCorrections', _refreshOutcomeCorrectionsFromApi);
       await maybe('salesmen', _refreshSalesmenFromApi);
       // Any of these moving can change the server-computed dashboard aggregates.
       if (pending.any((r) => const {'customers', 'tasks', 'ptps', 'disputes'}.contains(r))) {
@@ -1398,8 +1368,6 @@ class AppStore extends ChangeNotifier {
       await _guardedRefresh('disputes', _refreshDisputesFromApi);
       await _guardedRefresh('paymentClaims', _refreshPaymentClaimsFromApi);
       await _guardedRefresh('escalations', _refreshEscalationsFromApi);
-      await _guardedRefresh('outcomeCorrections', _refreshOutcomeCorrectionsFromApi);
-      await _guardedRefresh('outcomeEdits', _refreshOutcomeEditsFromApi);
       await _guardedRefresh('salesmen', _refreshSalesmenFromApi);
       await _guardedRefresh('reports', _refreshReportsFromApi);
       await _guardedRefresh('syncStatus', _refreshSyncStatusFromApi);
@@ -1566,8 +1534,6 @@ class AppStore extends ChangeNotifier {
       await _guardedRefresh('escalations', _refreshEscalationsFromApi);
       await _guardedRefresh('notifications', _refreshNotificationsFromApi);
       await _guardedRefresh('salesmen', _refreshSalesmenFromApi);
-      await _guardedRefresh('outcomeCorrections', _refreshOutcomeCorrectionsFromApi);
-      await _guardedRefresh('outcomeEdits', _refreshOutcomeEditsFromApi);
       await _guardedRefresh('reports', _refreshReportsFromApi);
       _hasLoadedInitialData = true;
       _initialLoadError = null;
@@ -2194,36 +2160,6 @@ class AppStore extends ChangeNotifier {
     await _refreshPaymentClaimsFromApi();
     await _refreshReportsFromApi();
     notifyListeners();
-  }
-
-  /// The same-day self-service replace (recordOutcome's `replacingNoAnswer`)
-  /// only exists for the day the No Answer was recorded — see
-  /// Customer360Screen's `_openEditRecordedOutcome`. Once that window has
-  /// passed, replacing it goes through the same RE-approval path every
-  /// other outcome edit already uses (see requestOutcomeEdit /
-  /// outcomeEditService.js's 'NoAnswerReplacement' kind): nothing changes
-  /// on the customer until an RE approves.
-  Future<void> requestNoAnswerReplacement(String customerId, String nextAction, String reason, String details,
-      {DateTime? followUpAt, double? ptpAmountValue, DateTime? ptpDate, String? ptpMode, XFile? screenshot}) async {
-    String? attachmentPath;
-    if (screenshot != null) {
-      final bytes = await screenshot.readAsBytes();
-      attachmentPath = await apiClient.uploadAttachment(bytes, filename: screenshot.name, contentType: screenshot.mimeType ?? 'image/jpeg');
-    }
-    await requestOutcomeEdit(customerId, {
-      'outcomeKind': 'NoAnswerReplacement',
-      'requestedPayload': {
-        'nextAction': nextAction,
-        'reason': reason,
-        'details': details,
-        if (followUpAt != null) 'followUpAt': followUpAt.toUtc().toIso8601String(),
-        if (ptpAmountValue != null) 'ptpAmountValue': ptpAmountValue,
-        if (ptpDate != null) 'ptpDate': ptpDate.toUtc().toIso8601String(),
-        if (ptpMode != null) 'ptpMode': ptpMode,
-        if (attachmentPath != null) 'attachmentPath': attachmentPath,
-      },
-      'editReason': 'Correcting a No Answer recorded on a previous day.',
-    });
   }
 
   /// Server-authoritative: completion, the "money still due, nothing else

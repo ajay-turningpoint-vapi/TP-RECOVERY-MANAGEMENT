@@ -39,6 +39,12 @@ function matches(entry, event) {
       if (scope.userId) return entry.userId === scope.userId;
       if (scope.userIds) return scope.userIds.includes(entry.userId);
       return false;
+    case 'session-revoked':
+      // Single-device login (authService.js) — every open SSE connection
+      // for this exact user hears it, including the device that just
+      // logged in; that one self-filters by comparing sessionVersion
+      // against its own token (see AppStore._onRealtimeEvent).
+      return !!scope.userId && entry.userId === scope.userId;
     case 'invalidate':
       // RE / Manager see the whole company (branch-filtered client-side),
       // so every data change is relevant to them. Salespeople only get a

@@ -51,7 +51,14 @@ async function listRoster() {
     const maturedPtps = ownedPtps.filter((p) => MATURED_STATUSES.includes(p.status));
     const keptCount = maturedPtps.filter((p) => p.status === 'kept').length;
     const brokenPtps = ownedPtps.filter((p) => p.status === 'broken').length;
-    const overdueTasks = ownedTasks.filter(scoringService.isTaskOverdue).length;
+    // Same exclusion as scoringService.js's followUpDiscipline: the
+    // routine auto-generated Recovery call exists identically for every
+    // overdue customer regardless of the salesperson's own effort, and
+    // its deadline (today 6 PM) hasn't passed yet the moment it's
+    // created — counting it made every salesperson with nothing but that
+    // one standing task read 100% task completion before doing anything.
+    const realOwnedTasks = ownedTasks.filter((t) => !(t.source === 'Recovery' && t.isRoutine));
+    const overdueTasks = realOwnedTasks.filter(scoringService.isTaskOverdue).length;
 
     const totalOverdue = owned.reduce((s, c) => s + c.totalDue, 0);
     // Tier 1 of the real recovery-target tiers (25/35/50/70% of overdue —
@@ -62,7 +69,7 @@ async function listRoster() {
       .reduce((s, p) => s + (p.amountReceived || 0), 0);
     const collectionAchievedPercent = collectionTarget <= 0 ? 100 : Math.round((collectionAchieved / collectionTarget) * 100);
 
-    const taskCompletionRate = ownedTasks.length === 0 ? 100 : Math.round(((ownedTasks.length - overdueTasks) / ownedTasks.length) * 100);
+    const taskCompletionRate = realOwnedTasks.length === 0 ? 0 : Math.round(((realOwnedTasks.length - overdueTasks) / realOwnedTasks.length) * 100);
     const validNextActionCount = owned.filter((c) =>
       scoringService.hasValidNextAction(c, ptpsByCustomer.get(c.id) || [], tasksByCustomer.get(c.id) || [])
     ).length;

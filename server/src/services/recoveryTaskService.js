@@ -68,11 +68,40 @@ function rupees(n) {
  * matches for any future caller that omits it.
  */
 async function driveRecoveryTask(customerId, opts = {}, conn) {
-  const { headline = 'Follow up.', priority = 'Normal', deadlineHour = 18, deadlineOverride, collectAmount, refreshOnly = false } = opts;
+  const { headline = 'Follow up.', priority = 'Normal', deadlineHour = 18, deadlineOverride, collectAmount, refreshOnly = false, attachmentPath } = opts;
 
   const body = async (c) => {
     const customer = await customerRepository.findById(customerId);
     if (!customer) return;
+
+    // Customer has vanished from BUSY's feed (balance cleared / account
+    // closed — see customerRepository.upsertFromBusy's deactivation
+    // sweep). There's nothing left to chase and no fresh BUSY data will
+    // ever update this customer's totalDue again, so close out any open
+    // recovery task and stop — never create or retarget one for a
+    // customer no one can act on anymore.
+    if (customer.busyStillActive === false) {
+      const existing = await taskRepository.findByCustomer(customerId, c);
+      const openRecoveryTask = existing.find(
+        (t) => t.type === 'customerCall' && t.source === RECOVERY_SOURCE && OPEN_TASK(t.status)
+      );
+      if (openRecoveryTask) {
+        // 'completed', not 'closed' — see taskRepository.closeOrphanedTasks'
+        // doc comment: the mobile app only recognizes TaskStatus.completed
+        // as "done" in almost every screen.
+        await taskRepository.update(
+          openRecoveryTask.id,
+          { status: 'completed', completedAt: new Date(), outcome: 'Auto-closed — customer no longer appears in BUSY.' },
+          c
+        );
+        await auditRepository.record(
+          customerId,
+          { type: 'RECOVERY_TASK_CLOSED_INACTIVE', description: 'Recovery task closed — customer no longer appears in BUSY.', actor: 'System', source: RECOVERY_SOURCE },
+          c
+        );
+      }
+      return;
+    }
 
     let due;
     if (collectAmount != null) {
@@ -167,12 +196,29 @@ async function driveRecoveryTask(customerId, opts = {}, conn) {
           );
         }
       }
+      // Only "park" a customer who actually HAD an open recovery task being
+      // retired here — never one who simply never had anything actionable
+      // in the first place (a brand-new sync, a customer with ₹0 due from
+      // day one). Without this guard, a customer nobody has ever touched
+      // got silently marked 'Waiting / Monitoring' on every single
+      // reconcile/sync pass — with no audit entry — and the mobile app
+      // treats that state as "an outcome was recorded" (see
+      // customer_360_screen.dart's `outcomeRecorded`), showing a false
+      // "Recorded Outcome" card for a customer no salesperson ever acted
+      // on. `openRecovery` existing means a task truly was open and is now
+      // being resolved — a real state transition worth recording.
       if (
+        openRecovery &&
         customer.escalationLevel === 'none' &&
         customer.currentRecoveryState !== 'Waiting / Monitoring' &&
         !tasks.some((t) => ['customerCall', 'physicalVisit'].includes(t.type) && OPEN_TASK(t.status) && t.id !== (openRecovery && openRecovery.id))
       ) {
         await customerRepository.update(customerId, { currentRecoveryState: 'Waiting / Monitoring' }, c);
+        await auditRepository.record(
+          customerId,
+          { type: 'RECOVERY_PARKED_NOTHING_DUE', description: 'Nothing actionable remains — account parked, recovery task retired.', actor: 'System', source: RECOVERY_SOURCE },
+          c
+        );
       }
       return;
     }
@@ -220,7 +266,18 @@ async function driveRecoveryTask(customerId, opts = {}, conn) {
     const reason = `${headline} Collect ${rupees(due)}, record a new outcome.`;
 
     if (openRecovery) {
-      await taskRepository.update(openRecovery.id, { reason, priority, deadline }, c);
+      // Only reached when !refreshOnly (the refreshOnly+openRecovery bump
+      // above already returned) — a genuine event driving this retarget
+      // (PTP broken, dispute decided, payment claim decided, …), so the
+      // salesperson needs to see it: surface it in their Tasks tab.
+      // attachmentPath only included when this specific event carries real
+      // evidence — an RE decision with nothing attached shouldn't blank
+      // out whatever evidence a previous event already left on this task.
+      await taskRepository.update(
+        openRecovery.id,
+        { reason, priority, deadline, isRoutine: false, ...(attachmentPath ? { attachmentPath } : {}) },
+        c
+      );
     } else if (customer.assignedSalesmanId) {
       await taskRepository.insert(
         {
@@ -231,6 +288,14 @@ async function driveRecoveryTask(customerId, opts = {}, conn) {
           priority,
           reason,
           source: RECOVERY_SOURCE,
+          // true only for the routine nightly/reconcile sweep creating a
+          // fresh task from scratch with no specific event behind it —
+          // false (visible) for every real event creating one.
+          isRoutine: refreshOnly,
+          // The RE's own evidence (e.g. an Internal Action approve/reject
+          // attachment) — carried onto the salesperson's actual task, not
+          // just the audit trail, so it shows up in their Task Details.
+          attachmentPath: attachmentPath || null,
         },
         c
       );

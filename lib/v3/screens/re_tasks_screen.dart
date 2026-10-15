@@ -88,6 +88,26 @@ Color _priorityColor(String p) {
 DateTime _reviewDeadline(DateTime raisedOn) =>
     DateTime(raisedOn.year, raisedOn.month, raisedOn.day, 21);
 
+/// Highlights just the salesman's name within a subtitle line (e.g.
+/// "Salesman: BHARAT -TP (0% achieved)" or "by BHARAT -TP") — the rest of
+/// the row's plain styling is kept; only the name itself is colored/bold,
+/// so it's easy to spot who a row is about while scanning the list.
+List<InlineSpan> _salesmanHighlightSpans(String text, TextStyle base) {
+  for (final prefix in const ['Salesman: ', 'by ']) {
+    if (!text.startsWith(prefix)) continue;
+    final rest = text.substring(prefix.length);
+    final parenIdx = rest.indexOf(' (');
+    final name = parenIdx == -1 ? rest : rest.substring(0, parenIdx);
+    final suffix = parenIdx == -1 ? '' : rest.substring(parenIdx);
+    return [
+      TextSpan(text: prefix),
+      TextSpan(text: name, style: base.copyWith(color: _blue, fontWeight: FontWeight.bold)),
+      if (suffix.isNotEmpty) TextSpan(text: suffix),
+    ];
+  }
+  return [TextSpan(text: text)];
+}
+
 enum _Filter { all, dueToday, overdue, upcoming, completed }
 
 class ReTasksScreen extends StatefulWidget {
@@ -263,7 +283,13 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
         title: 'Underperforming Salesman — Top Account',
         subtitle1: 'Salesman: ${(s['fullName'] as String?) ?? s['name']} (${s['collectionAchievedPercent']}% achieved)',
         subtitle2: worst.name,
-        date: DateTime.now(),
+        // 9 PM today — same RE review deadline convention as every other
+        // salesman-raised item (see _reviewDeadline below). DateTime.now()
+        // here made every one of these instantly "Overdue" the moment it
+        // rendered (due.isBefore(now) is always true a tick later), so the
+        // Overdue stat/tab was permanently flooded with items that have no
+        // real due time to show.
+        date: DateTime(now.year, now.month, now.day, 21),
         // A daily system-generated nudge, not something anyone "just did" —
         // pinned to the start of today rather than the live clock so it
         // doesn't jump back to the very top of the list on every rebuild.
@@ -356,25 +382,6 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
         amountLabel: 'Claimed Amount',
         amountValue: (p['amount'] as num).toDouble(),
         amountColor: kGreen,
-      ));
-    }
-
-    // 8) Outcome edit requests
-    for (final r in store.pendingOutcomeEdits) {
-      items.add(_TaskItem(
-        id: 'oer_${r.id}',
-        kind: TaskKind.outcomeEdit,
-        refId: r.id,
-        icon: Icons.edit_note,
-        color: kPink,
-        priority: 'LOW',
-        title: 'Outcome Edit Request',
-        subtitle1: 'Customer: ${r.customerName}',
-        subtitle2: 'by ${store.salesmanDisplayName(r.salesmanId)}',
-        date: _reviewDeadline(r.requestedAt),
-        createdAt: r.requestedAt,
-        isDone: false,
-        amountLabel: null,
       ));
     }
 
@@ -848,9 +855,9 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
                       decoration: BoxDecoration(
                           color: _priorityColor(item.priority).withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(4)),
-                      child: Text(item.priority,
+                      child: Text('${item.priority} PRIORITY',
                           style: TextStyle(
-                              fontSize: 8,
+                              fontSize: 9.5,
                               fontWeight: FontWeight.bold,
                               color: _priorityColor(item.priority))),
                     ),
@@ -860,16 +867,22 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
                             fontWeight: FontWeight.bold,
                             fontSize: 13.5,
                             color: _navy)),
-                    Text(item.subtitle1,
-                        style: const TextStyle(fontSize: 10.5, color: kMuted)),
-                    Text(item.subtitle2,
-                        style: const TextStyle(fontSize: 10.5, color: kMuted)),
+                    Text.rich(TextSpan(
+                        style: const TextStyle(fontSize: 10.5, color: kMuted),
+                        children: _salesmanHighlightSpans(item.subtitle1, const TextStyle(fontSize: 10.5, color: kMuted)))),
+                    Text.rich(TextSpan(
+                        style: const TextStyle(fontSize: 10.5, color: kMuted),
+                        children: _salesmanHighlightSpans(item.subtitle2, const TextStyle(fontSize: 10.5, color: kMuted)))),
                     const SizedBox(height: 4),
-                    Text(dueText,
-                        style: TextStyle(
-                            fontSize: 10.5,
-                            fontWeight: FontWeight.bold,
-                            color: dueColor)),
+                    if (item.kind != TaskKind.overdueTarget) ...[
+                      Text(dueText,
+                          style: TextStyle(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.bold,
+                              color: dueColor)),
+                      Text('Due ${DateFormat('dd MMM yyyy, hh:mm a').format(due)}',
+                          style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: dueColor)),
+                    ],
                   ],
                 ),
               ),
@@ -917,9 +930,6 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
                           style: TextStyle(
                               fontSize: 10.5, fontWeight: FontWeight.bold)),
                     ),
-                  const SizedBox(height: 4),
-                  Text(DateFormat('dd MMM yyyy').format(due),
-                      style: const TextStyle(fontSize: 9.5, color: kMuted)),
                 ],
               ),
             ],

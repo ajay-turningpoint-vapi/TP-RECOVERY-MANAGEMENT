@@ -5,6 +5,7 @@ const { signToken } = require('../utils/jwt');
 const env = require('../config/env');
 const { UnauthorizedError, ServiceUnavailableError } = require('../errors/AppError');
 const maintenanceService = require('./maintenanceService');
+const { publish } = require('../realtime/eventBus');
 
 function toPublicUser(user) {
   return {
@@ -65,6 +66,12 @@ async function login(username, password) {
   // staying usable until its access token happens to expire.
   await refreshTokenRepository.revokeAllForUser(user.id);
   const sessionVersion = await userRepository.bumpSessionVersion(user.id);
+  // Pushes an immediate SSE notice to any OTHER device already signed in
+  // as this user — previously that device only found out on its own next
+  // API call (the authenticate middleware rejection above). The client
+  // compares `sessionVersion` against its own token and ignores this if
+  // it's actually itself (e.g. its own just-completed login's echo).
+  publish({ type: 'session-revoked', scope: { userId: user.id }, sessionVersion });
 
   const publicUser = toPublicUser(user);
   const { accessToken, refreshToken } = await issueTokenPair(publicUser, sessionVersion);
@@ -126,6 +133,7 @@ async function changePassword(userId, newPassword) {
   await userRepository.updatePasswordHash(userId, await hashPassword(newPassword));
   await refreshTokenRepository.revokeAllForUser(userId);
   const sessionVersion = await userRepository.bumpSessionVersion(userId);
+  publish({ type: 'session-revoked', scope: { userId }, sessionVersion });
 
   const publicUser = toPublicUser(user);
   const { accessToken, refreshToken } = await issueTokenPair(publicUser, sessionVersion);

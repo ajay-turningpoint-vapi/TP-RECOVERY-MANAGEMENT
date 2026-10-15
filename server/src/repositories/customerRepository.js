@@ -1,4 +1,6 @@
 const { query, withTransaction } = require('../config/db');
+const taskRepository = require('./taskRepository');
+const auditRepository = require('./auditRepository');
 
 function mapCustomer(row) {
   if (!row) return null;
@@ -19,6 +21,11 @@ function mapCustomer(row) {
     reasonForAction: row.reason_for_action,
     escalationLevel: row.escalation_level,
     hasValidNextAction: !!row.has_valid_next_action,
+    // Soft-deactivation flag (see ACTIVE_FILTER below) — exposed so
+    // internal consumers that bypass that filter (findById, used by
+    // recoveryTaskService.driveRecoveryTask) can tell a customer vanished
+    // from BUSY apart from one that's merely paid off while still synced.
+    busyStillActive: row.busy_still_active == null ? true : !!row.busy_still_active,
     ownerMappingRequired: !!row.owner_mapping_required,
     creditHealthScore: row.credit_health_score,
     disputedAmount: Number(row.disputed_amount),
@@ -236,13 +243,44 @@ async function upsertFromBusy(rows, syncStartedAt, branch = { label: 'Turning Po
 
     // Scoped to this branch: each branch's run has its own timestamp, so a
     // global sweep would deactivate the other branch's customers as soon
-    // as the second branch syncs.
-    const [deactivateResult] = await connection.query(
-      'UPDATE customers SET busy_still_active = 0 WHERE branch = ? AND busy_salesman_code IS NOT NULL AND busy_last_synced_at < ?',
+    // as the second branch syncs. `busy_still_active = 1` in the WHERE
+    // restricts this to customers newly falling out of the feed this run
+    // (not re-touching ones already inactive from a prior sync) — needed
+    // so `deactivatedIds` below is exactly the "just vanished" set, not
+    // every historically-inactive customer re-processed every day.
+    const [toDeactivate] = await connection.query(
+      'SELECT id FROM customers WHERE branch = ? AND busy_salesman_code IS NOT NULL AND busy_still_active = 1 AND busy_last_synced_at < ?',
       [branchLabel, syncStartedAt]
     );
+    const deactivatedIds = toDeactivate.map((r) => r.id);
 
-    return { upserted: rows.length, deactivated: deactivateResult.affectedRows };
+    if (deactivatedIds.length > 0) {
+      await connection.query('UPDATE customers SET busy_still_active = 0 WHERE id IN (?)', [deactivatedIds]);
+
+      // A customer who vanishes from BUSY's feed entirely (fully paid /
+      // account closed) never gets its total_due corrected to 0 by the
+      // upsert loop above (there's no row for them to update) — so any
+      // open task referencing them would otherwise sit there forever,
+      // showing a salesman a customer they can no longer find or act on
+      // anywhere else in the app. Close those tasks here, in the same
+      // pass and the same transaction as the deactivation itself.
+      const note = 'Auto-closed — customer no longer appears in BUSY (balance cleared / account closed).';
+      await taskRepository.closeOrphanedTasks(deactivatedIds, note, connection);
+      for (const customerId of deactivatedIds) {
+        await auditRepository.record(
+          customerId,
+          {
+            type: 'TASK_AUTO_CLOSED',
+            description: 'Customer no longer appears in BUSY — open task(s) auto-closed.',
+            actor: 'System',
+            source: 'BUSY Sync',
+          },
+          connection
+        );
+      }
+    }
+
+    return { upserted: rows.length, deactivated: deactivatedIds.length, deactivatedIds };
   });
 }
 

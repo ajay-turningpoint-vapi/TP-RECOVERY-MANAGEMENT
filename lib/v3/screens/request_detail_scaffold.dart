@@ -151,6 +151,8 @@ class RequestDetailScaffold extends StatelessWidget {
   final IconData bannerIcon;
   final List<Widget> children;
   final List<Widget> actions;
+  /// Optional always-visible Due Date bar under the banner.
+  final DateTime? dueDate;
 
   const RequestDetailScaffold({
     super.key,
@@ -162,6 +164,7 @@ class RequestDetailScaffold extends StatelessWidget {
     required this.bannerIcon,
     required this.children,
     required this.actions,
+    this.dueDate,
   });
 
   @override
@@ -251,6 +254,7 @@ class RequestDetailScaffold extends StatelessWidget {
               ],
             ),
           ),
+          if (dueDate != null) _DueStrip(due: dueDate!, accent: color),
           Expanded(
             child: SingleChildScrollView(
               padding: const EdgeInsets.fromLTRB(14, 16, 14, 14),
@@ -1053,4 +1057,70 @@ class TaskAttachmentThumbnail extends StatelessWidget {
       ),
     );
   }
+}
+
+String _overdueBy(Duration diff) {
+  if (diff.inDays >= 1) return '${diff.inDays} Day${diff.inDays == 1 ? '' : 's'}';
+  if (diff.inHours >= 1) return '${diff.inHours} Hour${diff.inHours == 1 ? '' : 's'}';
+  final m = diff.inMinutes < 1 ? 1 : diff.inMinutes;
+  return '$m Minute${m == 1 ? '' : 's'}';
+}
+
+/// Due date bar: full date/time on the left, live status on the right —
+/// "Overdue by 1 Minute / 1 Day" once passed, otherwise "Due Today" etc.
+/// Due-date strip, styled as a direct continuation of the banner right
+/// above it (same flat full-width tint, same icon-circle + text layout) —
+/// a boxed/bordered card here previously looked bolted onto the banner's
+/// own visual language instead of belonging to the same screen.
+class _DueStrip extends StatelessWidget {
+  final DateTime due;
+  final Color accent;
+  const _DueStrip({required this.due, required this.accent});
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final overdue = due.isBefore(now);
+    // Only genuinely overdue forces red; otherwise this strip stays in the
+    // screen's own accent color so it reads as one continuous banner.
+    final Color c = overdue ? kRed : accent;
+    final String status;
+    if (overdue) {
+      status = 'Overdue by ${_overdueBy(now.difference(due))}';
+    } else if (_isToday(due)) {
+      status = 'Due Today';
+    } else {
+      final days = due.difference(now).inDays;
+      status = days <= 1 ? 'Due Tomorrow' : 'Due in $days Days';
+    }
+    return Container(
+      width: double.infinity,
+      color: c.withValues(alpha: 0.07),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(color: c.withValues(alpha: 0.15), shape: BoxShape.circle),
+            child: Icon(overdue ? Icons.alarm_off : Icons.schedule, size: 15, color: c),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text.rich(
+              TextSpan(children: [
+                TextSpan(text: '$status  ', style: TextStyle(fontWeight: FontWeight.bold, color: c)),
+                TextSpan(text: DateFormat('dd MMM yyyy, hh:mm a').format(due), style: TextStyle(color: c.withValues(alpha: 0.85), fontWeight: FontWeight.w600)),
+              ]),
+              style: const TextStyle(fontSize: 12, height: 1.3),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+bool _isToday(DateTime d) {
+  final now = DateTime.now();
+  return d.year == now.year && d.month == now.month && d.day == now.day;
 }

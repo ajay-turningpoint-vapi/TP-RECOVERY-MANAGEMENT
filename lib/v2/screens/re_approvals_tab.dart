@@ -19,7 +19,7 @@ class _ReApprovalsTabState extends State<ReApprovalsTab> with SingleTickerProvid
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
   }
 
   @override
@@ -38,7 +38,6 @@ class _ReApprovalsTabState extends State<ReApprovalsTab> with SingleTickerProvid
     final pendingDisputes = store.visibleDisputes.where((d) => AppStore.disputeNeedsReActionStatuses.contains(d['status'])).toList();
     final pendingClaims = store.paymentClaims.where((p) => p['status'] == 'Awaiting Verification' || p['status'] == 'Sync Pending').toList();
     final pendingPtpCorrections = store.ptpCorrectionRequests;
-    final pendingOutcomeEdits = store.pendingOutcomeEdits;
 
     return Column(
       children: [
@@ -54,7 +53,6 @@ class _ReApprovalsTabState extends State<ReApprovalsTab> with SingleTickerProvid
             labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
             tabs: [
               Tab(text: 'PTP Corrections (${pendingPtpCorrections.length})'),
-              Tab(text: 'Outcome Edits (${pendingOutcomeEdits.length})'),
               Tab(text: 'Disputes (${pendingDisputes.length})'),
               Tab(text: 'Payments (${pendingClaims.length})'),
             ],
@@ -66,7 +64,6 @@ class _ReApprovalsTabState extends State<ReApprovalsTab> with SingleTickerProvid
             controller: _tabController,
             children: [
               _buildPtpCorrectionsList(pendingPtpCorrections, store),
-              _buildOutcomeEditsList(pendingOutcomeEdits, store),
               _buildDisputesList(store.visibleDisputes, store),
               _buildClaimsList(pendingClaims, store),
             ],
@@ -146,97 +143,6 @@ class _ReApprovalsTabState extends State<ReApprovalsTab> with SingleTickerProvid
                         try {
                           await store.approvePtpCorrection(p.id);
                           showAppMessageAfter(navigator, message: 'PTP correction approved.');
-                        } catch (e) {
-                          showAppMessageAfter(navigator, message: 'Could not approve: $e', isError: true);
-                        }
-                      },
-                      child: const Text('Approve', style: TextStyle(fontWeight: FontWeight.bold)),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildOutcomeEditsList(List requests, AppStore store) {
-    if (requests.isEmpty) {
-      return const Center(
-        child: Text('No pending outcome edit requests.', style: TextStyle(color: Color(0xFF5A6B87))),
-      );
-    }
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: requests.length,
-      itemBuilder: (ctx, i) {
-        final r = requests[i];
-        return Container(
-          margin: const EdgeInsets.only(bottom: 16),
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.grey.withValues(alpha: 0.15)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(child: Text(r.customerName, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF1B2B48)))),
-                  Text('by ${store.salesmanDisplayName(r.salesmanId)}', style: const TextStyle(fontSize: 11, color: Color(0xFF5A6B87))),
-                ],
-              ),
-              const SizedBox(height: 12),
-              const Text('CURRENTLY RECORDED', style: TextStyle(fontSize: 10, color: Color(0xFF5A6B87), fontWeight: FontWeight.bold, letterSpacing: 0.5)),
-              const SizedBox(height: 4),
-              Text('${r.outcomeKind} outcome', style: const TextStyle(fontSize: 13, color: Colors.grey)),
-              Text(_payloadSummary(r.originalPayload), style: const TextStyle(fontSize: 11, color: Colors.grey)),
-              const SizedBox(height: 12),
-              const Text('REQUESTED EDIT', style: TextStyle(fontSize: 10, color: Color(0xFF5A6B87), fontWeight: FontWeight.bold, letterSpacing: 0.5)),
-              const SizedBox(height: 4),
-              Text(_payloadSummary(r.requestedPayload), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF1B2B48))),
-              const SizedBox(height: 8),
-              Text('Reason: ${r.editReason}', style: const TextStyle(fontSize: 11, color: Color(0xFF5A6B87), fontStyle: FontStyle.italic)),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: LoadingOutlinedButton(
-                      style: OutlinedButton.styleFrom(
-                        side: const BorderSide(color: Color(0xFFE53935)),
-                        foregroundColor: const Color(0xFFE53935),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
-                      onPressed: () async {
-                        final navigator = Navigator.of(context);
-                        try {
-                          await store.rejectOutcomeEdit(r.id, 'Not justified');
-                          showAppMessageAfter(navigator, message: 'Outcome edit rejected.');
-                        } catch (e) {
-                          showAppMessageAfter(navigator, message: 'Could not reject: $e', isError: true);
-                        }
-                      },
-                      child: const Text('Reject', style: TextStyle(fontWeight: FontWeight.bold)),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: LoadingElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF388E3C),
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
-                      onPressed: () async {
-                        final navigator = Navigator.of(context);
-                        try {
-                          await store.approveOutcomeEdit(r.id);
-                          showAppMessageAfter(navigator, message: 'Outcome edit approved and applied.');
                         } catch (e) {
                           showAppMessageAfter(navigator, message: 'Could not approve: $e', isError: true);
                         }
@@ -822,7 +728,4 @@ class _ReApprovalsTabState extends State<ReApprovalsTab> with SingleTickerProvid
       },
     );
   }
-
-  String _payloadSummary(Map<String, dynamic> m) =>
-      m.entries.map((e) => '${e.key}: ${e.value}').join('  ·  ');
 }

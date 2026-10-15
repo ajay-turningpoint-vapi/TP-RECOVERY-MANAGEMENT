@@ -13,6 +13,7 @@ import 'package:intl/intl.dart';
 import 'package:salesman_mobile/widgets/app_message.dart';
 import 'package:salesman_mobile/widgets/call_helper.dart';
 import 'package:salesman_mobile/widgets/loading_button.dart';
+import 'package:salesman_mobile/v3/screens/task_details_screen_v3.dart';
 
 // Indian digit grouping (₹1,23,456, not ₹123,456) — several money labels
 // on this screen used plain toStringAsFixed string interpolation, which
@@ -57,13 +58,22 @@ class Customer360Screen extends StatefulWidget {
   /// so the salesman can request an RE-approved change to its fields.
   final bool editOutcome;
 
+  /// True only when this screen was pushed from that specific task's own
+  /// Details screen (its Record Outcome button) — the one sanctioned way
+  /// in for a customer that has an open to-do task. Every other entry
+  /// point (customer list, search, Needs Attention, …) leaves this false,
+  /// so Record Outcome redirects there instead of opening directly. See
+  /// AppStore.openTodoTaskFor.
+  final bool fromTaskDetails;
+
   const Customer360Screen(
       {super.key,
       required this.customer,
       this.readOnly = false,
       this.recoveryQueue = false,
       this.queueVisitedIds,
-      this.editOutcome = false});
+      this.editOutcome = false,
+      this.fromTaskDetails = false});
 
   @override
   State<Customer360Screen> createState() => _Customer360ScreenState();
@@ -185,7 +195,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
       // A No Answer / 3rd-No-Answer Physical Visit never resolved anything —
       // this isn't an "edit", it's a fresh Record Outcome (record what
       // happened on the call-back or the visit). No RE approval.
-      _showOutcomeBottomSheet();
+      _recordOutcomeEntry();
       return;
     }
     showAppMessage(context,
@@ -243,6 +253,12 @@ class _Customer360ScreenState extends State<Customer360Screen> {
     // One open task per customer: the RE can't stack another on top.
     final hasOpenTask = store.tasks.any((t) =>
         t.customerId == currentCustomer.id && t.status != TaskStatus.completed);
+    // The salesperson's own open to-do task for this customer, when we
+    // weren't pushed here from that task's Details screen — the Record
+    // Outcome button becomes View Task and routes straight there instead.
+    final openTodoTask = store.userRole == 'SALESPERSON' && !widget.fromTaskDetails
+        ? store.openTodoTaskFor(currentCustomer.id)
+        : null;
 
     return DefaultTabController(
       length: 3,
@@ -425,21 +441,30 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                       )
                     : ElevatedButton(
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: isLocked
-                              ? Colors.grey[400]
-                              : const Color(0xFF0052CC),
+                          backgroundColor: openTodoTask != null
+                              ? const Color(0xFF4F46E5)
+                              : isLocked
+                                  ? Colors.grey[400]
+                                  : const Color(0xFF0052CC),
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 16),
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(8)),
                         ),
-                        onPressed: isLocked ? null : _showOutcomeBottomSheet,
+                        onPressed: openTodoTask != null
+                            ? () => Navigator.pushReplacement(context,
+                                MaterialPageRoute(builder: (_) => TaskDetailsScreenV3(task: openTodoTask)))
+                            : isLocked
+                                ? null
+                                : _recordOutcomeEntry,
                         child: Text(
-                            isLocked
-                                ? 'OUTCOME RECORDED'
-                                : isNoAnswerRerecord
-                                    ? 'NEW RECORD OUTCOME'
-                                    : 'RECORD OUTCOME',
+                            openTodoTask != null
+                                ? 'VIEW TASK'
+                                : isLocked
+                                    ? 'OUTCOME RECORDED'
+                                    : isNoAnswerRerecord
+                                        ? 'NEW RECORD OUTCOME'
+                                        : 'RECORD OUTCOME',
                             style: const TextStyle(
                                 fontWeight: FontWeight.bold, fontSize: 16)),
                       ),
@@ -1111,9 +1136,9 @@ class _Customer360ScreenState extends State<Customer360Screen> {
     }
   }
 
-  /// Pre-filled edit form for a recorded PTP outcome. Submitting creates an
-  /// RE-approval request (store.requestOutcomeEdit) — the PTP is not touched
-  /// until the RE approves.
+  /// Pre-filled edit form for a recorded PTP outcome. Submitting creates a
+  /// PTP correction request (store.requestPtpCorrection) — the PTP is not
+  /// touched until the RE approves.
   void _showEditPtpSheet(PromiseToPay ptp) {
     final amountCtrl = TextEditingController(text: ptp.amountPromised.toStringAsFixed(0));
     final reasonCtrl = TextEditingController();
@@ -1275,10 +1300,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
         openPtp != null && openPtp.correctionStatus != 'none';
     final ptpCorrectionPending =
         openPtp != null && openPtp.correctionStatus == 'Pending';
-    final alreadyRequested = ptpCorrectionUsed ||
-        store.hasPendingOutcomeEdit(c.id) ||
-        store.outcomeCorrectionRequests
-            .any((r) => r.customerId == c.id && r.status == 'Pending');
+    final alreadyRequested = ptpCorrectionUsed;
     final isPartial = c.currentRecoveryState != 'Waiting / Monitoring' && openPtp != null;
     final money = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
     final headline = isPartial
@@ -2810,6 +2832,25 @@ class _Customer360ScreenState extends State<Customer360Screen> {
     );
   }
 
+  /// Single chokepoint for every "start recording an outcome" trigger on
+  /// this screen (the main button, the No-Answer/Physical-Visit re-record
+  /// path). When the customer has an open to-do task and we weren't
+  /// pushed here from that task's own Details screen, redirect there
+  /// instead of opening the sheet — whatever route the salesman took to
+  /// land on this customer.
+  void _recordOutcomeEntry() {
+    final store = context.read<AppStore>();
+    if (store.userRole == 'SALESPERSON' && !widget.fromTaskDetails) {
+      final openTask = store.openTodoTaskFor(widget.customer.id);
+      if (openTask != null) {
+        Navigator.pushReplacement(context,
+            MaterialPageRoute(builder: (_) => TaskDetailsScreenV3(task: openTask)));
+        return;
+      }
+    }
+    _showOutcomeBottomSheet();
+  }
+
   Future<void> _showOutcomeBottomSheet() async {
     final store = context.read<AppStore>();
     final c = store.customers.firstWhere((x) => x.id == widget.customer.id, orElse: () => widget.customer);
@@ -3075,17 +3116,11 @@ class _Customer360ScreenState extends State<Customer360Screen> {
   }
 
   Widget _buildOutcomeForm() {
-    // Cap the amount fields at the still-uncovered slice of the overdue.
-    // While part of the balance is already under a PTP / dispute / payment
-    // claim, the salesperson can only act on what's left — actionableAmount
-    // (server-derived, customer detail only; 0 on plain list rows, in which
-    // case fall back to the full outstanding).
+    // Cap the amount fields at the customer's total outstanding balance.
     final fresh = context.read<AppStore>().customers.firstWhere(
         (x) => x.id == widget.customer.id,
         orElse: () => widget.customer);
-    final amountCeiling = fresh.actionableAmount > 0
-        ? fresh.actionableAmount
-        : fresh.totalOutstanding;
+    final amountCeiling = fresh.totalOutstanding;
     switch (_selectedOutcome) {
       case 'Promise to Pay (PTP)':
         return PtpOutcomeForm(
@@ -3129,8 +3164,10 @@ class _Customer360ScreenState extends State<Customer360Screen> {
       case 'Payment Already Made':
         return PaymentAlreadyMadeForm(
             maxOutstanding: amountCeiling,
-            onSubmit: (amt, file) => _finish(context, 'Verification Pending',
-                'Payment claimed', 'Amount: ₹$amt', screenshot: file));
+            onSubmit: (amt, reference, file) => _finish(context, 'Verification Pending',
+                'Payment claimed',
+                'Amount: ₹$amt${reference.isNotEmpty ? ' Ref: $reference' : ''}',
+                screenshot: file));
       case 'No Answer':
         return NoAnswerForm(
           attemptNumber:
@@ -3256,6 +3293,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
     String priority = 'Normal';
     String taskType = 'customerCall';
     String? reasonError;
+    XFile? attachmentFile;
     final salesmanId = customer.assignedSalesmanId;
     final salesmanName = salesmanId.isEmpty
         ? 'the assigned salesperson'
@@ -3374,6 +3412,23 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                       errorText: reasonError),
                 ),
                 const SizedBox(height: 16),
+                const Text('Attachment (optional)',
+                    style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1B2B48))),
+                const SizedBox(height: 6),
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                      foregroundColor: attachmentFile != null ? const Color(0xFF16A34A) : null),
+                  onPressed: () async {
+                    final file = await pickEvidenceFile(context);
+                    if (file != null) setState(() => attachmentFile = file);
+                  },
+                  icon: Icon(attachmentFile != null ? Icons.check : Icons.attach_file),
+                  label: Text(attachmentFile != null ? 'Attached: ${attachmentFile!.name}' : 'Attach Image / PDF'),
+                ),
+                const SizedBox(height: 16),
                 Row(children: [
                   Expanded(
                     child: Column(
@@ -3466,13 +3521,20 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                       }
                       final navigator = Navigator.of(context);
                       try {
+                        String? attachmentPath;
+                        if (attachmentFile != null) {
+                          final bytes = await attachmentFile!.readAsBytes();
+                          attachmentPath = await store.apiClient.uploadAttachment(bytes,
+                              filename: attachmentFile!.name, contentType: attachmentFile!.mimeType ?? 'image/jpeg');
+                        }
                         await store.assignManagementInstruction(
                             customer.id,
                             salesmanId,
                             reasonController.text.trim(),
                             selectedDate,
                             priority: priority,
-                            taskType: taskType);
+                            taskType: taskType,
+                            attachmentPath: attachmentPath);
                         if (sheetCtx.mounted) Navigator.pop(sheetCtx);
                         showAppMessageAfter(navigator,
                             message: 'Task assigned to agent.');

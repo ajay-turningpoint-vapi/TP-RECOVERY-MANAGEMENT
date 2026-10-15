@@ -22,9 +22,7 @@ class MoreMenuScreen extends StatelessWidget {
     final pendingApprovals = store.tasks.where((t) => t.approvalStatus == 'Pending').length +
         store.disputes.where((d) => AppStore.disputeNeedsReActionStatuses.contains(d['status'])).length +
         store.paymentClaims.where((p) => p['status'] == 'Awaiting Verification' || p['status'] == 'Sync Pending').length +
-        store.ptpCorrectionRequests.length +
-        store.pendingOutcomeCorrectionCount +
-        store.pendingOutcomeEditCount;
+        store.ptpCorrectionRequests.length;
 
     final items = <_MenuItem>[
       _MenuItem('Approvals', Icons.inbox_outlined, const Color(0xFF2563EB), (ctx) => const Scaffold(body: SafeArea(child: ReApprovalsTab())), badge: pendingApprovals),

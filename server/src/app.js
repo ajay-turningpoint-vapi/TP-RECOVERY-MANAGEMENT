@@ -81,6 +81,13 @@ function createApp() {
   // themselves, so serving the shell here needs no extra guard.
   app.use('/busy-sync', express.static(path.join(__dirname, '..', 'public', 'busy-sync')));
 
+  // Public app-download page — a static landing page + the field app's
+  // .apk itself (see public/downloads/). No auth: this is just app
+  // distribution (the binary carries no secrets), and salesmen need it
+  // reachable before they've ever logged in. Deliberately field-only —
+  // never serve the admin build from here.
+  app.use('/downloads', express.static(path.join(__dirname, '..', 'public', 'downloads')));
+
   app.use(routes);
 
   app.use(notFoundHandler);

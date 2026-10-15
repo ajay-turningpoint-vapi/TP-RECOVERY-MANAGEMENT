@@ -237,6 +237,18 @@ class _TasksScreenState extends State<TasksScreen> {
     return t.type.name.replaceAll(RegExp(r'(?<!^)(?=[A-Z])'), ' ').toUpperCase();
   }
 
+  Color _taskPriorityColor(String p) {
+    switch (p) {
+      case 'Critical':
+      case 'High':
+        return const Color(0xFFE53935);
+      case 'Medium':
+        return const Color(0xFFF57C00);
+      default:
+        return const Color(0xFF388E3C);
+    }
+  }
+
   Widget _buildTaskCard(AppTask t, AppStore store) {
     final isCompleted = t.status == TaskStatus.completed;
     final isCritical = t.priority == 'Critical';
@@ -284,12 +296,12 @@ class _TasksScreenState extends State<TasksScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          if (isCritical && !isCompleted)
+                          if (!isCompleted)
                             Container(
                               margin: const EdgeInsets.only(bottom: 6),
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                              decoration: BoxDecoration(color: const Color(0xFFFFEBEE), borderRadius: BorderRadius.circular(4)),
-                              child: const Text('Urgent', style: TextStyle(color: Color(0xFFE53935), fontSize: 10, fontWeight: FontWeight.bold)),
+                              decoration: BoxDecoration(color: _taskPriorityColor(t.priority).withValues(alpha: 0.12), borderRadius: BorderRadius.circular(4)),
+                              child: Text(isCritical ? 'Urgent' : '${t.priority} Priority', style: TextStyle(color: _taskPriorityColor(t.priority), fontSize: 10, fontWeight: FontWeight.bold)),
                             ),
                           Text(cardTitle, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: const Color(0xFF1B2B48), decoration: isCompleted ? TextDecoration.lineThrough : null)),
                           if (disputeMeta != null && (disputeMeta['desc'] ?? '').isNotEmpty) ...[
@@ -308,7 +320,9 @@ class _TasksScreenState extends State<TasksScreen> {
                 // Tabular Data
                 _buildDataRow(Icons.person_outline, 'Customer', t.customerName, Icons.category_outlined, 'Related To', relatedTo),
                 const SizedBox(height: 12),
-                _buildDataRow(Icons.calendar_today_outlined, 'Due On', DateFormat('dd MMM, HH:mm').format(t.deadline), Icons.info_outline, 'Status', isCompleted ? 'Completed' : 'Pending', vColor2: isCompleted ? const Color(0xFF388E3C) : const Color(0xFFF57C00)),
+                _buildDataRow(Icons.calendar_today_outlined, 'Due On', DateFormat('dd MMM yyyy, hh:mm a').format(t.deadline), Icons.info_outline, 'Status', isCompleted ? 'Completed' : 'Pending', vColor2: isCompleted ? const Color(0xFF388E3C) : const Color(0xFFF57C00)),
+                const SizedBox(height: 12),
+                _buildDataRow(Icons.flag_outlined, 'Priority', t.priority, Icons.event_outlined, 'Due Date', DateFormat('dd MMM yyyy').format(t.deadline), vColor1: _taskPriorityColor(t.priority)),
                 if (!isCompleted) ...[
                   const SizedBox(height: 16),
                   SizedBox(

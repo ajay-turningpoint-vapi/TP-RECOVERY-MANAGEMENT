@@ -419,8 +419,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    const Text('Financial data updated 10:56 AM',
-                        style: TextStyle(color: Colors.white70, fontSize: 11)),
+                    Text(
+                        store.myFinancialFreshness != null
+                            ? 'Financial data updated ${DateFormat('hh:mm a, dd MMM').format(store.myFinancialFreshness!)}'
+                            : 'Financial data not yet synced',
+                        style: const TextStyle(color: Colors.white70, fontSize: 11)),
                     const SizedBox(height: 20),
                     SizedBox(
                       width: double.infinity,

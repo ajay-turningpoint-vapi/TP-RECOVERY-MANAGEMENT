@@ -5,7 +5,6 @@ const disputeRepository = require('../repositories/disputeRepository');
 const paymentClaimRepository = require('../repositories/paymentClaimRepository');
 const escalationRepository = require('../repositories/escalationRepository');
 const auditRepository = require('../repositories/auditRepository');
-const outcomeCorrectionRepository = require('../repositories/outcomeCorrectionRepository');
 const userRepository = require('../repositories/userRepository');
 const salesmanService = require('./salesmanService');
 const scoringService = require('./scoringService');
@@ -41,7 +40,7 @@ function isToday(date) {
  * book).
  */
 async function getDashboard(user) {
-  const [rawCustomers, allPtps, allTasks, allDisputes, openEscalations, roster, allAudit, allOutcomeCorrections] = await Promise.all([
+  const [rawCustomers, allPtps, allTasks, allDisputes, openEscalations, roster, allAudit] = await Promise.all([
     user.role === 'SALESPERSON' ? customerRepository.findBySalesman(user.id) : customerRepository.findAll(),
     ptpRepository.findAll(),
     user.role === 'SALESPERSON' ? taskRepository.findByOwner(user.id) : taskRepository.findAll(),
@@ -49,7 +48,6 @@ async function getDashboard(user) {
     escalationRepository.findOpen(),
     user.role === 'SALESPERSON' ? [] : salesmanService.listRoster(),
     auditRepository.listAll(),
-    user.role === 'SALESPERSON' ? [] : outcomeCorrectionRepository.findAll(),
   ]);
 
   const ptpsByCustomer = scoringService.groupBy(allPtps, (p) => p.customerId);
@@ -111,7 +109,6 @@ async function getDashboard(user) {
   const disputesAwaitingReviewCount = allDisputes.filter((d) => DISPUTES_NEEDING_RE_ACTION.includes(d.status)).length;
   const pendingTaskExtensionCount = allTasks.filter((t) => t.approvalStatus === 'Pending').length;
   const ptpCorrectionRequestsCount = ptps.filter((p) => p.correctionStatus === 'Pending').length;
-  const pendingOutcomeCorrectionCount = allOutcomeCorrections.filter((r) => r.status === 'Pending').length;
   const salesmenOverdueTargetsCount = roster.filter((s) => s.collectionAchievedPercent < 60).length;
 
   const needsAttentionBadgeCount =
@@ -119,8 +116,7 @@ async function getDashboard(user) {
     physicalVisitsPendingReview.length +
     disputesAwaitingReviewCount +
     ptpCorrectionRequestsCount +
-    pendingTaskExtensionCount +
-    pendingOutcomeCorrectionCount;
+    pendingTaskExtensionCount;
 
   const todaysCollected = ptps.filter((p) => (p.status === 'kept' || p.status === 'partiallyKept') && isToday(p.promiseDate));
   const todaysCollectedAmount = todaysCollected.reduce((s, p) => s + (p.amountReceived || 0), 0);
@@ -208,7 +204,6 @@ async function getDashboard(user) {
     disputesAwaitingReviewCount,
     pendingTaskExtensionCount,
     ptpCorrectionRequestsCount,
-    pendingOutcomeCorrectionCount,
     needsAttentionBadgeCount,
     totalReceivedAllTime: ptps.filter((p) => p.status === 'kept' || p.status === 'partiallyKept').reduce((s, p) => s + (p.amountReceived || 0), 0),
     todaysCollectedAmount,

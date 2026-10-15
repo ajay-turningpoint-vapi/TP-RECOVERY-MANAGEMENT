@@ -61,6 +61,7 @@ async function approve(taskId, user, { note, attachmentPath }) {
     headline: 'Internal action approved — continue recovery.',
     priority: 'Normal',
     deadlineHour: 18,
+    attachmentPath: evidencePath,
   });
   return taskRepository.findById(taskId);
 }
@@ -96,6 +97,7 @@ async function reject(taskId, user, { reason, attachmentPath }) {
     headline: 'Internal action reviewed — continue recovery.',
     priority: 'Normal',
     deadlineHour: 18,
+    attachmentPath: evidencePath,
   });
   return taskRepository.findById(taskId);
 }

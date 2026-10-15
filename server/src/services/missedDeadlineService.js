@@ -231,6 +231,7 @@ async function sweepNoAnswerCycle() {
           ownerId: customer.assignedSalesmanId,
           deadline: plusHours(72),
           moneyAtRisk: customer.totalDue,
+          cause: 'NonContact',
         });
         escalated += 1;
       }

@@ -5,7 +5,7 @@ const ptpRepository = require('../repositories/ptpRepository');
 const customerRepository = require('../repositories/customerRepository');
 const auditRepository = require('../repositories/auditRepository');
 const notificationRepository = require('../repositories/notificationRepository');
-const { applyPtpOutcomeTx, evaluateBrokenPtpEscalation, reopenRecoveryAfterPtpOutcome } = require('./ptpService');
+const { applyPtpOutcomeTx, evaluateBrokenPtpEscalation, reopenRecoveryAfterPtpOutcome, reconcileBrokenPtpEscalation } = require('./ptpService');
 const receiptTotalsRepository = require('../busySync/reports/mssqlReceiptTotalsRepository');
 const { withRetry } = require('../busySync/utils/retry');
 const { BRANCHES } = require('../busySync/config/branches');
@@ -53,6 +53,18 @@ function addDaysStr(dateStr, days) {
   const d = new Date(`${dateStr}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
+}
+
+/**
+ * The single source of truth for the kept/partiallyKept/broken threshold —
+ * both finalizeDuePtps (first decision) and reverifyStalePtps (the
+ * correction pass) call this, so the ₹1 EPS tolerance and the three
+ * outcome bands can never drift apart between the two passes.
+ */
+function decideOutcome(promised, paid) {
+  if (paid + EPS >= promised) return { outcome: 'kept', received: Math.min(paid, promised) };
+  if (paid > 0) return { outcome: 'partiallyKept', received: paid };
+  return { outcome: 'broken', received: 0 };
 }
 
 function autoDescription(outcome, ptp, paid, received) {
@@ -185,21 +197,11 @@ async function finalizeDuePtps(getReceiptTotals = receiptTotalsRepository.getRec
         const customer = await customerRepository.findById(ptp.customerId);
         if (!customer) return { skip: 'noData' };
 
-        let outcome;
-        let received;
-        let brokenReason = null;
-        if (paid + EPS >= promised) {
-          outcome = 'kept';
-          received = Math.min(paid, promised);
-        } else if (paid > 0) {
-          outcome = 'partiallyKept';
-          received = paid;
-        } else {
-          outcome = 'broken';
-          received = 0;
-          brokenReason =
-            'Auto: no BUSY receipt or journal entry matching or covering the promised amount within the 1-day grace period (verified against BUSY receipt/journal totals).';
-        }
+        const { outcome, received } = decideOutcome(promised, paid);
+        const brokenReason =
+          outcome === 'broken'
+            ? 'Auto: no BUSY receipt or journal entry matching or covering the promised amount within the 1-day grace period (verified against BUSY receipt/journal totals).'
+            : null;
 
         await applyPtpOutcomeTx(conn, {
           ptp,
@@ -299,6 +301,168 @@ async function finalizeDuePtps(getReceiptTotals = receiptTotalsRepository.getRec
   return { examined: candidates.length, ...result };
 }
 
+// Only these two statuses are ever reverify candidates; the ladder below
+// is what "an upgrade" means for each — never a downgrade, and a 'kept'
+// PTP is already the best outcome so it's never a candidate at all.
+const OUTCOME_RANK = { broken: 0, partiallyKept: 1, kept: 2 };
+
+/**
+ * Correction pass: re-checks every 'broken' / 'partiallyKept' PTP within
+ * the lookback window (env.ptpReverifyLookbackDays) against BUSY, for the
+ * exact same eligible window finalizeDuePtps originally used
+ * (promise_date to promise_date + 1 day) — never "BUSY as of today". BUSY
+ * back-office receipt entry lags real payments by ~1.5 days (see this
+ * file's header comment), so a PTP finalized broken before the receipt
+ * was keyed in can heal itself here once it is.
+ *
+ * Upgrade-only: only writes when the recheck strictly improves on the
+ * PTP's current outcome (broken → partiallyKept/kept, partiallyKept →
+ * kept) via the SAME decideOutcome threshold finalizeDuePtps uses. Same
+ * or worse → skipped silently, no audit noise, no write at all. Uses the
+ * same applyPtpOutcomeTx(..., moveBalance: false) — BUSY sync's own
+ * upsertFromBusy already moved the customer's balance, so this must never
+ * double-count it — just a distinct `source` so the audit trail shows
+ * this as a re-verify upgrade, not the original automatic verification.
+ *
+ * `branchLabel` scopes the scan to one branch's customers (the branch
+ * that's mid-sync right now) so a 5-branch sync doesn't re-ask BUSY for
+ * every other branch's stale PTPs on every single branch's pass; omit it
+ * to scan all branches (e.g. a manual one-off run).
+ *
+ * `getReceiptTotals` is injectable, same pattern as finalizeDuePtps, so
+ * tests can stub BUSY responses.
+ */
+async function reverifyStalePtps({ branchLabel, getReceiptTotals = receiptTotalsRepository.getReceiptTotals } = {}) {
+  const sinceCutoff = addDaysStr(istDateStr(new Date()), -env.ptpReverifyLookbackDays);
+  const candidates = await ptpRepository.findReverifiableCandidates(`${sinceCutoff} 00:00:00`);
+
+  const result = { examined: 0, upgradedToKept: 0, upgradedToPartiallyKept: 0, unchanged: 0, skippedNoData: 0, errors: 0 };
+  const upgradedCustomerIds = [];
+  const receiptTotalsCache = new Map();
+
+  for (const ptp of candidates) {
+    const promised = ptp.amountPromised;
+    const dueDate = istDateStr(new Date(ptp.promiseDate));
+    const verificationDate = addDaysStr(dueDate, 1);
+
+    try {
+      const customerForBranch = await customerRepository.findById(ptp.customerId);
+      if (!customerForBranch) {
+        result.skippedNoData += 1;
+        continue;
+      }
+      const branch = branchForCustomer(customerForBranch);
+      if (branchLabel && branch.label !== branchLabel) continue;
+
+      result.examined += 1;
+
+      const startDate = dueDate;
+      const endDate = verificationDate;
+      const cacheKey = `${branch.key}|${startDate}|${endDate}`;
+      let rows = receiptTotalsCache.get(cacheKey);
+      if (!rows) {
+        rows = await withRetry('BUSY receipt totals fetch (re-verify)', () =>
+          getReceiptTotals({
+            startDate,
+            endDate,
+            database: branch.database,
+            parentGroups: branch.parentGroups,
+            conn: branch.conn,
+          })
+        );
+        receiptTotalsCache.set(cacheKey, rows);
+      }
+      const match = rows.find((r) => r.customerId === ptp.customerId);
+      const paid = match ? match.totalAmount : 0;
+
+      const { outcome, received } = decideOutcome(promised, paid);
+      if (OUTCOME_RANK[outcome] <= OUTCOME_RANK[ptp.status]) {
+        result.unchanged += 1;
+        continue;
+      }
+
+      await withTransaction(async (conn) => {
+        const customer = await customerRepository.findById(ptp.customerId);
+        if (!customer) return;
+        await applyPtpOutcomeTx(conn, {
+          ptp,
+          customer,
+          outcome,
+          received,
+          brokenReason: null,
+          moveBalance: false,
+          actor: 'System',
+          source: 'PTP Re-Verification (Manual Sync)',
+          description:
+            `Re-checked against BUSY receipts/journal entries dated within the original 1-day grace period ` +
+            `(promised ₹${promised.toFixed(0)}, BUSY total ₹${Math.round(paid)}) — a late-entered receipt upgraded ` +
+            `this PTP from ${ptp.status} to ${outcome}. ₹${Math.round(received)} applied; no manual balance ` +
+            `adjustment made, the BUSY sync already reflects this payment.`,
+        });
+      });
+
+      if (outcome === 'kept') result.upgradedToKept += 1;
+      else result.upgradedToPartiallyKept += 1;
+      upgradedCustomerIds.push({ customerId: ptp.customerId, outcome, promised, received });
+
+      try {
+        await auditRepository.record(ptp.customerId, {
+          type: 'PTP_REVERIFIED',
+          description: `Re-verify on sync: ₹${Math.round(received)} of ₹${Math.round(promised)} → upgraded ${ptp.status} to ${outcome}.`,
+          actor: 'System',
+          source: 'PTP Re-Verification (Manual Sync)',
+        });
+      } catch (auditErr) {
+        logger.warn('[ptp-verification] re-verify audit failed', { ptpId: ptp.id, message: auditErr.message });
+      }
+
+      logger.info('[ptp-verification] PTP re-verified and upgraded', {
+        ptpId: ptp.id,
+        customerId: ptp.customerId,
+        from: ptp.status,
+        to: outcome,
+        busyReceiptAmount: paid,
+      });
+    } catch (err) {
+      result.errors += 1;
+      logger.error('[ptp-verification] PTP re-verify failed for one PTP', { ptpId: ptp.id, message: err.message });
+    }
+  }
+
+  // Broken-count dropping can both still-escalate (if it didn't drop
+  // below a threshold) and, now that an upgrade just happened, needs the
+  // normal post-outcome recovery-task follow-up same as finalizeDuePtps.
+  for (const { customerId, outcome, promised, received } of upgradedCustomerIds) {
+    try {
+      await evaluateBrokenPtpEscalation(customerId);
+    } catch (err) {
+      logger.error('[ptp-verification] re-verify escalation check failed', { customerId, message: err.message });
+    }
+    // The upgrade just dropped this customer's broken-PTP count — walk
+    // back (lower or resolve) any escalation that count itself caused.
+    // Only ever touches cause: 'BrokenPTP' escalations; a Customer
+    // Refused / Non-Contact / manual escalation on the same customer is
+    // never auto-touched.
+    try {
+      await reconcileBrokenPtpEscalation(customerId);
+    } catch (err) {
+      logger.error('[ptp-verification] re-verify escalation reconcile failed', { customerId, message: err.message });
+    }
+    try {
+      await reopenRecoveryAfterPtpOutcome(customerId, outcome, { promised, received });
+    } catch (err) {
+      logger.error('[ptp-verification] re-verify reopen recovery failed', { customerId, outcome, message: err.message });
+    }
+  }
+
+  if (upgradedCustomerIds.length > 0) {
+    emitChange(['ptps', 'customers', 'tasks', 'escalations'], { reason: 'ptp.reverify' });
+  }
+
+  logger.info('[ptp-verification] PTP re-verify pass complete', result);
+  return result;
+}
+
 /**
  * Entry point called from workers/busySyncWorker.js, after the daily
  * customer/invoice BUSY sync steps. Runs Pass A then Pass B. Unlike the old
@@ -313,4 +477,4 @@ async function verifyDuePtps({ getReceiptTotals } = {}) {
   return { promoted, ...finalized };
 }
 
-module.exports = { verifyDuePtps, promoteDuePtps, finalizeDuePtps };
+module.exports = { verifyDuePtps, promoteDuePtps, finalizeDuePtps, reverifyStalePtps };

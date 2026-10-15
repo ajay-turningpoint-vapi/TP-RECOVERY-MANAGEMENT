@@ -16,8 +16,6 @@ router.use('/api/salesmen', require('./salesmanRoutes'));
 router.use('/api/escalations', require('./escalationRoutes'));
 router.use('/api/notifications', require('./notificationRoutes'));
 router.use('/api/reports', require('./reportRoutes'));
-router.use('/api/outcome-corrections', require('./outcomeCorrectionRoutes'));
-router.use('/api/outcome-edits', require('./outcomeEditRoutes'));
 router.use('/api/busy-sync', require('./busySyncAdminRoutes'));
 router.use('/api/sync-status', require('./syncStatusRoutes'));
 router.use('/api/attachments', require('./attachmentRoutes'));

@@ -345,10 +345,10 @@ Future<TimeOfDay?> _pickTime(BuildContext context, {TimeOfDay? initialTime}) asy
   );
 }
 
-/// Lets the salesman either open the camera or pick an existing screenshot
-/// from the gallery — used for every "Capture / Upload Evidence" button in
-/// the Record Outcome forms.
-Future<XFile?> _pickImage(BuildContext context) async {
+/// Camera or gallery only — No Answer's "proof of call" is always a
+/// screenshot, never a PDF, so this deliberately skips the PDF option the
+/// shared pickEvidenceFile offers (used by every other evidence button).
+Future<XFile?> _pickCallScreenshot(BuildContext context) async {
   final source = await showModalBottomSheet<ImageSource>(
     context: context,
     shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
@@ -357,18 +357,16 @@ Future<XFile?> _pickImage(BuildContext context) async {
         mainAxisSize: MainAxisSize.min,
         children: [
           const SizedBox(height: 12),
-          const Text('Add evidence', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF1B2B48))),
+          const Text('Add call screenshot', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF1B2B48))),
           const SizedBox(height: 2),
           ListTile(
             leading: const CircleAvatar(backgroundColor: Color(0xFFE3EDFB), child: Icon(Icons.photo_camera, color: Color(0xFF0052CC))),
             title: const Text('Take photo', style: TextStyle(fontWeight: FontWeight.bold)),
-            subtitle: const Text('Open the camera'),
             onTap: () => Navigator.pop(ctx, ImageSource.camera),
           ),
           ListTile(
             leading: const CircleAvatar(backgroundColor: Color(0xFFDCFCE7), child: Icon(Icons.photo_library, color: Color(0xFF16A34A))),
             title: const Text('Choose from gallery', style: TextStyle(fontWeight: FontWeight.bold)),
-            subtitle: const Text('Pick an existing screenshot'),
             onTap: () => Navigator.pop(ctx, ImageSource.gallery),
           ),
           const SizedBox(height: 8),
@@ -621,7 +619,7 @@ class _WillConfirmFormState extends State<WillConfirmForm> {
 
 // 3. Payment Already Made
 class PaymentAlreadyMadeForm extends StatefulWidget {
-  final Future<void> Function(double, XFile?) onSubmit;
+  final Future<void> Function(double, String, XFile?) onSubmit;
   final double maxOutstanding;
   const PaymentAlreadyMadeForm({super.key, required this.onSubmit, this.maxOutstanding = 0});
   @override
@@ -630,6 +628,7 @@ class PaymentAlreadyMadeForm extends StatefulWidget {
 
 class _PaymentAlreadyMadeFormState extends State<PaymentAlreadyMadeForm> {
   final _amountCtrl = TextEditingController();
+  final _referenceCtrl = TextEditingController();
   XFile? _imageFile;
   String? _amountError;
   String? _imageError;
@@ -659,7 +658,7 @@ class _PaymentAlreadyMadeFormState extends State<PaymentAlreadyMadeForm> {
         }
 
         if (hasError) return false;
-        await widget.onSubmit(amt, _imageFile);
+        await widget.onSubmit(amt, _referenceCtrl.text.trim(), _imageFile);
         return true;
       },
       child: Column(
@@ -668,6 +667,15 @@ class _PaymentAlreadyMadeFormState extends State<PaymentAlreadyMadeForm> {
           const Text('Customer claims payment was already transferred.', style: TextStyle(color: AppTheme.textSecondary)),
           const SizedBox(height: 16),
           TextField(controller: _amountCtrl, decoration: InputDecoration(labelText: 'Claimed Amount (₹)', errorText: _amountError, helperText: widget.maxOutstanding > 0 ? 'Max ${_money.format(widget.maxOutstanding)} (total outstanding)' : null), keyboardType: TextInputType.number),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _referenceCtrl,
+            decoration: const InputDecoration(
+              labelText: 'Payment Reference / UPI / UTR No. (optional)',
+              helperText: 'Anything that helps RE match this against BUSY — transaction ID, mode, who paid, etc.',
+            ),
+            maxLines: 2,
+          ),
           const SizedBox(height: 16),
           if (_imageFile == null)
             OutlinedButton.icon(
@@ -1000,21 +1008,21 @@ class _NoAnswerFormState extends State<NoAnswerForm> {
             style: const TextStyle(color: AppTheme.textSecondary),
           ),
           const SizedBox(height: 16),
-          OutlinedButton.icon(
-            style: OutlinedButton.styleFrom(foregroundColor: _imageFile != null ? AppTheme.accentEmerald : null),
-            onPressed: () async {
-              final file = await _pickImage(context);
-              if (file != null) setState(() => _imageFile = file);
-            }, 
-            icon: Icon(_imageFile != null ? Icons.check : Icons.add_a_photo_outlined),
-            label: Text(_imageFile != null ? 'Attached: ${_imageFile!.name}' : 'Add Call Screenshot'),
-          ),
-          if (_imageFile != null)
-            FutureBuilder(
-              future: _imageFile!.readAsBytes(),
-              builder: (ctx, AsyncSnapshot snap) {
-                if (snap.hasData) return Padding(padding: const EdgeInsets.only(top: 8), child: Image.memory(snap.data, height: 80));
-                return const SizedBox();
+          if (_imageFile == null)
+            OutlinedButton.icon(
+              onPressed: () async {
+                final file = await _pickCallScreenshot(context);
+                if (file != null) setState(() => _imageFile = file);
+              },
+              icon: const Icon(Icons.add_a_photo_outlined),
+              label: const Text('Add Call Screenshot'),
+            )
+          else
+            _AttachmentPreview(
+              file: _imageFile!,
+              onEdit: () async {
+                final file = await _pickCallScreenshot(context);
+                if (file != null) setState(() => _imageFile = file);
               },
             ),
           if (_imageError != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(_imageError!, style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12))),

@@ -8,6 +8,8 @@ const { upsertBusySalesmen } = require('../../repositories/salesmanRepository');
 const { startRun, completeRun } = require('../repositories/syncRunsRepository');
 const { BRANCHES } = require('../config/branches');
 const syncLockService = require('../../services/syncLockService');
+const { emitChange } = require('../../realtime/eventBus');
+const ptpVerificationService = require('../../services/ptpVerificationService');
 
 // MySQL/MariaDB named lock — atomic, unlike a "check sync_runs then INSERT"
 // pattern (proven racy: two callers can both see no 'running' row and both
@@ -153,11 +155,35 @@ async function runLockedInner(branchLabel) {
       // brand-new salesman rows exist when it resolves customer ->
       // assigned_salesman_id by busy_salesman_code in the same run.
       const { created: salesmenCreated, renamed: salesmenRenamed } = await upsertBusySalesmen(rows, branch);
-      const { deactivated } = await upsertFromBusy(rows, startedAt, branch);
+      const { deactivated, deactivatedIds } = await upsertFromBusy(rows, startedAt, branch);
       logger.info(
         `[busy-sync] customer_ageing run #${runId} (${branch.label}): customers — ${rows.length} upserted, ` +
           `${deactivated} deactivated; salesmen — ${salesmenCreated} created, ${salesmenRenamed} renamed.`
       );
+      // A deactivated customer (vanished from BUSY — balance cleared /
+      // account closed) just had its open tasks auto-closed inside
+      // upsertFromBusy's own transaction (see customerRepository.js) — push
+      // a live refresh so it drops off a salesman's Tasks list immediately
+      // instead of waiting for their next manual pull-to-refresh.
+      if (deactivatedIds && deactivatedIds.length > 0) {
+        emitChange(['tasks', 'customers'], { reason: 'busy-sync.customer-deactivated' });
+      }
+
+      // Correction pass: re-check this branch's already-broken/partially-
+      // kept PTPs against the fresh BUSY data this sync just pulled, in
+      // case a late-entered receipt now covers one. Runs after
+      // upsertFromBusy so customer.totalOutstanding/totalDue are already
+      // current; applyPtpOutcomeTx itself never double-moves them
+      // (moveBalance: false). Scoped to this branch — see
+      // ptpVerificationService.js's reverifyStalePtps doc comment for why.
+      try {
+        await ptpVerificationService.reverifyStalePtps({ branchLabel: branch.label });
+      } catch (err) {
+        logger.error('[busy-sync] PTP re-verify pass failed (sync itself still succeeded)', {
+          branch: branch.label,
+          message: err.message,
+        });
+      }
 
       await completeRun(runId, {
         status: 'success',

@@ -23,14 +23,38 @@ function groupBy(items, keyFn) {
 function daysSinceLastFollowUp(customer, customerTasks, customerAuditEvents) {
   let last = null;
   for (const a of customerAuditEvents) {
+    // System-authored rows (RECOVERY_TASK_CREATED, the reconcile sweep,
+    // BUSY sync bookkeeping, …) aren't the salesperson doing anything —
+    // counting them made every account look "touched today" the moment
+    // the automatic sweep ran, regardless of whether a human ever acted.
+    // Only a real actor's own entry counts as follow-up evidence.
+    if (a.actor === 'System') continue;
     const ts = new Date(a.occurredAt);
     if (!last || ts > last) last = ts;
   }
   for (const t of customerTasks) {
-    const ts = new Date(t.completedAt || t.deadline);
+    // Only a task's actual COMPLETION is real evidence of contact. Its
+    // `deadline` is just a future due date — a task the reconcile sweep
+    // auto-created moments ago (untouched, still pending) has a deadline
+    // of "today", which previously counted as "touched today" and made
+    // every salesperson with zero real activity look 100% recently active.
+    if (!t.completedAt) continue;
+    const ts = new Date(t.completedAt);
     if (!last || ts > last) last = ts;
   }
-  if (!last) return customer.oldestOverdueDays;
+  if (!last) {
+    // No real activity ever recorded. A customer who owes nothing needs no
+    // follow-up, so 0 (fine) is honest. But a customer WITH real overdue
+    // exposure and zero genuine contact is the textbook "no follow-up"
+    // case — `customer.oldestOverdueDays` was a misleading proxy here: a
+    // salesperson who has done nothing at all still read as "recently
+    // touched" for every customer that happened to go overdue only a few
+    // days ago (including a brand-new salesperson's whole freshly-synced
+    // book). A large finite sentinel (not Infinity, which JSON.stringify
+    // silently turns into null over the wire) means "never" for both this
+    // function's own <= 7 check and reportService's >= threshold check.
+    return customer.totalDue > 0 ? 999999 : 0;
+  }
   const days = Math.floor((Date.now() - last.getTime()) / 86400000);
   return days < 0 ? 0 : days;
 }
@@ -44,12 +68,33 @@ function hasValidNextAction(customer, customerPtps, customerTasks) {
 }
 
 /**
+ * Stricter than hasValidNextAction, for the Recovery Score's
+ * noFollowUpControl only — that one's meant to reward the salesperson's
+ * OWN engagement, not just "does this account have a safety net." An open
+ * `source: 'Recovery'` task is the automatic sweep's own standing call
+ * task, created identically for every overdue customer regardless of
+ * whether the salesperson has done anything — it can never itself be
+ * evidence of action (once acted on, applyOutcome closes/supersedes it).
+ * An active PTP, in contrast, can only exist because the salesperson
+ * recorded one — genuine evidence they engaged this customer.
+ */
+function hasRealFollowUpAction(customer, customerPtps, customerTasks) {
+  if (customer.totalDue <= 0) return true;
+  const hasRealOpenTask = customerTasks.some(
+    (t) => t.status !== 'completed' && t.status !== 'closed' && t.source !== 'Recovery'
+  );
+  const hasActivePtp = customerPtps.some((p) => p.status === 'scheduled' || p.status === 'financialSyncPending');
+  return hasRealOpenTask || hasActivePtp;
+}
+
+/**
  * Customer Reliability & Credit Health Score (Master Build Book RMS-06) —
- * ported verbatim from the client's former `AppStore.creditHealthComponents`.
- * `creditLimit`/`lastPaymentDate` have no real source anywhere in this
- * schema yet, so — exactly like the client did — those two components stay
- * neutral rather than fabricating a number; nothing here is faked, it's
- * just honestly incomplete until those data sources exist.
+ * ported verbatim from the client's former `AppStore.creditHealthComponents`,
+ * but with `exposure`/`recentTrend` since wired up to the real BUSY-synced
+ * `creditLimit`/`lastPaymentDate` fields (customerRepository.js) — the
+ * "no real source exists" premise this comment used to state was wrong;
+ * both are real, synced columns. Each stays neutral only when BUSY itself
+ * has nothing on file for that one customer (no limit set / never paid).
  */
 function computeCreditHealthComponents(customer, customerPtps) {
   const maturedPtps = customerPtps.filter((p) => MATURED_STATUSES.includes(p.status));
@@ -64,7 +109,7 @@ function computeCreditHealthComponents(customer, customerPtps) {
   else paymentTimeliness = 15;
 
   const keptCount = maturedPtps.filter((p) => p.status === 'kept').length;
-  const ptpReliability = maturedPtps.length === 0 ? 70 : (keptCount / maturedPtps.length) * 100;
+  const ptpReliability = maturedPtps.length === 0 ? 0 : (keptCount / maturedPtps.length) * 100;
 
   let currentAgeing;
   if (customer.oldestOverdueDays <= 0) currentAgeing = 100;
@@ -73,10 +118,28 @@ function computeCreditHealthComponents(customer, customerPtps) {
   else if (customer.oldestOverdueDays <= 90) currentAgeing = 25;
   else currentAgeing = 10;
 
-  // No credit_limit column exists yet — neutral, not fabricated.
-  const exposure = 70;
-  // No last-payment-date column exists yet — neutral, not fabricated.
-  const recentTrend = 50;
+  // Real BUSY-synced credit limit (customerRepository.js) — how much of
+  // it is currently used. Low utilization = low risk = high score. Stays
+  // neutral only when BUSY genuinely has no limit on file for this
+  // customer (creditLimit <= 0) — can't compute a real ratio then.
+  const exposure =
+    customer.creditLimit > 0
+      ? Math.max(0, Math.min(100, 100 - (customer.totalOutstanding / customer.creditLimit) * 100))
+      : 70;
+
+  // Real BUSY-synced last receipt date — how recently this customer
+  // actually paid something, not just how old their oldest overdue
+  // invoice is (that's paymentTimeliness/currentAgeing already). Stays
+  // neutral only when they've genuinely never made a recorded payment.
+  let recentTrend = 50;
+  if (customer.lastPaymentDate) {
+    const daysSincePayment = Math.floor((Date.now() - new Date(customer.lastPaymentDate).getTime()) / 86400000);
+    if (daysSincePayment <= 30) recentTrend = 100;
+    else if (daysSincePayment <= 60) recentTrend = 75;
+    else if (daysSincePayment <= 90) recentTrend = 50;
+    else if (daysSincePayment <= 180) recentTrend = 25;
+    else recentTrend = 10;
+  }
 
   let exceptions = 100;
   if (customer.disputedAmount > 0) exceptions -= 30;
@@ -130,6 +193,35 @@ function computeRecoveryScoreComponents({ ownedCustomers, ownedPtps, ownedTasks,
     return null;
   }
 
+  // A salesperson CAN have customers assigned yet have done literally
+  // nothing — e.g. a brand-new assignment whose small starting portfolio
+  // simply has nothing currently owed. Every component's "no problems
+  // found" default then stacks up into a misleadingly high score (seen
+  // for real: a from-scratch salesperson scored 65% on day one, having
+  // never recorded a single outcome). Require at least one genuine sign of
+  // the salesperson's own activity — a PTP they ever recorded (any
+  // status — even 'scheduled' only exists because they created it), a
+  // real event-driven task (not the routine auto-generated Recovery
+  // call, which exists identically regardless of effort — same filter
+  // `realOwnedTasks` below uses), or a real (non-System-authored) audit
+  // entry on one of their customers — before computing a score at all.
+  // Until then: 0%, not a formula full of charitable defaults.
+  const hasRealActivity =
+    ownedPtps.length > 0 ||
+    ownedTasks.some((t) => !(t.source === 'Recovery' && t.isRoutine)) ||
+    ownedCustomers.some((c) => (auditByCustomer.get(c.id) || []).some((a) => a.actor !== 'System'));
+  if (!hasRealActivity) {
+    return {
+      collectionPerformance: 0,
+      followUpDiscipline: 0,
+      ptpDiscipline: 0,
+      oldOutstandingReduction: 0,
+      noFollowUpControl: 0,
+      processDiscipline: 0,
+      total: 0,
+    };
+  }
+
   const maturedPtps = ownedPtps.filter((p) => MATURED_STATUSES.includes(p.status));
   const keptCount = maturedPtps.filter((p) => p.status === 'kept').length;
 
@@ -143,10 +235,18 @@ function computeRecoveryScoreComponents({ ownedCustomers, ownedPtps, ownedTasks,
     .reduce((s, p) => s + (p.amountReceived || 0), 0);
   const collectionPerformance = collectionTarget <= 0 ? 100 : Math.max(0, Math.min(100, (collectionAchieved / collectionTarget) * 100));
 
-  const overdueTasks = ownedTasks.filter(isTaskOverdue).length;
-  const followUpDiscipline = ownedTasks.length === 0 ? 100 : ((ownedTasks.length - overdueTasks) / ownedTasks.length) * 100;
+  // The routine auto-generated Recovery call (isRoutine, see
+  // recoveryTaskService.js) exists identically for every overdue customer
+  // regardless of the salesperson's own effort — it's already treated as
+  // not a real task in the Tasks tab (AppStore.isRoutineRecoveryCall), so
+  // it shouldn't count as one here either. An event-driven Recovery task
+  // (isRoutine: false — a rejected claim, a broken PTP, …) still counts:
+  // that one genuinely needs the salesperson's action.
+  const realOwnedTasks = ownedTasks.filter((t) => !(t.source === 'Recovery' && t.isRoutine));
+  const overdueTasks = realOwnedTasks.filter(isTaskOverdue).length;
+  const followUpDiscipline = realOwnedTasks.length === 0 ? 0 : ((realOwnedTasks.length - overdueTasks) / realOwnedTasks.length) * 100;
 
-  const ptpDiscipline = maturedPtps.length === 0 ? 75 : (keptCount / maturedPtps.length) * 100;
+  const ptpDiscipline = maturedPtps.length === 0 ? 0 : (keptCount / maturedPtps.length) * 100;
 
   const agedCustomers = ownedCustomers.filter((c) => c.oldestOverdueDays > 60);
   const agedCleared = agedCustomers.filter((c) => c.totalDue <= 0).length;
@@ -154,14 +254,23 @@ function computeRecoveryScoreComponents({ ownedCustomers, ownedPtps, ownedTasks,
 
   const ownedPtpsByCustomer = groupBy(ownedPtps, (p) => p.customerId);
   const validNextActionCount = ownedCustomers.filter((c) =>
-    hasValidNextAction(c, ownedPtpsByCustomer.get(c.id) || [], taskByCustomer.get(c.id) || [])
+    hasRealFollowUpAction(c, ownedPtpsByCustomer.get(c.id) || [], taskByCustomer.get(c.id) || [])
   ).length;
   const noFollowUpControl = ownedCustomers.length === 0 ? 100 : (validNextActionCount / ownedCustomers.length) * 100;
 
-  const recentlyTouched = ownedCustomers.filter(
+  // "Process/Evidence Discipline" — did the salesperson actually log real
+  // contact recently. A customer who owes nothing needs no evidence at
+  // all, so they don't belong in this measure either way: including them
+  // (even as an automatic "pass") let a salesperson with real overdue
+  // accounts and zero genuine evidence on any of them still read as
+  // partly disciplined, just because part of their book happens to owe
+  // nothing. Only customers who actually need following up count here.
+  const customersNeedingFollowUp = ownedCustomers.filter((c) => c.totalDue > 0);
+  const recentlyTouched = customersNeedingFollowUp.filter(
     (c) => daysSinceLastFollowUp(c, taskByCustomer.get(c.id) || [], auditByCustomer.get(c.id) || []) <= 7
   ).length;
-  const processDiscipline = ownedCustomers.length === 0 ? 100 : (recentlyTouched / ownedCustomers.length) * 100;
+  const processDiscipline =
+    customersNeedingFollowUp.length === 0 ? 100 : (recentlyTouched / customersNeedingFollowUp.length) * 100;
 
   const total = Math.max(
     0,

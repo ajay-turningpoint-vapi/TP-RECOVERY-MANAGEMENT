@@ -58,8 +58,7 @@ class _ControlDashboardScreenState extends State<ControlDashboardScreen> {
   // The branch scope is global now (AppStore.branchFilter) so every other
   // RE screen, card and count moves with this one dropdown.
   String get _branchFilter => context.read<AppStore>().branchFilter;
-  int _visibleSalesmen = 5;
-  String _salesmanSearch = '';
+  int _visibleSalesmen = 10;
 
   @override
   Widget build(BuildContext context) {
@@ -69,10 +68,6 @@ class _ControlDashboardScreenState extends State<ControlDashboardScreen> {
     // Overdue row is noise on this "who needs chasing" list.
     final salesmen = store.visibleSalesmen
         .where((s) => ((s['totalOverdue'] as num?) ?? 0) > 0)
-        .where((s) => _salesmanSearch.isEmpty ||
-            ((s['fullName'] as String?) ?? (s['name'] as String? ?? ''))
-                .toLowerCase()
-                .contains(_salesmanSearch.toLowerCase()))
         .toList();
     final visible = salesmen.take(_visibleSalesmen).toList();
 
@@ -175,7 +170,7 @@ class _ControlDashboardScreenState extends State<ControlDashboardScreen> {
                 onChanged: (v) {
                   if (v == null) return;
                   store.setBranchFilter(v);
-                  setState(() => _visibleSalesmen = 5);
+                  setState(() => _visibleSalesmen = 10);
                 },
               ),
             ),
@@ -349,28 +344,6 @@ class _ControlDashboardScreenState extends State<ControlDashboardScreen> {
                 ),
             ],
           ),
-          const SizedBox(height: 10),
-          SizedBox(
-            height: 34,
-            child: TextField(
-              onChanged: (v) => setState(() {
-                _salesmanSearch = v;
-                _visibleSalesmen = 5;
-              }),
-              decoration: InputDecoration(
-                isDense: true,
-                hintText: 'Search salesman...',
-                hintStyle: const TextStyle(fontSize: 12, color: _muted),
-                prefixIcon: const Icon(Icons.search, size: 16, color: _muted),
-                prefixIconConstraints: const BoxConstraints(minWidth: 30, minHeight: 16),
-                contentPadding: const EdgeInsets.symmetric(vertical: 8),
-                filled: true,
-                fillColor: _bg,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
-              ),
-              style: const TextStyle(fontSize: 12, color: _dark),
-            ),
-          ),
           const SizedBox(height: 14),
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
@@ -410,7 +383,7 @@ class _ControlDashboardScreenState extends State<ControlDashboardScreen> {
               Text('Showing 1 to ${visible.length} of ${all.length} Salesmen', style: const TextStyle(fontSize: 11, color: _muted)),
               if (visible.length < all.length)
                 GestureDetector(
-                  onTap: () => setState(() => _visibleSalesmen = (_visibleSalesmen + 5).clamp(0, all.length)),
+                  onTap: () => setState(() => _visibleSalesmen = (_visibleSalesmen + 10).clamp(0, all.length)),
                   child: const Text('Load More  ⌄', style: TextStyle(fontSize: 11, color: Color(0xFF2563EB), fontWeight: FontWeight.bold)),
                 ),
             ],

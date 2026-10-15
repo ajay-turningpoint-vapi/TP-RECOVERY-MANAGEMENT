@@ -2,6 +2,7 @@ const ptpRepository = require('../repositories/ptpRepository');
 const customerRepository = require('../repositories/customerRepository');
 const auditRepository = require('../repositories/auditRepository');
 const escalationService = require('./escalationService');
+const escalationRepository = require('../repositories/escalationRepository');
 const taskService = require('./taskService');
 const { notifyDecision, salesmanForCustomer } = require('./decisionNotify');
 const { driveRecoveryTask, rupees } = require('./recoveryTaskService');
@@ -192,8 +193,63 @@ async function evaluateBrokenPtpEscalation(customerId) {
       ownerId: customer.assignedSalesmanId,
       deadline: new Date(Date.now() + (targetLevel === 'L3' ? 2 : 3) * 86400000),
       moneyAtRisk: customer.totalDue,
+      cause: 'BrokenPTP',
     }
   );
+}
+
+/**
+ * Walks back (lowers or resolves) an escalation that the broken-PTP count
+ * itself caused, once a PTP re-verify upgrade (see
+ * services/ptpVerificationService.js's reverifyStalePtps) drops that
+ * count. The mirror image of evaluateBrokenPtpEscalation above — that one
+ * only ever raises, this one only ever lowers/resolves, and both key off
+ * the exact same brokenCount → targetLevel ladder so they can never
+ * disagree on what level a given broken count justifies.
+ *
+ * Only ever touches the customer's OPEN escalation(s) tagged
+ * `cause: 'BrokenPTP'` — an escalation raised for Customer Refused,
+ * non-contact, or a manual RE/management reason (cause !== 'BrokenPTP',
+ * including legacy rows where cause is NULL) is never auto-resolved or
+ * auto-lowered here, even if it happens to sit on the same customer.
+ */
+async function reconcileBrokenPtpEscalation(customerId) {
+  const customerPtps = await ptpRepository.findByCustomer(customerId);
+  const brokenCount = customerPtps.filter((p) => p.status === 'broken').length;
+
+  const openCases = (await escalationService.listForCustomer(customerId)).filter(
+    (e) => e.isOpen && e.cause === 'BrokenPTP'
+  );
+  if (openCases.length === 0) return;
+
+  const targetLevel = brokenCount >= 3 ? 'L3' : brokenCount >= 2 ? 'L2' : null;
+
+  for (const escalation of openCases) {
+    if (targetLevel === null) {
+      // Broken-PTP count dropped below the L2 threshold entirely —
+      // nothing left to justify this cause's case at all.
+      await escalationService.resolve(
+        escalation.id,
+        { id: 'system', fullName: 'System' },
+        'Auto-resolved — broken-PTP count dropped below the escalation threshold after a re-verify upgrade.'
+      );
+      continue;
+    }
+    if (LEVEL_SEVERITY[targetLevel] < LEVEL_SEVERITY[escalation.level]) {
+      await escalationRepository.update(escalation.id, { level: targetLevel });
+      await auditRepository.record(customerId, {
+        type: 'ESCALATION_LOWERED',
+        description: `Broken-PTP count dropped to ${brokenCount} after a re-verify upgrade — escalation lowered from ${escalation.level} to ${targetLevel}.`,
+        actor: 'System',
+        previousState: escalation.level,
+        newState: targetLevel,
+        source: 'Escalation',
+      });
+      await escalationService.recomputeCustomerEscalationLevel(customerId);
+    }
+    // targetLevel >= escalation.level: the remaining broken count still
+    // fully justifies (or exceeds) this case's current level — leave it.
+  }
 }
 
 /**
@@ -231,5 +287,6 @@ module.exports = {
   rejectCorrection,
   applyPtpOutcomeTx,
   evaluateBrokenPtpEscalation,
+  reconcileBrokenPtpEscalation,
   reopenRecoveryAfterPtpOutcome,
 };

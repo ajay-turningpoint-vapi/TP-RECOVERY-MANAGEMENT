@@ -47,6 +47,13 @@ class AppTask {
   final DateTime? pendingDeadline;
   final String? pendingPriority;
   final String source;
+  /// True for routine/nightly-refresh recovery calls (kept out of the
+  /// salesperson's Tasks tab — Start Recovery covers them); false when this
+  /// task/retarget was driven by a specific event (a payment claim
+  /// rejected, a PTP broken, a dispute decided, …) the salesperson needs
+  /// to see right now. Defaults true so any payload that omits it (older
+  /// cached data) keeps today's behavior.
+  final bool isRoutine;
   final DateTime? completedAt;
   final DateTime createdAt;
   final bool reviewedByRE;
@@ -75,6 +82,7 @@ class AppTask {
     this.pendingDeadline,
     this.pendingPriority,
     this.source = 'System',
+    this.isRoutine = true,
     this.completedAt,
     required this.createdAt,
     this.reviewedByRE = false,
@@ -111,6 +119,7 @@ class AppTask {
       pendingDeadline: json['pendingDeadline'] != null ? DateTime.parse(json['pendingDeadline'] as String).toLocal() : null,
       pendingPriority: json['pendingPriority'] as String?,
       source: json['source'] as String? ?? 'System',
+      isRoutine: json['isRoutine'] as bool? ?? true,
       completedAt: json['completedAt'] != null ? DateTime.parse(json['completedAt'] as String).toLocal() : null,
       // Falls back to the deadline for the rare payload that omits it
       // (never happens from the real API — taskRepository always sends
@@ -141,6 +150,7 @@ class AppTask {
     DateTime? pendingDeadline,
     String? pendingPriority,
     String? source,
+    bool? isRoutine,
     DateTime? completedAt,
     DateTime? createdAt,
     bool? reviewedByRE,
@@ -164,6 +174,7 @@ class AppTask {
       pendingDeadline: pendingDeadline ?? this.pendingDeadline,
       pendingPriority: pendingPriority ?? this.pendingPriority,
       source: source ?? this.source,
+      isRoutine: isRoutine ?? this.isRoutine,
       completedAt: completedAt ?? this.completedAt,
       createdAt: createdAt ?? this.createdAt,
       reviewedByRE: reviewedByRE ?? this.reviewedByRE,

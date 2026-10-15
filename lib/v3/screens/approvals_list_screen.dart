@@ -4,8 +4,6 @@ import 'package:intl/intl.dart';
 import 'package:salesman_mobile/v2/stores/app_store.dart';
 import 'package:salesman_mobile/v3/screens/dispute_detail_screen.dart';
 import 'package:salesman_mobile/v3/screens/ptp_correction_review_screen.dart';
-import 'package:salesman_mobile/v3/screens/outcome_edit_detail_screen.dart';
-import 'package:salesman_mobile/v3/screens/outcome_edit_review_screen.dart';
 import 'package:salesman_mobile/widgets/app_message.dart';
 import 'package:salesman_mobile/widgets/loading_button.dart';
 import 'package:salesman_mobile/widgets/data_loading.dart' show LoadingAppBarStrip;
@@ -138,30 +136,6 @@ class ApprovalsListScreen extends StatelessWidget {
         amount: _rupee.format(p.amountPromised),
         critical: customerEscalated(p.customerId),
         onTap: () => go(PtpCorrectionReviewScreen(ptpId: p.id)),
-      ));
-    }
-
-    for (final r in store.pendingOutcomeEdits) {
-      items.add(_ApprovalItem(
-        type: 'OUTCOME EDIT',
-        color: const Color(0xFFDB2777),
-        title: r.customerName,
-        subtitle: '${r.outcomeKind} · by ${store.salesmanDisplayName(r.salesmanId)}',
-        amount: DateFormat('dd MMM yyyy').format(r.requestedAt),
-        critical: customerEscalated(r.customerId),
-        onTap: () => go(OutcomeEditDetailScreen(requestId: r.id)),
-      ));
-    }
-
-    for (final r in store.pendingOutcomeCorrections) {
-      items.add(_ApprovalItem(
-        type: 'OUTCOME CORRECTION',
-        color: const Color(0xFFDB2777),
-        title: r.customerName,
-        subtitle: 'Correction requested by ${store.salesmanDisplayName(r.salesmanId)}',
-        amount: DateFormat('dd MMM yyyy').format(r.requestedAt),
-        critical: customerEscalated(r.customerId),
-        onTap: () => go(OutcomeEditReviewScreen(requestId: r.id)),
       ));
     }
 

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:salesman_mobile/v2/screens/maintenance_screen.dart';
 import 'package:salesman_mobile/v2/stores/app_store.dart';
+import 'package:salesman_mobile/widgets/app_message.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -33,6 +34,18 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     _shakeAnimation = Tween<double>(begin: 0, end: 8).chain(CurveTween(curve: Curves.elasticIn)).animate(_shakeController);
     _maintenancePoll = Timer.periodic(const Duration(seconds: 15), (_) {
       if (mounted) context.read<AppStore>().checkMaintenanceStatus();
+    });
+    // Single-device login forced us back here mid-session (see
+    // AppStore._handleSessionRevoked) — show why, once, then clear it so
+    // it doesn't reappear on a later failed/cancelled sign-in attempt.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final store = context.read<AppStore>();
+      final msg = store.forcedLogoutMessage;
+      if (msg != null) {
+        store.clearForcedLogoutMessage();
+        showAppMessage(context, message: msg, type: AppMessageType.warning, title: 'Signed out');
+      }
     });
   }
 

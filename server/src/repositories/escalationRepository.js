@@ -13,6 +13,7 @@ function mapEscalation(row) {
     deadline: row.deadline,
     moneyAtRisk: Number(row.money_at_risk),
     isOpen: !!row.is_open,
+    cause: row.cause,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -49,8 +50,8 @@ async function insert(escalation, connection) {
   const id = escalation.id || uuid();
   const run = connection ? (sql, params) => connection.query(sql, params) : query;
   await run(
-    `INSERT INTO escalation_cases (id, customer_id, level, reason, plan, owner_id, deadline, money_at_risk, is_open)
-     VALUES (:id, :customerId, :level, :reason, :plan, :ownerId, :deadline, :moneyAtRisk, :isOpen)`,
+    `INSERT INTO escalation_cases (id, customer_id, level, reason, plan, owner_id, deadline, money_at_risk, is_open, cause)
+     VALUES (:id, :customerId, :level, :reason, :plan, :ownerId, :deadline, :moneyAtRisk, :isOpen, :cause)`,
     {
       id,
       customerId: escalation.customerId,
@@ -61,6 +62,7 @@ async function insert(escalation, connection) {
       deadline: escalation.deadline || null,
       moneyAtRisk: escalation.moneyAtRisk || 0,
       isOpen: escalation.isOpen === undefined ? 1 : escalation.isOpen ? 1 : 0,
+      cause: escalation.cause || null,
     }
   );
   return id;
@@ -74,6 +76,7 @@ const COLUMN_MAP = {
   deadline: 'deadline',
   moneyAtRisk: 'money_at_risk',
   isOpen: 'is_open',
+  cause: 'cause',
 };
 
 async function update(id, fields, connection) {

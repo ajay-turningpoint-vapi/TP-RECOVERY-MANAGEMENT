@@ -74,6 +74,27 @@ class ApiClient {
 
   bool get isAuthenticated => _accessToken != null && _refreshToken != null;
 
+  /// This device's own `sessionVersion`, read straight out of the current
+  /// access token's JWT payload (never sent back from the server as part
+  /// of `user` — see authService.js) — lets the client tell "a real
+  /// session-revoked push about ME" apart from a stale echo of the login
+  /// this very device just performed. No signature verification needed
+  /// here; this is purely a local self-comparison, not an auth check.
+  int? get sessionVersion {
+    final token = _accessToken;
+    if (token == null) return null;
+    final parts = token.split('.');
+    if (parts.length != 3) return null;
+    try {
+      var payload = parts[1].replaceAll('-', '+').replaceAll('_', '/');
+      payload += '=' * ((4 - payload.length % 4) % 4);
+      final decoded = jsonDecode(utf8.decode(base64.decode(payload))) as Map<String, dynamic>;
+      return decoded['sessionVersion'] as int?;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// The last successfully-fetched `getMe()`/`login()` identity (role/id/
   /// username/fullName), persisted so a cold start that fails on a pure
   /// network error (not a real auth rejection) can still route the UI —
@@ -394,22 +415,6 @@ class ApiClient {
       await _post('/api/disputes/$disputeId/resolve-by-owner', body) as Map<String, dynamic>;
   Future<Map<String, dynamic>> rejectDisputeByOwner(String disputeId, Map<String, dynamic> body) async =>
       await _post('/api/disputes/$disputeId/reject-by-owner', body) as Map<String, dynamic>;
-
-  // ---- Outcome correction requests ----
-  Future<List<dynamic>> getOutcomeCorrections() async => await _get('/api/outcome-corrections') as List<dynamic>;
-  Future<Map<String, dynamic>> requestOutcomeCorrection(String customerId, Map<String, dynamic> body) async =>
-      await _post('/api/outcome-corrections/customer/$customerId', body) as Map<String, dynamic>;
-  Future<Map<String, dynamic>> approveOutcomeCorrection(String id) async => await _post('/api/outcome-corrections/$id/approve') as Map<String, dynamic>;
-  Future<Map<String, dynamic>> rejectOutcomeCorrection(String id, String reason) async =>
-      await _post('/api/outcome-corrections/$id/reject', {'reason': reason}) as Map<String, dynamic>;
-
-  // ---- Outcome edit requests (edit a recorded outcome's own fields, RE-approved) ----
-  Future<List<dynamic>> getOutcomeEdits() async => await _get('/api/outcome-edits') as List<dynamic>;
-  Future<Map<String, dynamic>> requestOutcomeEdit(String customerId, Map<String, dynamic> body) async =>
-      await _post('/api/outcome-edits/customer/$customerId', body) as Map<String, dynamic>;
-  Future<Map<String, dynamic>> approveOutcomeEdit(String id) async => await _post('/api/outcome-edits/$id/approve') as Map<String, dynamic>;
-  Future<Map<String, dynamic>> rejectOutcomeEdit(String id, String reason) async =>
-      await _post('/api/outcome-edits/$id/reject', {'reason': reason}) as Map<String, dynamic>;
 
   // ---- Payment claims ----
   Future<List<dynamic>> getPaymentClaims() async => await _get('/api/payment-claims') as List<dynamic>;

@@ -19,8 +19,6 @@ const RESOURCE_ALL = [
   'disputes',
   'paymentClaims',
   'escalations',
-  'outcomeEdits',
-  'outcomeCorrections',
   'salesmen',
 ];
 

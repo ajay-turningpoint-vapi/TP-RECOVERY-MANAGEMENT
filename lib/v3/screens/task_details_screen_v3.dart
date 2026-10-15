@@ -107,7 +107,7 @@ class TaskDetailsScreenV3 extends StatelessWidget {
                         // Outcome (which now requires a visit photo up
                         // front — see customer_360_screen.dart) instead of
                         // just landing on the profile page with no prompt.
-                        onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => Customer360Screen(customer: customer, editOutcome: t.type == TaskType.physicalVisit))),
+                        onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => Customer360Screen(customer: customer, editOutcome: t.type == TaskType.physicalVisit, fromTaskDetails: true))),
                         icon: const Icon(Icons.play_circle_outline, size: 16),
                         label: const FittedBox(fit: BoxFit.scaleDown, child: Text('Take Action', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
                       ),

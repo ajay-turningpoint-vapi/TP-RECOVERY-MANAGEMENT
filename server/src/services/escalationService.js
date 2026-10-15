@@ -36,14 +36,14 @@ async function getOrThrow(id) {
  * whatever is already recorded — an L1 raised after an L3 already exists
  * shouldn't quietly downgrade the customer's badge.
  */
-async function raise(customerId, user, { level, reason, plan, ownerId, deadline, moneyAtRisk }) {
+async function raise(customerId, user, { level, reason, plan, ownerId, deadline, moneyAtRisk, cause }) {
   const customer = await customerRepository.findById(customerId);
   if (!customer) throw new NotFoundError('Customer');
 
   let escalationId;
   await withTransaction(async (conn) => {
     escalationId = await escalationRepository.insert(
-      { customerId, level, reason, plan, ownerId, deadline, moneyAtRisk },
+      { customerId, level, reason, plan, ownerId, deadline, moneyAtRisk, cause },
       conn
     );
 
@@ -150,4 +150,25 @@ async function resolve(escalationId, user, note) {
   return escalationRepository.findById(escalationId);
 }
 
-module.exports = { listForUser, listForCustomer, raise, resolve };
+/**
+ * Sets customers.escalation_level to the max severity across the
+ * customer's remaining OPEN escalation cases ('none' if none are left).
+ * Nothing in this file needed this before `raise` only ever bumps up and
+ * `resolve` only ever resets straight to 'none' when the LAST case
+ * closes. It's needed once a single cause's case can be lowered or closed
+ * on its own (see ptpService.reconcileBrokenPtpEscalation) while a
+ * DIFFERENT-cause case might still be open on the same customer — the
+ * badge must reflect whatever that other case still justifies, not just
+ * blindly drop to 'none'.
+ */
+async function recomputeCustomerEscalationLevel(customerId, conn) {
+  const openCases = await escalationRepository.findOpenByCustomer(customerId, conn);
+  const maxLevel = openCases.reduce(
+    (max, c) => (LEVEL_SEVERITY[c.level] > LEVEL_SEVERITY[max] ? c.level : max),
+    'none'
+  );
+  await customerRepository.update(customerId, { escalationLevel: maxLevel }, conn);
+  return maxLevel;
+}
+
+module.exports = { listForUser, listForCustomer, raise, resolve, recomputeCustomerEscalationLevel, LEVEL_SEVERITY };

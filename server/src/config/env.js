@@ -66,6 +66,26 @@ const env = {
   businessTimezone: process.env.BUSINESS_TIMEZONE || 'Asia/Kolkata',
 
   logLevel: process.env.LOG_LEVEL || 'info',
+
+  // How far back (by PTP promise_date) ptpVerificationService's
+  // reverifyStalePtps correction pass scans for broken/partiallyKept PTPs
+  // to re-check against BUSY. Bounds the query volume — without this,
+  // every broken PTP ever recorded gets re-asked of BUSY on every sync,
+  // forever. BUSY's back-office receipt entry lags by ~1.5 days (see that
+  // file's header comment), so days-not-months is the realistic window.
+  ptpReverifyLookbackDays: parseInt(process.env.PTP_REVERIFY_LOOKBACK_DAYS || '60', 10),
+
+  // Crash-alert email (src/scripts/crashWatcher.js) — optional: the
+  // watcher just logs a warning and skips sending if these aren't set,
+  // rather than crashing itself for lack of mail config.
+  smtp: {
+    host: process.env.SMTP_HOST || '',
+    port: parseInt(process.env.SMTP_PORT || '465', 10),
+    secure: process.env.SMTP_SECURE !== 'false',
+    user: process.env.SMTP_USER || '',
+    pass: process.env.SMTP_PASS || '',
+  },
+  alertEmailTo: process.env.ALERT_EMAIL_TO || '',
 };
 
 // A placeholder secret in production means every JWT this server issues can

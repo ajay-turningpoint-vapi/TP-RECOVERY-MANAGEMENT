@@ -159,6 +159,28 @@ async function findPendingVerificationDue(cutoff, connection) {
   return rows.map(mapPtp);
 }
 
+/**
+ * PTPs already finalized to 'broken' or 'partiallyKept' whose due date is
+ * within the re-verify lookback window — candidates for
+ * services/ptpVerificationService.js's reverifyStalePtps correction pass,
+ * which re-checks BUSY for a late-entered receipt and upgrades the
+ * outcome (never downgrades, never touches 'kept'). `sinceCutoff` bounds
+ * the scan so the BUSY query volume doesn't grow unbounded as broken PTPs
+ * accumulate over the life of the system.
+ */
+async function findReverifiableCandidates(sinceCutoff, connection) {
+  const run = connection ? (sql, params) => connection.query(sql, params) : query;
+  const result = await run(
+    `SELECT * FROM ptps
+     WHERE status IN ('broken', 'partiallyKept')
+       AND promise_date >= :sinceCutoff
+     ORDER BY promise_date`,
+    { sinceCutoff }
+  );
+  const rows = connection ? result[0] : result;
+  return rows.map(mapPtp);
+}
+
 async function update(id, fields, connection) {
   const keys = Object.keys(fields).filter((k) => COLUMN_MAP[k]);
   if (keys.length === 0) return;
@@ -176,6 +198,7 @@ module.exports = {
   findScheduledPastDue,
   findScheduledDueByTime,
   findPendingVerificationDue,
+  findReverifiableCandidates,
   hasActivePtpForCustomer,
   insert,
   update,

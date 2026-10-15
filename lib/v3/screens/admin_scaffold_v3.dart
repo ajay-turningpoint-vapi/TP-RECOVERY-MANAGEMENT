@@ -37,7 +37,7 @@ class _AdminScaffoldV3State extends State<AdminScaffoldV3> {
       _AdminSettingsTab(),
     ];
     return Scaffold(
-      body: SafeArea(child: IndexedStack(index: _currentIndex, children: pages)),
+      body: SafeArea(top: false, bottom: false, child: IndexedStack(index: _currentIndex, children: pages)),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
         type: BottomNavigationBarType.fixed,
