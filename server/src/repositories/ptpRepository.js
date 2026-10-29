@@ -10,12 +10,16 @@ function mapPtp(row) {
     promiseDate: row.promise_date,
     paymentMode: row.payment_mode,
     status: row.status,
+    // When the salesman recorded the promise — the PTP check counts
+    // payments from this day (ptpVerificationService.checkWindowStart).
+    createdAt: row.created_at,
     correctionRequestedAmount: row.correction_requested_amount === null ? null : Number(row.correction_requested_amount),
     correctionRequestedDate: row.correction_requested_date,
     correctionRequestedPaymentMode: row.correction_requested_payment_mode || null,
     correctionReason: row.correction_reason,
     correctionStatus: row.correction_status,
     amountReceived: row.amount_received === null || row.amount_received === undefined ? null : Number(row.amount_received),
+    advanceAmount: row.advance_amount === null || row.advance_amount === undefined ? null : Number(row.advance_amount),
     brokenReason: row.broken_reason,
     totalDueAtPromise: row.total_due_at_promise === null || row.total_due_at_promise === undefined ? null : Number(row.total_due_at_promise),
     totalOutstandingAtPromise:
@@ -60,9 +64,9 @@ async function insert(ptp, connection) {
   const run = connection ? (sql, params) => connection.query(sql, params) : query;
   await run(
     `INSERT INTO ptps (id, customer_id, amount_promised, promise_date, payment_mode, status,
-                       total_due_at_promise, total_outstanding_at_promise)
+                       total_due_at_promise, total_outstanding_at_promise, advance_amount)
      VALUES (:id, :customerId, :amountPromised, :promiseDate, :paymentMode, :status,
-             :totalDueAtPromise, :totalOutstandingAtPromise)`,
+             :totalDueAtPromise, :totalOutstandingAtPromise, :advanceAmount)`,
     {
       id,
       customerId: ptp.customerId,
@@ -72,6 +76,7 @@ async function insert(ptp, connection) {
       status: ptp.status || 'scheduled',
       totalDueAtPromise: ptp.totalDueAtPromise ?? null,
       totalOutstandingAtPromise: ptp.totalOutstandingAtPromise ?? null,
+      advanceAmount: ptp.advanceAmount ?? null,
     }
   );
   return id;
@@ -88,6 +93,7 @@ const COLUMN_MAP = {
   correctionReason: 'correction_reason',
   correctionStatus: 'correction_status',
   amountReceived: 'amount_received',
+  advanceAmount: 'advance_amount',
   brokenReason: 'broken_reason',
   totalDueAtPromise: 'total_due_at_promise',
   totalOutstandingAtPromise: 'total_outstanding_at_promise',

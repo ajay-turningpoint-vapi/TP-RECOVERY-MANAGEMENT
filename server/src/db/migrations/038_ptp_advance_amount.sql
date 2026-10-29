@@ -1,0 +1,1 @@
+ALTER TABLE ptps ADD COLUMN advance_amount DECIMAL(14, 2) NULL;

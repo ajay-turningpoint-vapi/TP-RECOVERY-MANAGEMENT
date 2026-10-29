@@ -79,6 +79,13 @@ async function reconcileState(customerId, { trigger = 'state' } = {}) {
 
   const { totalDue, covered, actionable } = await coverageFor(customerId);
 
+  // Never un-park a customer still inside one of the Record Outcome rules'
+  // waits (Will Confirm time, No Answer window, open PTP / claim /
+  // Internal Action) — overwriting primaryNextAction here is exactly what
+  // let early tasks through before.
+  const { outcomeWait } = require('./recoveryTaskService');
+  if (await outcomeWait(customerId, { customer })) return { totalDue, covered, actionable };
+
   if (actionable > 0 && customer.currentRecoveryState === 'Waiting / Monitoring') {
     await customerRepository.update(customerId, {
       currentRecoveryState: 'Action Required',
@@ -151,8 +158,81 @@ async function reconcileAll() {
     }
   }
   logger.info(`[recoveryReconcile] daily sweep reconciled ${changed}/${targets.length} customer(s).`);
+
+  const { normalized } = await reconcileStuckParked(customers, allTasks);
+  const { enforceOutcomeRules } = require('./recoveryTaskService');
+  const { outcomeRuleTasksClosed } = await enforceOutcomeRules();
+
   emitChange(['customers', 'tasks'], { reason: 'recovery.reconcile.sweep' });
-  return { reconciled: changed };
+  return { reconciled: changed, stuckParkedNormalized: normalized, outcomeRuleTasksClosed };
 }
 
-module.exports = { reconcileState, reconcileAll, computeCoverage, coverageFor, RECOVERY_SOURCE };
+/**
+ * Safety net for a parked customer (Waiting / Monitoring) with NO open
+ * task — driveRecoveryTask's own park-to-'Nothing Pending' correction
+ * (recoveryTaskService.js) deliberately only fires when there's an actual
+ * open recovery task to retire, so a customer who reached ₹0 due by some
+ * OTHER path (a PTP that verified as kept/broken, a "Will Confirm" whose
+ * delayed job never fired, driveRecoveryTask itself closing the last task
+ * on an earlier pass) and never had — or already lost — an open task
+ * falls through that guard and is left showing stale leftover text (e.g.
+ * "PTP Scheduled" / "Follow-up Scheduled") forever, with Record Outcome
+ * locked and no task in sight. This mirrors driveRecoveryTask's exact
+ * park logic (same primaryNextAction/reasonForAction/audit shape) for
+ * precisely that complementary case. Runs as part of `reconcileAll`'s
+ * daily sweep (so this class of stuck customer can't recur unnoticed);
+ * also callable standalone to heal existing stragglers without running
+ * the rest of the (much broader) daily sweep.
+ */
+async function reconcileStuckParked(customers, allTasks) {
+  if (!customers || !allTasks) {
+    [customers, allTasks] = await Promise.all([customerRepository.findAll(), taskRepository.findAll()]);
+  }
+  const [allPtps, allClaims, allDisputes] = await Promise.all([
+    ptpRepository.findAll(),
+    paymentClaimRepository.findAll(),
+    disputeRepository.findAll(),
+  ]);
+  const openTaskCustomerIds = new Set(
+    allTasks.filter((t) => !['completed', 'closed', 'cancelled'].includes(t.status)).map((t) => t.customerId)
+  );
+  let normalized = 0;
+  for (const c of customers) {
+    if (c.currentRecoveryState !== 'Waiting / Monitoring') continue;
+    if (c.primaryNextAction === 'Nothing Pending') continue;
+    if (openTaskCustomerIds.has(c.id)) continue;
+    const { actionable } = computeCoverage(c, { ptps: allPtps, claims: allClaims, disputes: allDisputes });
+    if (actionable > 0) continue;
+    // Still inside a Record Outcome rule's wait (open PTP / claim /
+    // Internal Action, Will Confirm time, No Answer window) — that's a
+    // legitimately parked customer, not a stale one. Relabelling it
+    // 'Nothing Pending' hid the open PTP and broke the Will Confirm job
+    // (resolveFollowUp keys off primaryNextAction). Seen on 23 Oct once
+    // the stale RE follow-ups that used to mask these were closed.
+    const { outcomeWait } = require('./recoveryTaskService');
+    if (await outcomeWait(c.id, { customer: c, tasks: allTasks.filter((t) => t.customerId === c.id) })) continue;
+    try {
+      const stalePrimaryNextAction = c.primaryNextAction;
+      await customerRepository.update(c.id, {
+        primaryNextAction: 'Nothing Pending',
+        reasonForAction: `Nothing currently due — "${stalePrimaryNextAction}" never resolved into a new task.`,
+      });
+      await auditRepository.record(c.id, {
+        type: 'RECOVERY_PARKED_NOTHING_DUE',
+        description: `Stale parked state cleared (was "${stalePrimaryNextAction}") — nothing actionable and no open task remains.`,
+        actor: 'System',
+        source: RECOVERY_SOURCE,
+      });
+      normalized += 1;
+    } catch (err) {
+      logger.error('[recoveryReconcile] stuck-parked normalize failed for customer', { customerId: c.id, message: err.message });
+    }
+  }
+  if (normalized > 0) {
+    logger.info(`[recoveryReconcile] stuck-parked sweep normalized ${normalized} customer(s).`);
+    emitChange(['customers'], { reason: 'recovery.reconcile.stuck' });
+  }
+  return { normalized };
+}
+
+module.exports = { reconcileState, reconcileAll, reconcileStuckParked, computeCoverage, coverageFor, RECOVERY_SOURCE };

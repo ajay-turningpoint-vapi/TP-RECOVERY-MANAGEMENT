@@ -29,14 +29,22 @@ function refreshTokenExpiry() {
  * of `user` — it's purely for the `authenticate` middleware to compare
  * against the current DB value on every request (see migration 028).
  */
-async function issueTokenPair(publicUser, sessionVersion) {
-  const accessToken = signToken({ ...publicUser, sessionVersion });
+async function issueTokenPair(publicUser, sessionVersion, channel = 'mobile') {
+  // Mobile tokens deliberately carry no `channel` claim — the shipped apps
+  // decode their own token and nothing there should change for them.
+  const claims = channel === 'web' ? { ...publicUser, sessionVersion, channel } : { ...publicUser, sessionVersion };
+  const accessToken = signToken(claims);
   const refreshToken = refreshTokenRepository.generateRawToken();
-  await refreshTokenRepository.insert(publicUser.id, refreshToken, refreshTokenExpiry());
+  await refreshTokenRepository.insert(publicUser.id, refreshToken, refreshTokenExpiry(), channel);
   return { accessToken, refreshToken };
 }
 
-async function login(username, password) {
+/**
+ * `channel` is 'mobile' (default — every shipped app) or 'web' (the RE web
+ * dashboard, migration 040). Single-device login applies within a channel
+ * only, so signing in on the web never logs the same user out of their phone.
+ */
+async function login(username, password, channel = 'mobile') {
   const user = await userRepository.findByUsername(username);
   if (!user) {
     throw new UnauthorizedError('Invalid username or password');
@@ -64,17 +72,17 @@ async function login(username, password) {
   // middleware rejects any token carrying an older version, so an already
   // signed-in device is logged out on its very next request instead of
   // staying usable until its access token happens to expire.
-  await refreshTokenRepository.revokeAllForUser(user.id);
-  const sessionVersion = await userRepository.bumpSessionVersion(user.id);
+  await refreshTokenRepository.revokeAllForUser(user.id, channel);
+  const sessionVersion = await userRepository.bumpSessionVersion(user.id, channel);
   // Pushes an immediate SSE notice to any OTHER device already signed in
   // as this user — previously that device only found out on its own next
   // API call (the authenticate middleware rejection above). The client
   // compares `sessionVersion` against its own token and ignores this if
   // it's actually itself (e.g. its own just-completed login's echo).
-  publish({ type: 'session-revoked', scope: { userId: user.id }, sessionVersion });
+  publish({ type: 'session-revoked', scope: { userId: user.id }, sessionVersion, channel });
 
   const publicUser = toPublicUser(user);
-  const { accessToken, refreshToken } = await issueTokenPair(publicUser, sessionVersion);
+  const { accessToken, refreshToken } = await issueTokenPair(publicUser, sessionVersion, channel);
   return { accessToken, refreshToken, user: publicUser };
 }
 
@@ -104,9 +112,10 @@ async function refresh(rawRefreshToken) {
   }
 
   await refreshTokenRepository.revokeById(record.id);
-  const sessionVersion = await userRepository.getSessionVersion(user.id);
+  const channel = record.channel || 'mobile';
+  const sessionVersion = await userRepository.getSessionVersion(user.id, channel);
   const publicUser = toPublicUser(user);
-  const { accessToken, refreshToken } = await issueTokenPair(publicUser, sessionVersion);
+  const { accessToken, refreshToken } = await issueTokenPair(publicUser, sessionVersion, channel);
   return { accessToken, refreshToken, user: publicUser };
 }
 
@@ -124,19 +133,24 @@ async function logout(rawRefreshToken) {
  * user (so any other device is logged out) and issues a fresh token pair for
  * the caller so their current session stays alive seamlessly.
  */
-async function changePassword(userId, newPassword) {
+async function changePassword(userId, newPassword, channel = 'mobile') {
   const user = await userRepository.findById(userId);
   if (!user) {
     throw new UnauthorizedError('Authentication required');
   }
 
+  // A password change logs out every channel, not just the caller's.
   await userRepository.updatePasswordHash(userId, await hashPassword(newPassword));
   await refreshTokenRepository.revokeAllForUser(userId);
-  const sessionVersion = await userRepository.bumpSessionVersion(userId);
-  publish({ type: 'session-revoked', scope: { userId }, sessionVersion });
+  let sessionVersion;
+  for (const ch of ['mobile', 'web']) {
+    const v = await userRepository.bumpSessionVersion(userId, ch);
+    publish({ type: 'session-revoked', scope: { userId }, sessionVersion: v, channel: ch });
+    if (ch === channel) sessionVersion = v;
+  }
 
   const publicUser = toPublicUser(user);
-  const { accessToken, refreshToken } = await issueTokenPair(publicUser, sessionVersion);
+  const { accessToken, refreshToken } = await issueTokenPair(publicUser, sessionVersion, channel);
   return { accessToken, refreshToken, user: publicUser };
 }
 

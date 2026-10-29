@@ -94,6 +94,10 @@ class Customer {
   // to chase now. 0 on list rows (only /customers/:id computes them).
   final double coveredAmount;
   final double actionableAmount;
+  // Set (detail fetch only) while a Record Outcome rule is still waiting
+  // on its own trigger — open PTP, Will Confirm time, No Answer window,
+  // claim / Internal Action with the RE. The RE can't create a task then.
+  final String? outcomeWaitText;
   final String branch;
   final String customerCategory; // e.g. Carpenter, Contractor, End Customer, Builder, Distributor
   final int noAnswerAttempts; // real server-tracked count (customerService.recordOutcome's No Answer threshold)
@@ -136,6 +140,7 @@ class Customer {
     required this.totalDue,
     this.coveredAmount = 0,
     this.actionableAmount = 0,
+    this.outcomeWaitText,
     required this.oldestOverdueDays,
     this.activePtpDetails,
     required this.currentRecoveryState,
@@ -189,6 +194,7 @@ class Customer {
       totalOutstanding: (json['totalOutstanding'] as num?)?.toDouble() ?? 0.0,
       coveredAmount: (json['coveredAmount'] as num?)?.toDouble() ?? 0.0,
       actionableAmount: (json['actionableAmount'] as num?)?.toDouble() ?? 0.0,
+      outcomeWaitText: (json['outcomeWait'] as Map?)?['text'] as String?,
       // BUSY's detail response calls this `overdueAmount` (more accurate
       // name for what it is) rather than RMS's `totalDue` — same "Overdue
       // Amount" UI slot, so both keys map onto the same field here rather
@@ -330,6 +336,7 @@ class Customer {
       noAnswerAttempts: noAnswerAttempts ?? this.noAnswerAttempts,
       coveredAmount: coveredAmount ?? this.coveredAmount,
       actionableAmount: actionableAmount ?? this.actionableAmount,
+      outcomeWaitText: outcomeWaitText,
       updatedAt: updatedAt ?? this.updatedAt,
     );
   }

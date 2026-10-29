@@ -37,8 +37,14 @@ const internalActionRejectSchema = z.object({
   attachmentPath: z.string().optional(),
 });
 
+const rejectVisitSchema = z.object({
+  reason: z.string().min(1),
+  attachmentPath: z.string().optional(),
+});
+
 router.get('/', controller.list);
 router.post('/:id/complete', controller.complete);
+router.post('/:id/reject-visit', authorize('RECOVERY_EXECUTIVE', 'MANAGEMENT'), validate(rejectVisitSchema), controller.rejectVisit);
 router.post('/:id/request-extension', validate(extensionSchema), controller.requestExtension);
 router.post('/:id/approve-edit', authorize('RECOVERY_EXECUTIVE', 'MANAGEMENT'), controller.approveEdit);
 router.post('/:id/reject-edit', authorize('RECOVERY_EXECUTIVE', 'MANAGEMENT'), controller.rejectEdit);

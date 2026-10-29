@@ -1,0 +1,1 @@
+ALTER TABLE disputes MODIFY COLUMN status ENUM('Pending Approval','Approved','Rejected','Need More Information','Awaiting Verification','Resolved','Returned to Recovery','Auto-Closed') NOT NULL DEFAULT 'Pending Approval';

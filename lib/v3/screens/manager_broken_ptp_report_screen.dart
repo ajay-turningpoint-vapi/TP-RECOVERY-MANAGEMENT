@@ -244,7 +244,7 @@ class _ManagerBrokenPtpReportScreenState extends State<ManagerBrokenPtpReportScr
   Widget _trendCard(List<Map<String, dynamic>> trend, double chartMax) {
     return InfoCard(
       children: [
-        const Text('Broken PTP Trend (Last 6 Months)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: kNavy)),
+        const Text('Broken PTP Trend (Last 7 Days)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: kNavy)),
         const SizedBox(height: 12),
         SizedBox(
           height: 160,

@@ -64,11 +64,29 @@ async function listForCustomer(customerId) {
  * previous page (or null for the first page). Fetches `limit + 1` rows so
  * the caller can tell whether another page exists without a second query.
  */
-async function listForCustomerPage(customerId, { after, limit }) {
-  const params = { customerId, limit: limit + 1 };
-  let cursorClause = '';
+// The simple Customer History (History tab): the salesman's recorded
+// outcomes plus the steps that matter to people — "time reached, call the
+// customer", payment results, RE decisions, escalations. Everything else
+// (task created / auto-closed / missed-deadline / state corrections …) is
+// housekeeping and is left out.
+const SIMPLE_HISTORY_TYPES = [
+  'FOLLOWUP_TIME_PASSED', 'NO_ANSWER_CALLBACK_DUE', 'NO_ANSWER_PHYSICAL_VISIT',
+  'PTP_KEPT_PAYMENT_APPLIED', 'PTP_PARTIALLY_KEPT_PAYMENT_APPLIED', 'PTP_BROKEN',
+  'PAYMENT_CLAIM_VERIFIED', 'PAYMENT_CLAIM_FAILED',
+  'RE_APPROVED_DISPUTE', 'RE_REJECTED_DISPUTE', 'RE_RESOLVED_DISPUTE', 'RE_RETURNED_DISPUTE_TO_RECOVERY', 'RE_REQUESTED_INFORMATION',
+  'INTERNAL_ACTION_APPROVED', 'INTERNAL_ACTION_REJECTED',
+  'RE_APPROVED_PTP_CORRECTION', 'RE_REJECTED_PTP_CORRECTION',
+  'RE_CREATED_TASK', 'RE_CREATED_INSTRUCTION',
+  'ESCALATION_RAISED', 'ESCALATION_RESOLVED',
+];
+const SIMPLE_HISTORY_CLAUSE = `AND (source = 'Record Outcome' OR type IN (:simpleTypes)
+  OR (type = 'TASK_COMPLETED' AND (source = 'Physical Visit' OR description LIKE '%"physicalVisit" task%')))`;
+
+async function listForCustomerPage(customerId, { after, limit, simple = false }) {
+  const params = { customerId, limit: limit + 1, simpleTypes: SIMPLE_HISTORY_TYPES };
+  let cursorClause = simple ? SIMPLE_HISTORY_CLAUSE : '';
   if (after) {
-    cursorClause = 'AND (occurred_at < :afterTime OR (occurred_at = :afterTime AND id < :afterId))';
+    cursorClause += ' AND (occurred_at < :afterTime OR (occurred_at = :afterTime AND id < :afterId))';
     params.afterTime = after.occurredAt;
     params.afterId = after.id;
   }
@@ -85,4 +103,13 @@ async function listAll() {
   return rows.map(mapAuditEvent);
 }
 
-module.exports = { record, listForCustomer, listForCustomerPage, listAll, deleteLatestOfType, mapAuditEvent };
+/** This customer's single most recent audit event from `source` (e.g. 'Record Outcome'), or null. */
+async function latestOfSource(customerId, source) {
+  const rows = await query(
+    'SELECT * FROM audit_events WHERE customer_id = :customerId AND source = :source ORDER BY occurred_at DESC, id DESC LIMIT 1',
+    { customerId, source }
+  );
+  return rows.length ? mapAuditEvent(rows[0]) : null;
+}
+
+module.exports = { SIMPLE_HISTORY_TYPES, record, listForCustomer, listForCustomerPage, listAll, deleteLatestOfType, latestOfSource, mapAuditEvent };

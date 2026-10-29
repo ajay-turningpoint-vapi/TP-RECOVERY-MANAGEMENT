@@ -17,6 +17,7 @@ const recordOutcomeSchema = z.object({
   details: z.string().min(1),
   followUpAt: z.coerce.date().optional(),
   ptpAmountValue: z.coerce.number().positive().optional(),
+  advanceAmountValue: z.coerce.number().nonnegative().optional(),
   ptpDate: z.coerce.date().optional(),
   ptpMode: z.string().optional(),
   // The on-disk filename an earlier POST /api/attachments call returned —

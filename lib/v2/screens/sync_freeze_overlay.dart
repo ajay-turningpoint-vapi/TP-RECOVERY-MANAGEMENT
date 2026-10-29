@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:salesman_mobile/v2/screens/maintenance_screen.dart';
 import 'package:salesman_mobile/v2/stores/app_store.dart';
 import 'package:salesman_mobile/v3/screens/pending_sync_screen.dart';
+import 'package:salesman_mobile/widgets/app_message.dart' show appNavigatorKey;
 
 /// Wraps the whole app (see v3/main_v3.dart's MaterialApp.builder) and, for
 /// as long as AppStore.isSyncing is true, blocks every screen behind a
@@ -104,7 +105,11 @@ class _PendingSyncBanner extends StatelessWidget {
               type: MaterialType.transparency,
               child: InkWell(
                 borderRadius: BorderRadius.circular(12),
-                onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PendingSyncScreen())),
+                // This banner lives in MaterialApp.builder, ABOVE the
+                // Navigator — Navigator.of(context) throws here (that was
+                // the "Something went wrong" on tap). Go through the app's
+                // own navigator key instead.
+                onTap: () => appNavigatorKey.currentState?.push(MaterialPageRoute(builder: (_) => const PendingSyncScreen())),
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
                   decoration: BoxDecoration(

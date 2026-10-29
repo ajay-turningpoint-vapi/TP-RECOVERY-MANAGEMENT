@@ -10,6 +10,7 @@ import 'package:salesman_mobile/v2/models/task.dart';
 import 'package:salesman_mobile/v2/stores/app_store.dart';
 import 'package:salesman_mobile/services/attachment_opener.dart';
 import 'package:salesman_mobile/widgets/app_message.dart';
+import 'package:salesman_mobile/v2/widgets/voice_translate_field.dart';
 
 const _imageExtensions = {'jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'bmp'};
 
@@ -80,7 +81,7 @@ String taskTypeLabel(TaskType t) {
     case TaskType.documentFollowUp:
       return 'Document Follow-Up';
     case TaskType.financialTeamFollowUp:
-      return 'Financial Team Follow-Up';
+      return 'Internal Action';
     case TaskType.customerDetailCorrection:
       return 'Customer Detail Correction';
     case TaskType.paymentVerification:
@@ -153,6 +154,8 @@ class RequestDetailScaffold extends StatelessWidget {
   final List<Widget> actions;
   /// Optional always-visible Due Date bar under the banner.
   final DateTime? dueDate;
+  /// false hides the coloured status banner (the salesman's Task Details).
+  final bool showBanner;
 
   const RequestDetailScaffold({
     super.key,
@@ -165,6 +168,7 @@ class RequestDetailScaffold extends StatelessWidget {
     required this.children,
     required this.actions,
     this.dueDate,
+    this.showBanner = true,
   });
 
   @override
@@ -228,6 +232,7 @@ class RequestDetailScaffold extends StatelessWidget {
               ),
             ),
           ),
+          if (showBanner)
           Container(
             width: double.infinity,
             color: color.withValues(alpha: 0.07),
@@ -698,13 +703,31 @@ Future<ApproveRejectResult?> showApproveRejectForm(
   required String title,
   required Color accent,
   String submitLabel = 'Submit',
+  // Every existing caller (dispute/PTP-correction/claim decisions) treats
+  // evidence as optional — these default to that same behaviour. Set both
+  // true for a flow (e.g. a Physical Visit the RE must actually complete)
+  // where "I decided this with no proof" isn't an acceptable submission.
+  bool requireNote = false,
+  bool requirePhoto = false,
+  // Every existing caller allows attaching a PDF alongside/instead of a
+  // photo — a flow where evidence must specifically be a camera/gallery
+  // photo (e.g. a Physical Visit) sets this false to drop that option.
+  bool allowPdf = true,
 }) {
   return showModalBottomSheet<ApproveRejectResult>(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.white,
     shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
-    builder: (_) => _ApproveRejectForm(refId: refId, title: title, accent: accent, submitLabel: submitLabel),
+    builder: (_) => _ApproveRejectForm(
+      refId: refId,
+      title: title,
+      accent: accent,
+      submitLabel: submitLabel,
+      requireNote: requireNote,
+      requirePhoto: requirePhoto,
+      allowPdf: allowPdf,
+    ),
   );
 }
 
@@ -713,11 +736,17 @@ class _ApproveRejectForm extends StatefulWidget {
   final String title;
   final Color accent;
   final String submitLabel;
+  final bool requireNote;
+  final bool requirePhoto;
+  final bool allowPdf;
   const _ApproveRejectForm({
     required this.refId,
     required this.title,
     required this.accent,
     required this.submitLabel,
+    this.requireNote = false,
+    this.requirePhoto = false,
+    this.allowPdf = true,
   });
 
   @override
@@ -728,6 +757,7 @@ class _ApproveRejectFormState extends State<_ApproveRejectForm> {
   final _note = TextEditingController();
   final List<_PendingFile> _files = [];
   bool _busy = false;
+  String? _validationError;
 
   @override
   void dispose() {
@@ -766,9 +796,19 @@ class _ApproveRejectFormState extends State<_ApproveRejectForm> {
   }
 
   Future<void> _submit() async {
+    final note = _note.text.trim();
+    if (widget.requireNote && note.isEmpty) {
+      setState(() => _validationError = 'Notes are required.');
+      return;
+    }
+    if (widget.requirePhoto && _files.isEmpty) {
+      setState(() => _validationError = 'A photo is required.');
+      return;
+    }
+    setState(() => _validationError = null);
+
     final store = context.read<AppStore>();
     final navigator = Navigator.of(context);
-    final note = _note.text.trim();
 
     // Keep the RE's own copy (drives the read-only sections on this screen).
     for (final f in _files) {
@@ -841,7 +881,16 @@ class _ApproveRejectFormState extends State<_ApproveRejectForm> {
                   children: [
                     Text(widget.title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15.5, color: kDark)),
                     const SizedBox(height: 2),
-                    const Text('Add evidence and a note — both optional.', style: TextStyle(fontSize: 11, color: kMuted)),
+                    Text(
+                      widget.requireNote && widget.requirePhoto
+                          ? 'A photo and a note are both required.'
+                          : widget.requireNote
+                              ? 'A note is required; a photo is optional.'
+                              : widget.requirePhoto
+                                  ? 'A photo is required; a note is optional.'
+                                  : 'Add evidence and a note — both optional.',
+                      style: const TextStyle(fontSize: 11, color: kMuted),
+                    ),
                   ],
                 ),
               ),
@@ -911,15 +960,17 @@ class _ApproveRejectFormState extends State<_ApproveRejectForm> {
                         label: const Text('Gallery', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(side: const BorderSide(color: kRed), foregroundColor: kRed, padding: const EdgeInsets.symmetric(vertical: 9), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9))),
-                        onPressed: _busy ? null : _pickPdf,
-                        icon: const Icon(Icons.picture_as_pdf_outlined, size: 15),
-                        label: const Text('PDF', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                    if (widget.allowPdf) ...[
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(side: const BorderSide(color: kRed), foregroundColor: kRed, padding: const EdgeInsets.symmetric(vertical: 9), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9))),
+                          onPressed: _busy ? null : _pickPdf,
+                          icon: const Icon(Icons.picture_as_pdf_outlined, size: 15),
+                          label: const Text('PDF', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                        ),
                       ),
-                    ),
+                    ],
                   ],
                 ),
               ],
@@ -929,10 +980,9 @@ class _ApproveRejectFormState extends State<_ApproveRejectForm> {
 
           const Text('NOTE', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.6, color: kMuted)),
           const SizedBox(height: 8),
-          TextField(
+          VoiceTranslateField(
             controller: _note,
             maxLines: 3,
-            style: const TextStyle(fontSize: 12.5),
             decoration: InputDecoration(
               filled: true,
               fillColor: kBg,
@@ -945,6 +995,10 @@ class _ApproveRejectFormState extends State<_ApproveRejectForm> {
               hintStyle: const TextStyle(fontSize: 12, color: kMuted),
             ),
           ),
+          if (_validationError != null) ...[
+            const SizedBox(height: 8),
+            Text(_validationError!, style: const TextStyle(fontSize: 11.5, color: kRed, fontWeight: FontWeight.w600)),
+          ],
           const SizedBox(height: 20),
 
           Row(
@@ -1123,4 +1177,27 @@ class _DueStrip extends StatelessWidget {
 bool _isToday(DateTime d) {
   final now = DateTime.now();
   return d.year == now.year && d.month == now.month && d.day == now.day;
+}
+
+
+/// The "TO DO" section every RE task screen shows below what was recorded
+/// / why the task exists — same look as the other sections (heading +
+/// plain white card), one plain sentence. `**` markers are stripped.
+class TodoCallout extends StatelessWidget {
+  final String text;
+  final bool done;
+  const TodoCallout(this.text, {super.key, this.done = false});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SectionLabel('TO DO'),
+        InfoCard(children: [
+          Text(text.replaceAll('**', ''), style: const TextStyle(fontSize: 13, color: kDark, height: 1.45)),
+        ]),
+      ],
+    );
+  }
 }

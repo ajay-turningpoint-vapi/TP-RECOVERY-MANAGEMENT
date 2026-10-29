@@ -19,26 +19,41 @@ class ManagerScaffoldV3 extends StatefulWidget {
 
 class _ManagerScaffoldV3State extends State<ManagerScaffoldV3> {
   int _currentIndex = 0;
+  // Pages are built only once first opened — see ReScaffoldV3.
+  final Set<int> _visited = {0};
 
   void _goTo(int index) {
-    setState(() => _currentIndex = index);
-    context.read<AppStore>().refreshLiveData();
+    setState(() {
+      _currentIndex = index;
+      _visited.add(index);
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) context.read<AppStore>().refreshLiveDataIfStale();
+    });
+  }
+
+  Widget _page(int i) {
+    if (!_visited.contains(i)) return const SizedBox.shrink();
+    switch (i) {
+      case 0:
+        return ManagerDashboardScreen(onNavigate: _goTo);
+      case 1:
+        return const CompanyRecoveryQueueScreen();
+      case 2:
+        return ManagerTasksScreen(onNavigate: _goTo);
+      case 3:
+        return ManagerReportsScreen(onNavigate: _goTo);
+      default:
+        return const ManagerProfileScreen();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final pages = [
-      ManagerDashboardScreen(onNavigate: _goTo),
-      const CompanyRecoveryQueueScreen(),
-      ManagerTasksScreen(onNavigate: _goTo),
-      ManagerReportsScreen(onNavigate: _goTo),
-      const ManagerProfileScreen(),
-    ];
-
     return Scaffold(
       body: SafeArea(
         child: InitialDataLoader(
-          child: IndexedStack(index: _currentIndex, children: pages),
+          child: IndexedStack(index: _currentIndex, children: List.generate(5, _page)),
         ),
       ),
       bottomNavigationBar: BottomNavigationBar(

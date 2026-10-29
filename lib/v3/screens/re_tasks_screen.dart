@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:salesman_mobile/widgets/call_helper.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:salesman_mobile/v2/stores/app_store.dart';
@@ -37,6 +38,13 @@ class _TaskItem {
   // the existing backlog.
   final DateTime createdAt;
   final bool isDone;
+  // The customer's salesman — every RE task card shows their name with a
+  // call icon (SalesmanCallIcon).
+  final String salesmanId;
+  // Closed by the system (stale follow-up cleanup, customer removed from
+  // BUSY, superseded) — not something the RE did, so it must not count
+  // as "Completed by RE".
+  final bool autoClosed;
   /// Owner of the underlying task (RE's own id for Internal Action tasks
   /// routed to them). '' for items with no single task owner.
   final String ownerId;
@@ -63,6 +71,8 @@ class _TaskItem {
     required this.date,
     required this.createdAt,
     required this.isDone,
+    this.salesmanId = '',
+    this.autoClosed = false,
     this.ownerId = '',
     this.amountLabel,
     this.amountValue,
@@ -118,7 +128,9 @@ class ReTasksScreen extends StatefulWidget {
 }
 
 class _ReTasksScreenState extends State<ReTasksScreen> {
-  _Filter _filter = _Filter.all;
+  // Opens on Due Today — the RE's working list for the day (order of the
+  // cards in _statCards: Due Today, Overdue, Total Tasks, ...).
+  _Filter _filter = _Filter.dueToday;
   String _query = '';
   int _visible = 6;
   final Set<String> _priorityFilter = {'HIGH', 'MEDIUM', 'LOW'};
@@ -170,8 +182,41 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
     return '$minutes Minute${minutes == 1 ? '' : 's'}';
   }
 
+  /// Outcome texts the server writes when IT closes a task, not a person:
+  /// missedDeadlineService.closeStaleMissedDeadlineTasks and
+  /// customerRepository.closeOutRemovedCustomers ("Auto-closed — …"),
+  /// recoveryTaskService ("Closed — …" / "Paused — …"), No-Answer cycle
+  /// ("Superseded — …"). ~795 such RE tasks made "Completed" read 457+.
+  static bool _isSystemClosed(String? outcome) {
+    final o = (outcome ?? '').trimLeft();
+    return o.startsWith('Auto-closed') ||
+        o.startsWith('Closed —') ||
+        o.startsWith('Paused —') ||
+        o.startsWith('Superseded');
+  }
+
   List<_TaskItem> _buildItems(AppStore store) {
     final items = <_TaskItem>[];
+
+    // store.customers only holds ACTIVE customers (ACTIVE_FILTER server-
+    // side — a customer who paid off / vanished from BUSY is excluded).
+    // A task raised against a customer BEFORE they went inactive still
+    // references that customerId — e.g. ~90% of completed RE tasks, since
+    // "task got completed" and "customer later resolved and dropped out
+    // of BUSY" go hand in hand. Looking such a task up with
+    // `.firstWhere(..., orElse: () => store.customers.first)` silently
+    // substitutes a totally unrelated customer (whichever happens to be
+    // first in the list) — every affected task then shows that same
+    // wrong salesman/amount, which is why many distinct tasks can look
+    // like identical repeats. A plain map lookup returns null instead, so
+    // each call site below can fall back to something that's actually
+    // true for THIS task (its own stored name, its real owner) rather
+    // than a different customer's data.
+    final customerById = {for (final c in store.customers) c.id: c};
+    // Salesperson user ids — a task owned by one of them is the salesman's
+    // own work, not the RE's (an RE-owned visit/internal action is never
+    // hidden by the rule below).
+    final salesmanIds = {for (final sm in store.salesmen) sm['name'] as String};
 
     // 1) Real AppTasks — excluding physical visits closed without a
     // recorded outcome (those get their own "nudge the salesman" entry).
@@ -190,20 +235,28 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
       // queue only needs it once its time has passed and nothing was
       // recorded (recording an outcome supersedes the task, so a still-open
       // one here already means "nothing done"). So: hide it until overdue.
-      final isSalesmanSelfFollowUp = t.type == TaskType.customerCall &&
-          (t.source == 'Record Outcome' || t.source == 'Recovery Reconcile' || t.source == 'Recovery' || t.source == 'No Answer') &&
-          t.ownerId != store.currentSalesmanId;
+      // Also covers the salesman's own Physical Visit after a 3rd No
+      // Answer and the Customer Refused call-back — both previously showed
+      // in the RE's list from the moment they were created (ZAKARIA KHAN /
+      // DARPAN INFRASTRUCTURE, 24 Oct), not only once overdue.
+      final isSalesmanSelfFollowUp =
+          (t.type == TaskType.customerCall || t.type == TaskType.physicalVisit) &&
+          const ['Record Outcome', 'Recovery Reconcile', 'Recovery', 'No Answer', 'Customer Refused'].contains(t.source) &&
+          t.ownerId != store.currentSalesmanId &&
+          salesmanIds.contains(t.ownerId);
       if (!done && isSalesmanSelfFollowUp && !t.deadline.isBefore(now)) {
         continue;
       }
       final priority = t.priority == 'Critical' || t.priority == 'High'
           ? 'HIGH'
           : (t.priority == 'Normal' ? 'MEDIUM' : 'LOW');
-      final customer = store.customers.firstWhere((c) => c.id == t.customerId,
-          orElse: () => store.customers.first);
+      final customer = customerById[t.customerId];
       // The customer's field salesperson — NOT t.ownerId, which for an
       // Internal Action task routed to the RE would show the RE's name.
-      final salesmanId = customer.assignedSalesmanId.isNotEmpty
+      // Falls back to t.ownerId when the customer is no longer active
+      // (see customerById above) rather than guessing from an unrelated
+      // customer.
+      final salesmanId = customer != null && customer.assignedSalesmanId.isNotEmpty
           ? customer.assignedSalesmanId
           : t.ownerId;
       items.add(_TaskItem(
@@ -216,12 +269,17 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
         title: taskTypeLabel(t.type),
         subtitle1: 'Salesman: ${store.salesmanDisplayName(salesmanId)}',
         subtitle2: t.customerName,
+        salesmanId: salesmanId,
         date: t.deadline,
         createdAt: t.createdAt,
         isDone: done,
+        autoClosed: done && _isSystemClosed(t.outcome),
         ownerId: t.ownerId,
         amountLabel: 'Outstanding',
-        amountValue: customer.totalDue,
+        // null (customer gone inactive — paid off/closed) reads as ₹0,
+        // which is the true current picture, not a stand-in for data we
+        // don't have.
+        amountValue: customer?.totalDue ?? 0,
       ));
     }
 
@@ -231,9 +289,8 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
       final dispute = store.disputes.cast<Map<String, dynamic>?>().firstWhere(
           (d) => d != null && d['customer'] == t.customerName,
           orElse: () => null);
-      final customer = store.customers.firstWhere((c) => c.id == t.customerId,
-          orElse: () => store.customers.first);
-      final salesmanId = customer.assignedSalesmanId.isNotEmpty
+      final customer = customerById[t.customerId];
+      final salesmanId = customer != null && customer.assignedSalesmanId.isNotEmpty
           ? customer.assignedSalesmanId
           : t.ownerId;
       items.add(_TaskItem(
@@ -246,13 +303,14 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
         title: 'Physical Visit — No Outcome Recorded',
         subtitle1: 'Salesman: ${store.salesmanDisplayName(salesmanId)}',
         subtitle2: t.customerName,
+        salesmanId: salesmanId,
         date: t.completedAt ?? t.deadline,
         createdAt: t.completedAt ?? t.createdAt,
         isDone: false,
         amountLabel: dispute != null ? 'Amount in Dispute' : 'Outstanding',
         amountValue: dispute != null
             ? (dispute['amount'] as num).toDouble()
-            : customer.totalDue,
+            : (customer?.totalDue ?? 0),
         amountColor: kPurple,
       ));
     }
@@ -264,9 +322,18 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
     // straight at that salesman's single largest overdue account — RE
     // opens that customer, sees the real numbers, and can create a task /
     // contact the salesman about that specific account.
+    //
+    // Monthly, not daily: this nudge only ever appears on the 1st of the
+    // month (rest of the month it's simply absent from RE Tasks, not just
+    // dismissed) — a daily repeat of the same "still below target" nudge
+    // added noise without giving the RE anything new to act on between
+    // reviews. Dismissing it (see salesmanService.js's
+    // underperformanceDismissedThisMonth) holds through the rest of that
+    // same month; it reappears fresh on the 1st of the next one.
     for (final s in store.visibleSalesmen.where((s) =>
+        now.day == 1 &&
         (s['collectionAchievedPercent'] as int) < 60 &&
-        s['underperformanceDismissedToday'] != true)) {
+        s['underperformanceDismissedThisMonth'] != true)) {
       final owned = store.customers
           .where((c) => c.assignedSalesmanId == s['name'] && c.totalDue > 0)
           .toList();
@@ -283,6 +350,7 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
         title: 'Underperforming Salesman — Top Account',
         subtitle1: 'Salesman: ${(s['fullName'] as String?) ?? s['name']} (${s['collectionAchievedPercent']}% achieved)',
         subtitle2: worst.name,
+        salesmanId: s['name'] as String,
         // 9 PM today — same RE review deadline convention as every other
         // salesman-raised item (see _reviewDeadline below). DateTime.now()
         // here made every one of these instantly "Overdue" the moment it
@@ -290,9 +358,10 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
         // Overdue stat/tab was permanently flooded with items that have no
         // real due time to show.
         date: DateTime(now.year, now.month, now.day, 21),
-        // A daily system-generated nudge, not something anyone "just did" —
-        // pinned to the start of today rather than the live clock so it
-        // doesn't jump back to the very top of the list on every rebuild.
+        // A monthly system-generated nudge, not something anyone "just
+        // did" — pinned to the start of today rather than the live clock
+        // so it doesn't jump back to the very top of the list on every
+        // rebuild.
         createdAt: DateTime(now.year, now.month, now.day),
         isDone: false,
         amountLabel: 'Overdue Amount',
@@ -310,6 +379,7 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
     // owner submitted their work — no badge, nothing to tap).
     for (final d in store.visibleDisputes.where((d) => AppStore.disputeNeedsReActionStatuses.contains(d['status']))) {
       final awaitingVerification = d['status'] == 'Awaiting Verification';
+      final disputeSalesmanId = customerById['${d['customerCode']}']?.assignedSalesmanId ?? '';
       items.add(_TaskItem(
         id: 'dispute_${d['id']}',
         kind: TaskKind.dispute,
@@ -318,10 +388,9 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
         color: kIndigo,
         priority: (d['priority'] as String?) == 'High' ? 'HIGH' : 'MEDIUM',
         title: awaitingVerification ? 'Dispute Awaiting Verification' : 'Dispute Awaiting Review',
-        subtitle1: awaitingVerification
-            ? 'Submitted: ${DateFormat('dd MMM yyyy').format(d['lastUpdated'] as DateTime? ?? d['raisedDate'])}'
-            : 'Raised: ${DateFormat('dd MMM yyyy').format(d['raisedDate'])}',
+        subtitle1: 'Salesman: ${store.salesmanDisplayName(disputeSalesmanId)}',
         subtitle2: '${d['customer']}  ·  ${d['invoice']}',
+        salesmanId: disputeSalesmanId,
         date: _reviewDeadline((d['raisedDate'] as DateTime?) ?? DateTime.now()),
         // When this actually landed in the RE's queue — the raise date for
         // a fresh approval, or the resolution owner's submission for a
@@ -339,8 +408,10 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
 
     // 7) PTP correction requests
     for (final p in store.ptpCorrectionRequests) {
-      final c = store.customers.firstWhere((c) => c.id == p.customerId,
-          orElse: () => store.customers.first);
+      // Never fall back to another customer — a request whose customer is no
+      // longer active (removed from BUSY) is skipped, not mislabelled.
+      final c = customerById[p.customerId];
+      if (c == null) continue;
       items.add(_TaskItem(
         id: 'ptpc_${p.id}',
         kind: TaskKind.ptpCorrection,
@@ -351,6 +422,7 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
         title: 'PTP Correction Request',
         subtitle1: 'Customer: ${c.name}',
         subtitle2: 'Salesman: ${store.salesmanDisplayName(c.assignedSalesmanId)}',
+        salesmanId: c.assignedSalesmanId,
         date: _reviewDeadline(p.correctionRequestedDate ?? p.promiseDate),
         createdAt: p.correctionRequestedDate ?? p.promiseDate,
         isDone: false,
@@ -363,9 +435,10 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
     // 7b) Payment Already Made claims awaiting the RE's manual verification
     // (check BUSY / ask the operator, then confirm or reject).
     for (final p in store.pendingPaymentClaims) {
-      final c = store.customers.firstWhere(
-          (c) => c.id == (p['customerCode'] ?? ''),
-          orElse: () => store.customers.first);
+      // Same as above — earlier every claim of a removed customer showed the
+      // first customer in the list (CHAMPALAL -TP, 28 Oct).
+      final c = customerById['${p['customerCode'] ?? ''}'];
+      if (c == null) continue;
       items.add(_TaskItem(
         id: 'pc_${p['id']}',
         kind: TaskKind.paymentClaim,
@@ -376,6 +449,7 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
         title: 'Payment Already Made — Verify',
         subtitle1: 'Customer: ${c.name}',
         subtitle2: 'Salesman: ${store.salesmanDisplayName(c.assignedSalesmanId)}',
+        salesmanId: c.assignedSalesmanId,
         date: _reviewDeadline((p['claimDateRaw'] as DateTime?) ?? DateTime.now()),
         createdAt: (p['claimDateRaw'] as DateTime?) ?? DateTime.now(),
         isDone: false,
@@ -388,7 +462,16 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
     // 9) Broken PTPs the system did NOT already handle — no open escalation
     // AND no open task on the account. A broken PTP normally auto-creates a
     // call-customer follow-up; this row only surfaces the ones that fell
-    // through, so the RE can create that task manually.
+    // through, so the RE can create that task manually. Skipped when there
+    // is nothing overdue (the promise was against future-due money, so no
+    // task is owed yet) or a newer promise has replaced it.
+    final latestPromiseByCustomer = <String, DateTime>{};
+    for (final p in store.ptps) {
+      final cur = latestPromiseByCustomer[p.customerId];
+      if (cur == null || p.promiseDate.isAfter(cur)) {
+        latestPromiseByCustomer[p.customerId] = p.promiseDate;
+      }
+    }
     final escalatedCustomerIds =
         store.openEscalationCases.map((e) => e.customerId).toSet();
     final openTaskCustomerIds = store.visibleTasks
@@ -398,8 +481,10 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
     for (final p in store.brokenPtps) {
       if (escalatedCustomerIds.contains(p.customerId)) continue;
       if (openTaskCustomerIds.contains(p.customerId)) continue;
-      final c = store.customers.firstWhere((c) => c.id == p.customerId,
-          orElse: () => store.customers.first);
+      final c = customerById[p.customerId];
+      if (c == null) continue;
+      if (c.totalDue < 1) continue;
+      if (latestPromiseByCustomer[p.customerId]!.isAfter(p.promiseDate)) continue;
       items.add(_TaskItem(
         id: 'ptpm_${p.id}',
         kind: TaskKind.ptpMissed,
@@ -411,6 +496,7 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
         subtitle1:
             'Salesman: ${store.salesmanDisplayName(c.assignedSalesmanId)}',
         subtitle2: c.name,
+        salesmanId: c.assignedSalesmanId,
         date: p.promiseDate,
         createdAt: p.promiseDate,
         isDone: false,
@@ -460,7 +546,7 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
     // Internal Action the salesman raised, the task is owned by this RE,
     // so once actioned it drops out of the pending list and lands here.
     final reId = store.currentSalesmanId;
-    final completed = items.where((i) => i.isDone && i.ownerId == reId).length;
+    final completed = items.where((i) => i.isDone && !i.autoClosed && i.ownerId == reId).length;
 
     List<_TaskItem> filtered;
     switch (_filter) {
@@ -480,7 +566,7 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
             .toList();
         break;
       case _Filter.completed:
-        filtered = items.where((i) => i.isDone && i.ownerId == reId).toList();
+        filtered = items.where((i) => i.isDone && !i.autoClosed && i.ownerId == reId).toList();
         break;
       case _Filter.all:
         filtered = items.where((i) => !i.isDone).toList();
@@ -647,14 +733,6 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
       int total, int dueToday, int overdue, int upcoming, int completed) {
     final cards = [
       (
-        _Filter.all,
-        Icons.calendar_month_outlined,
-        kBlue,
-        '$total',
-        'Total Tasks',
-        'All Pending'
-      ),
-      (
         _Filter.dueToday,
         Icons.event_outlined,
         kOrange,
@@ -669,6 +747,14 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
         '$overdue',
         'Overdue',
         'Need Action'
+      ),
+      (
+        _Filter.all,
+        Icons.calendar_month_outlined,
+        kBlue,
+        '$total',
+        'Total Tasks',
+        'All Pending'
       ),
       (
         _Filter.upcoming,
@@ -867,12 +953,22 @@ class _ReTasksScreenState extends State<ReTasksScreen> {
                             fontWeight: FontWeight.bold,
                             fontSize: 13.5,
                             color: _navy)),
-                    Text.rich(TextSpan(
-                        style: const TextStyle(fontSize: 10.5, color: kMuted),
-                        children: _salesmanHighlightSpans(item.subtitle1, const TextStyle(fontSize: 10.5, color: kMuted)))),
-                    Text.rich(TextSpan(
-                        style: const TextStyle(fontSize: 10.5, color: kMuted),
-                        children: _salesmanHighlightSpans(item.subtitle2, const TextStyle(fontSize: 10.5, color: kMuted)))),
+                    for (final line in [item.subtitle1, item.subtitle2])
+                      line.startsWith('Salesman: ') && item.salesmanId.isNotEmpty
+                          ? Row(
+                              children: [
+                                Flexible(
+                                  child: Text.rich(TextSpan(
+                                      style: const TextStyle(fontSize: 10.5, color: kMuted),
+                                      children: _salesmanHighlightSpans(line, const TextStyle(fontSize: 10.5, color: kMuted)))),
+                                ),
+                                const SizedBox(width: 6),
+                                SalesmanCallIcon(phone: context.read<AppStore>().salesmanPhone(item.salesmanId), size: 13),
+                              ],
+                            )
+                          : Text.rich(TextSpan(
+                              style: const TextStyle(fontSize: 10.5, color: kMuted),
+                              children: _salesmanHighlightSpans(line, const TextStyle(fontSize: 10.5, color: kMuted)))),
                     const SizedBox(height: 4),
                     if (item.kind != TaskKind.overdueTarget) ...[
                       Text(dueText,

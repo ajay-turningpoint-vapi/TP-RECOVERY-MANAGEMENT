@@ -39,6 +39,22 @@ async function findPendingApproval() {
   return rows.map(mapDispute);
 }
 
+// Not yet terminally decided — these are the only statuses a dispute can
+// still be sitting in when its customer vanishes from BUSY.
+const OPEN_STATUSES = ['Pending Approval', 'Approved', 'Need More Information', 'Awaiting Verification'];
+
+/** Open disputes for a batch of customer ids — used by customerRepository.upsertFromBusy to auto-close disputes whose customer no longer appears in BUSY. */
+async function findOpenByCustomerIds(customerIds, connection) {
+  if (!customerIds || customerIds.length === 0) return [];
+  const run = connection ? (sql, params) => connection.query(sql, params) : query;
+  const result = await run(
+    'SELECT * FROM disputes WHERE customer_id IN (:customerIds) AND status IN (:openStatuses)',
+    { customerIds, openStatuses: OPEN_STATUSES }
+  );
+  const rows = connection ? result[0] : result;
+  return rows.map(mapDispute);
+}
+
 /** Distinct customer ids of every dispute this user is (or was) the resolution owner on. */
 async function findCustomerIdsByResolutionOwner(userId) {
   const rows = await query('SELECT DISTINCT customer_id FROM disputes WHERE resolution_owner = :userId', { userId });
@@ -96,4 +112,4 @@ async function update(id, fields, connection) {
   await run(`UPDATE disputes SET ${setClause} WHERE id = :id`, { ...fields, id });
 }
 
-module.exports = { mapDispute, findAll, findById, findPendingApproval, findCustomerIdsByResolutionOwner, isResolutionOwner, insert, update };
+module.exports = { mapDispute, findAll, findById, findPendingApproval, findOpenByCustomerIds, findCustomerIdsByResolutionOwner, isResolutionOwner, insert, update };

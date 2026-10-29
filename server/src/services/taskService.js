@@ -4,14 +4,17 @@ const customerRepository = require('../repositories/customerRepository');
 const ptpRepository = require('../repositories/ptpRepository');
 const auditRepository = require('../repositories/auditRepository');
 const userRepository = require('../repositories/userRepository');
-const { notifyDecision } = require('./decisionNotify');
+const { notifyDecision, salesmanForCustomer } = require('./decisionNotify');
 const { NotFoundError, ForbiddenError, ValidationError } = require('../errors/AppError');
 
 async function listForUser(user) {
   if (user.role === 'SALESPERSON') {
     return taskRepository.findByOwner(user.id);
   }
-  return taskRepository.findAll();
+  // RE/Manager/Admin Tasks screens — excludes tasks whose customer has
+  // gone inactive since (paid off / closed, dropped out of BUSY's feed).
+  // See taskRepository.findAllForActiveCustomers' doc comment.
+  return taskRepository.findAllForActiveCustomers();
 }
 
 async function getOrThrow(id) {
@@ -95,7 +98,7 @@ async function ensureFollowUpIfNeeded(
   return true;
 }
 
-async function completeTask(taskId, user, { attachmentPath } = {}) {
+async function completeTask(taskId, user, { attachmentPath, note } = {}) {
   const task = await getOrThrow(taskId);
   if (user.role === 'SALESPERSON' && task.ownerId !== user.id) {
     throw new ForbiddenError('You can only complete your own tasks');
@@ -109,20 +112,35 @@ async function completeTask(taskId, user, { attachmentPath } = {}) {
   if (user.role === 'SALESPERSON' && task.type === 'physicalVisit' && !attachmentPath) {
     throw new ValidationError('A photo from the visit is required to complete a Physical Visit task.');
   }
+  // The other physicalVisit flow: salesman requested the visit (Internal
+  // Action → "Physical Visit" dependency, customerService.applyOutcome),
+  // the RE is the one who actually goes — always a non-salesperson here,
+  // since task.ownerId is the RE (resolveDefaultREOwner). Require both a
+  // photo AND notes to close it, not just the photo.
+  if (user.role !== 'SALESPERSON' && task.type === 'physicalVisit') {
+    if (!attachmentPath) throw new ValidationError('A photo from the visit is required to complete this task.');
+    if (!note || !note.trim()) throw new ValidationError('Notes from the visit are required to complete this task.');
+  }
 
   await withTransaction(async (conn) => {
-    await taskRepository.update(taskId, { status: 'completed', completedAt: new Date() }, conn);
+    await taskRepository.update(taskId, { status: 'completed', completedAt: new Date(), note: note || null }, conn);
     // Always logged — was previously only recorded when
     // ensureFollowUpIfNeeded's guard actually reopened recovery, so a
     // completed task with nothing else to do left no trace at all in
     // Customer History. Every single thing that happens to a customer
     // must show up in their unified timeline. attachmentPath (the visit
-    // photo, when present) rides along so it's preserved in history too.
+    // photo, when present) rides along so it's preserved in history too —
+    // note (the RE's visit notes, when present) is folded into the
+    // description itself so both show on the one entry Customer 360's
+    // History tab renders (it already shows attachmentPath as an inline
+    // thumbnail next to description — see customer_360_screen.dart).
     await auditRepository.record(
       task.customerId,
       {
         type: 'TASK_COMPLETED',
-        description: `${user.fullName} completed the "${task.type}" task: "${task.reason}".`,
+        description: note
+          ? `${user.fullName} completed the "${task.type}" task: "${task.reason}". Notes: ${note}`
+          : `${user.fullName} completed the "${task.type}" task: "${task.reason}".`,
         actor: user.fullName,
         previousState: task.status,
         newState: 'completed',
@@ -185,7 +203,78 @@ async function completeTask(taskId, user, { attachmentPath } = {}) {
         deadlineHour: 18,
       });
     }
+  } else if (task.type === 'physicalVisit' && !isSalesperson) {
+    // The RE just closed out a salesman-requested visit (photo + notes
+    // enforced above) — hand the account back to the salesperson so
+    // recovery continues, same mechanism every other RE decision uses
+    // (dispute resolve, payment claim verify) to re-drive the single
+    // `source='Recovery'` call task. A no-op if nothing is actionable.
+    const { driveRecoveryTask } = require('./recoveryTaskService');
+    await driveRecoveryTask(task.customerId, {
+      headline: 'Physical visit completed — see notes/photo in History.',
+      priority: 'Normal',
+      deadlineHour: 18,
+    });
+    await notifyDecision(await salesmanForCustomer(task.customerId), {
+      approved: true,
+      title: 'Physical visit completed',
+      body: `${user.fullName} completed the requested physical visit.${note ? ` Notes: "${note}".` : ''}`,
+      customerId: task.customerId,
+    });
   }
+
+  return taskRepository.findById(taskId);
+}
+
+/**
+ * The RE couldn't actually carry out a salesman-requested visit (customer
+ * not available, address wrong, etc.) — a reason is required so there's a
+ * real record of why, but unlike `completeTask`'s photo+notes close, no
+ * proof of a visit is expected since none happened. Mirrors
+ * internalActionService.reject's shape: close the task out, log it, and
+ * hand the account straight back to the salesperson.
+ */
+async function rejectVisit(taskId, user, { reason, attachmentPath } = {}) {
+  const task = await getOrThrow(taskId);
+  if (task.type !== 'physicalVisit') {
+    throw new ValidationError('This task is not a Physical Visit task');
+  }
+  if (['completed', 'closed'].includes(task.status)) {
+    throw new ValidationError(`This visit is already "${task.status}" — it can only be decided once`);
+  }
+  if (!reason || !reason.trim()) {
+    throw new ValidationError('A reason is required to reject this visit.');
+  }
+
+  await withTransaction(async (conn) => {
+    await taskRepository.update(taskId, { status: 'completed', completedAt: new Date(), note: reason, attachmentPath: attachmentPath || null }, conn);
+    await auditRepository.record(
+      task.customerId,
+      {
+        type: 'TASK_COMPLETED',
+        description: `${user.fullName} could not complete the physical visit. Reason: "${reason}".`,
+        actor: user.fullName,
+        previousState: task.status,
+        newState: 'completed',
+        source: 'Physical Visit',
+        attachmentPath: attachmentPath || null,
+      },
+      conn
+    );
+  });
+
+  const { driveRecoveryTask } = require('./recoveryTaskService');
+  await driveRecoveryTask(task.customerId, {
+    headline: 'Physical visit could not be completed — see notes in History.',
+    priority: 'Normal',
+    deadlineHour: 18,
+  });
+  await notifyDecision(await salesmanForCustomer(task.customerId), {
+    approved: false,
+    title: 'Physical visit rejected',
+    body: `${user.fullName} could not complete the physical visit. Reason: "${reason}".`,
+    customerId: task.customerId,
+  });
 
   return taskRepository.findById(taskId);
 }
@@ -400,4 +489,4 @@ function defaultCallDeadline(now = new Date()) {
   return d;
 }
 
-module.exports = { listForUser, completeTask, requestExtension, approveEdit, rejectEdit, reassignTask, reschedule, markReviewed, ensureFollowUpIfNeeded, defaultCallDeadline };
+module.exports = { listForUser, completeTask, rejectVisit, requestExtension, approveEdit, rejectEdit, reassignTask, reschedule, markReviewed, ensureFollowUpIfNeeded, defaultCallDeadline };

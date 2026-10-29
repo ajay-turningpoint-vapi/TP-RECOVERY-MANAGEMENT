@@ -373,8 +373,16 @@ class ApiClient {
 
   // ---- Tasks ----
   Future<List<dynamic>> getTasks() async => await _get('/api/tasks') as List<dynamic>;
-  Future<Map<String, dynamic>> completeTask(String taskId, {String? attachmentPath}) async =>
-      await _post('/api/tasks/$taskId/complete', {if (attachmentPath != null) 'attachmentPath': attachmentPath}) as Map<String, dynamic>;
+  Future<Map<String, dynamic>> completeTask(String taskId, {String? attachmentPath, String? note}) async =>
+      await _post('/api/tasks/$taskId/complete', {
+        if (attachmentPath != null) 'attachmentPath': attachmentPath,
+        if (note != null) 'note': note,
+      }) as Map<String, dynamic>;
+  Future<Map<String, dynamic>> rejectVisit(String taskId, {required String reason, String? attachmentPath}) async =>
+      await _post('/api/tasks/$taskId/reject-visit', {
+        'reason': reason,
+        if (attachmentPath != null) 'attachmentPath': attachmentPath,
+      }) as Map<String, dynamic>;
   Future<Map<String, dynamic>> requestTaskExtension(String taskId, Map<String, dynamic> body) async =>
       await _post('/api/tasks/$taskId/request-extension', body) as Map<String, dynamic>;
   Future<Map<String, dynamic>> approveTaskEdit(String taskId) async => await _post('/api/tasks/$taskId/approve-edit') as Map<String, dynamic>;

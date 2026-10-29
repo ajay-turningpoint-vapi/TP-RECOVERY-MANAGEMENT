@@ -194,6 +194,18 @@ class AppStore extends ChangeNotifier {
   Timer? _invalidateDebounce;
   final Set<String> _pendingInvalidations = {};
   bool _refreshInFlight = false;
+  // Guards _reconnectCatchUp specifically — an SSE connection that's
+  // flapping (drops and reconnects every ~1-2s, e.g. a flaky mobile
+  // network or an infra keepalive cutting the stream short) used to fire
+  // a full, expensive re-fetch of every list on EVERY reconnect. For a
+  // small salesperson portfolio that's barely noticeable; for an RE/
+  // Manager account with the whole company's customers/tasks, doing that
+  // 3+ times in a few seconds is real, visible jank. Real-time deltas
+  // still arrive independently via SSE push events the moment the
+  // connection IS up, so skipping a catch-up that just happened a moment
+  // ago loses nothing — the next genuine gap still gets caught.
+  DateTime? _lastReconnectCatchUpAt;
+  static const _reconnectCatchUpCooldown = Duration(seconds: 10);
 
   // True while any server fetch of the core lists is running (login/restore,
   // a nav-tap refresh, or an SSE-triggered re-fetch). Screens show a thin
@@ -399,8 +411,19 @@ class AppStore extends ChangeNotifier {
 
   /// Open (not-completed) to-do tasks the signed-in salesperson owns — drives
   /// the count bubble on the bottom-nav Tasks icon.
-  int get myOpenTaskCount =>
-      myTodoTasks.where((t) => t.status != TaskStatus.completed).length;
+  int get myOpenTaskCount {
+    // Today only — same rule as the Tasks screen's "Today" tab (open, due
+    // later today; overdue and upcoming have their own tabs).
+    final now = DateTime.now();
+    final endOfToday = DateTime(now.year, now.month, now.day, 23, 59, 59);
+    return myTodoTasks
+        .where((t) =>
+            t.status != TaskStatus.completed &&
+            t.status != TaskStatus.closed &&
+            !t.deadline.isBefore(now) &&
+            t.deadline.isBefore(endOfToday))
+        .length;
+  }
 
   /// The salesperson's own open real to-do task for one customer, if any —
   /// a physical visit, a dispute-clarification reply, a payment-verification
@@ -559,18 +582,25 @@ class AppStore extends ChangeNotifier {
   }
 
   /// Real, genuinely-accumulated historical daily metrics from the server
-  /// (`GET /api/reports/trends`, populated by the 5 PM snapshot job) — only
+  /// (`GET /api/reports/trends` — last 7 days, computed from real records) — only
   /// ever as many points as have genuinely been recorded. No fabricated
   /// placeholder history.
   List<Map<String, dynamic>> trends = [];
 
-  List<Map<String, dynamic>> get recoveryScoreTrend =>
-      trends.map((t) => {'label': _trendLabel(t), 'score': t['avgRecoveryScore']}).toList();
+  // Recovery score and no-follow-up can't be rebuilt for past days, so the
+  // server sends null for days with no snapshot — those days are skipped.
+  List<Map<String, dynamic>> get recoveryScoreTrend => trends
+      .where((t) => t['avgRecoveryScore'] != null)
+      .map((t) => {'label': _trendLabel(t), 'score': t['avgRecoveryScore']})
+      .toList();
   List<Map<String, dynamic>> get ptpAmountTrend => trends.map((t) => {'label': _trendLabel(t), 'amount': t['ptpAmountTotal']}).toList();
   List<Map<String, dynamic>> get brokenPtpCountTrend => trends.map((t) => {'label': _trendLabel(t), 'count': t['brokenPtpCount']}).toList();
   List<Map<String, dynamic>> get collectionTrend =>
       trends.map((t) => {'label': _trendLabel(t), 'expected': t['collectionExpected'], 'actual': t['collectionActual']}).toList();
-  List<Map<String, dynamic>> get noFollowUpTrend => trends.map((t) => {'label': _trendLabel(t), 'count': t['noFollowUpCount']}).toList();
+  List<Map<String, dynamic>> get noFollowUpTrend => trends
+      .where((t) => t['noFollowUpCount'] != null)
+      .map((t) => {'label': _trendLabel(t), 'count': t['noFollowUpCount']})
+      .toList();
   List<Map<String, dynamic>> get dailyCollectionTrend => trends.map((t) => {'label': _trendLabel(t), 'amount': t['collectionActual']}).toList();
   List<Map<String, dynamic>> get collectionsTrendLast7Days =>
       trends.map((t) => {'label': _trendLabel(t), 'expected': t['collectionExpected'], 'actual': t['collectionActual']}).toList();
@@ -806,9 +836,10 @@ class AppStore extends ChangeNotifier {
     unawaited(_cacheList('salesmen', raw));
   }
 
-  /// RE marks an underperforming salesman's nudge "complete" for today. It
-  /// drops off the RE Tasks list and reappears automatically on the next
-  /// calendar day if the salesman is still below the collection threshold.
+  /// RE marks an underperforming salesman's nudge "complete" for this
+  /// month. The nudge itself only appears on the 1st of each month — it
+  /// drops off the RE Tasks list and reappears automatically on the 1st of
+  /// next month if the salesman is still below the collection threshold.
   Future<void> dismissUnderperformance(String salesmanId) async {
     await apiClient.dismissUnderperformance(salesmanId);
     await _refreshSalesmenFromApi();
@@ -1193,6 +1224,11 @@ class AppStore extends ChangeNotifier {
 
   Future<void> _reconnectCatchUp() async {
     if (!isLoggedIn) return;
+    final now = DateTime.now();
+    if (_lastReconnectCatchUpAt != null && now.difference(_lastReconnectCatchUpAt!) < _reconnectCatchUpCooldown) {
+      return;
+    }
+    _lastReconnectCatchUpAt = now;
     try {
       await _refreshDataForRole();
       await _refreshSyncStatusFromApi();
@@ -1371,10 +1407,23 @@ class AppStore extends ChangeNotifier {
       await _guardedRefresh('salesmen', _refreshSalesmenFromApi);
       await _guardedRefresh('reports', _refreshReportsFromApi);
       await _guardedRefresh('syncStatus', _refreshSyncStatusFromApi);
+      _lastLiveRefreshAt = DateTime.now();
       notifyListeners();
     } finally {
       _refreshInFlight = false;
     }
+  }
+
+  DateTime? _lastLiveRefreshAt;
+
+  /// Bottom-nav tab taps call this instead of [refreshLiveData]: a full
+  /// re-download of every list on every tap made tab switches take 2-3s
+  /// for RE/Manager (whole-company data). SSE push events already keep
+  /// lists live, so only refresh when the last full pull is genuinely old.
+  Future<void> refreshLiveDataIfStale({Duration maxAge = const Duration(seconds: 60)}) async {
+    final last = _lastLiveRefreshAt;
+    if (last != null && DateTime.now().difference(last) < maxAge) return;
+    await refreshLiveData();
   }
 
   /// Real authentication against the TP-RMS server — replaces the
@@ -1771,6 +1820,37 @@ class AppStore extends ChangeNotifier {
     }
   }
 
+  // customerId -> in-flight fetch, so a screen that rebuilds a few times
+  // while the request is outstanding (every Provider notifyListeners
+  // elsewhere) doesn't fire the same GET repeatedly.
+  final Set<String> _customersBeingFetched = {};
+
+  /// [customers] only ever holds ACTIVE customers (server-side
+  /// ACTIVE_FILTER — ones that paid off / closed and dropped out of
+  /// BUSY's feed are excluded). A task detail screen opened for a task
+  /// against one of those still needs the REAL customer (real name, real
+  /// assigned salesman, real phone) to show anything meaningful — the
+  /// single-customer endpoint this hits (customerService.getDetail) has
+  /// no such filter, so it finds them regardless of active status. Call
+  /// this fire-and-forget from build(); once it resolves, notifyListeners
+  /// makes the real customer show up on the next rebuild in place of
+  /// whatever placeholder the caller was using meanwhile.
+  Future<void> ensureCustomerLoaded(String customerId) async {
+    if (customerId.isEmpty) return;
+    if (customers.any((c) => c.id == customerId)) return;
+    if (_customersBeingFetched.contains(customerId)) return;
+    _customersBeingFetched.add(customerId);
+    try {
+      await _refreshOneCustomerFromApi(customerId);
+      notifyListeners();
+    } catch (_) {
+      // Leave it absent — the caller's own placeholder fallback stays in
+      // effect (e.g. truly deleted, or a transient network failure).
+    } finally {
+      _customersBeingFetched.remove(customerId);
+    }
+  }
+
   /// GET /api/customers (used to populate [customers] everywhere else)
   /// never includes `invoices`/`auditHistory` — only the single-customer
   /// detail endpoint does (see customerService.getDetail). Customer 360
@@ -2032,6 +2112,34 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// RE-side task completion where the evidence came through
+  /// [showApproveRejectForm] (request_detail_scaffold.dart) — that form
+  /// already uploaded the file and handed back a server path, so (unlike
+  /// [completeTask] above, which takes a raw [XFile] and uploads it
+  /// itself) this just forwards the already-uploaded path. Used for a
+  /// salesman-requested Physical Visit (Internal Action → "Physical
+  /// Visit"), where the server requires both a note and a photo from the
+  /// completing RE — see taskService.completeTask.
+  Future<void> completeTaskWithEvidence(String taskId, {String? note, String? attachmentPath}) async {
+    final task = tasks.firstWhere((t) => t.id == taskId);
+    await apiClient.completeTask(taskId, attachmentPath: attachmentPath, note: note);
+    tasksCompleted++;
+    await _refreshTasksFromApi();
+    await _refreshOneCustomerFromApi(task.customerId);
+    notifyListeners();
+  }
+
+  /// RE couldn't actually carry out a salesman-requested Physical Visit —
+  /// closes it with a reason instead of photo+notes evidence. See
+  /// taskService.rejectVisit.
+  Future<void> rejectTaskVisit(String taskId, {required String reason, String? attachmentPath}) async {
+    final task = tasks.firstWhere((t) => t.id == taskId);
+    await apiClient.rejectVisit(taskId, reason: reason, attachmentPath: attachmentPath);
+    await _refreshTasksFromApi();
+    await _refreshOneCustomerFromApi(task.customerId);
+    notifyListeners();
+  }
+
   static const Map<String, int> _escalationSeverity = {'L4': 4, 'L3': 3, 'L2': 2, 'L1': 1, 'none': 0};
 
   /// Kept only for [test/system_wide_verification_test.dart]'s offline unit
@@ -2060,6 +2168,16 @@ class AppStore extends ChangeNotifier {
   /// (Today's Recovery Tasks' "Edit Recorded Outcome"), so "Start
   /// Recovery" landing here would show the salesman a customer they
   /// can't actually record anything against.
+  /// The single rule for "this customer is in the salesman's recovery
+  /// queue" — shared by START RECOVERY ([getNextCustomer]) and the Today's
+  /// Recovery Tasks card so the two can never disagree. Needs real overdue
+  /// money: a customer whose whole balance is future-due (totalDue ₹0, e.g.
+  /// ITEC MEASURES — ₹16.4L outstanding, nothing overdue) has nothing to
+  /// recover yet, even though BUSY sync creates every new customer as
+  /// 'Action Required'. They join automatically once an invoice falls due.
+  bool isInRecoveryQueue(Customer c) =>
+      c.currentRecoveryState != 'Waiting / Monitoring' && c.totalDue >= 1;
+
   Customer? getNextCustomer({Set<String>? excludeIds}) {
     // Customers whose outcome is already recorded today (Internal Action,
     // Dispute, Follow-up, PTP, Payment Made — any "source: Record Outcome"
@@ -2074,7 +2192,7 @@ class AppStore extends ChangeNotifier {
         .map((t) => t.customerId)
         .toSet();
     final actionable = myCustomers.where((c) =>
-        c.currentRecoveryState != 'Waiting / Monitoring' &&
+        isInRecoveryQueue(c) &&
         !c.isPendingNoAnswerEdit &&
         !doneToday.contains(c.id) &&
         !onPhysicalVisit.contains(c.id) &&
@@ -2094,6 +2212,7 @@ class AppStore extends ChangeNotifier {
   Future<void> recordOutcome(String customerId, String nextAction, String reason, String details,
       {DateTime? followUpAt,
       double? ptpAmountValue,
+      double? ptpAdvanceAmount,
       DateTime? ptpDate,
       String? ptpMode,
       XFile? screenshot,
@@ -2104,6 +2223,7 @@ class AppStore extends ChangeNotifier {
       'details': details,
       if (followUpAt != null) 'followUpAt': followUpAt.toUtc().toIso8601String(),
       if (ptpAmountValue != null) 'ptpAmountValue': ptpAmountValue,
+      if (ptpAdvanceAmount != null) 'advanceAmountValue': ptpAdvanceAmount,
       if (ptpDate != null) 'ptpDate': ptpDate.toUtc().toIso8601String(),
       if (ptpMode != null) 'ptpMode': ptpMode,
       // Salesman is replacing a misrecorded No Answer via "Edit Recorded
@@ -2169,7 +2289,7 @@ class AppStore extends ChangeNotifier {
   /// server (and rejected with a real error if omitted) when this is a
   /// Physical Visit task — real proof the visit happened, preserved in the
   /// customer's history alongside the completion.
-  Future<void> completeTask(String taskId, {XFile? visitPhoto}) async {
+  Future<void> completeTask(String taskId, {XFile? visitPhoto, String? note}) async {
     final task = tasks.firstWhere((t) => t.id == taskId, orElse: () => tasks.first);
     try {
       String? attachmentPath;
@@ -2177,7 +2297,7 @@ class AppStore extends ChangeNotifier {
         final bytes = await visitPhoto.readAsBytes();
         attachmentPath = await apiClient.uploadAttachment(bytes, filename: visitPhoto.name, contentType: visitPhoto.mimeType ?? 'image/jpeg');
       }
-      await apiClient.completeTask(taskId, attachmentPath: attachmentPath);
+      await apiClient.completeTask(taskId, attachmentPath: attachmentPath, note: note);
     } on ApiException catch (e) {
       await _queueOrRethrow(e,
           type: PendingActionType.taskComplete,

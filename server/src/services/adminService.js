@@ -26,7 +26,8 @@ async function resetSalesmanPassword(targetUserId, newPassword) {
 
   await userRepository.updatePasswordHash(targetUserId, await hashPassword(newPassword));
   await refreshTokenRepository.revokeAllForUser(targetUserId);
-  await userRepository.bumpSessionVersion(targetUserId);
+  await userRepository.bumpSessionVersion(targetUserId, 'mobile');
+  await userRepository.bumpSessionVersion(targetUserId, 'web');
 }
 
 module.exports = { resetSalesmanPassword };

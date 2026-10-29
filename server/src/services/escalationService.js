@@ -42,6 +42,20 @@ async function raise(customerId, user, { level, reason, plan, ownerId, deadline,
 
   let escalationId;
   await withTransaction(async (conn) => {
+    // A case raised at a HIGHER level supersedes any lower one still open
+    // (e.g. the L2 for 2 broken PTPs once the 3rd broken PTP raises L3) —
+    // otherwise both stay open and the app showed the stale lower one
+    // (SHIVA MISTRY PERSONAL, 24 Oct).
+    for (const open of await escalationRepository.findOpenByCustomer(customerId, conn)) {
+      if ((LEVEL_SEVERITY[open.level] || 0) < (LEVEL_SEVERITY[level] || 0)) {
+        await escalationRepository.update(open.id, { isOpen: false }, conn);
+        await auditRepository.record(
+          customerId,
+          { type: 'ESCALATION_SUPERSEDED', description: `${open.level} escalation closed — superseded by the new ${level} escalation.`, actor: 'System', previousState: open.level, newState: level, source: 'Escalation' },
+          conn
+        );
+      }
+    }
     escalationId = await escalationRepository.insert(
       { customerId, level, reason, plan, ownerId, deadline, moneyAtRisk, cause },
       conn

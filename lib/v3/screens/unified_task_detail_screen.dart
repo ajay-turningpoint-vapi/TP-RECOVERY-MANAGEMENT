@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:salesman_mobile/v3/screens/task_details_screen_v3.dart' show plainTask;
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:image_picker/image_picker.dart';
@@ -44,6 +45,67 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
     return _buildCustomerLevelView(context, store);
   }
 
+  /// Used only when a task's customer isn't in store.customers anymore
+  /// (e.g. paid off / closed and dropped out of BUSY's feed — see
+  /// customerRepository's ACTIVE_FILTER). Built from the task's OWN stored
+  /// fields, which stay accurate regardless — never substitutes a
+  /// different, unrelated customer the way `orElse: () => store.customers.first`
+  /// used to.
+  /// Stand-in when a request's customer isn't in the active list (removed
+  /// from BUSY) — shows that request's own id/name, never another customer.
+  Customer _placeholderCustomer(String id, String name) => Customer(
+        id: id,
+        name: name,
+        totalOutstanding: 0,
+        totalDue: 0,
+        oldestOverdueDays: 0,
+        currentRecoveryState: '',
+        primaryNextAction: '',
+        reasonForAction: '',
+        assignedSalesmanId: '',
+      );
+
+  Customer _taskCustomerFallback(AppTask t) {
+    return Customer(
+      id: t.customerId,
+      name: t.customerName,
+      totalOutstanding: 0,
+      totalDue: 0,
+      oldestOverdueDays: 0,
+      currentRecoveryState: '',
+      primaryNextAction: '',
+      reasonForAction: '',
+      assignedSalesmanId: t.ownerId,
+    );
+  }
+
+  Widget _notFoundScaffold(BuildContext context, String message) {
+    return Scaffold(
+      backgroundColor: kBg,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        foregroundColor: kNavy,
+        title: const Text('Task Details', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: kNavy)),
+      ),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.search_off_rounded, size: 48, color: kMuted),
+              const SizedBox(height: 16),
+              Text(message, textAlign: TextAlign.center, style: const TextStyle(fontSize: 13.5, color: kMuted)),
+              const SizedBox(height: 20),
+              OutlinedButton(onPressed: () => Navigator.pop(context), child: const Text('Go Back')),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   // -------------------------------------------------------------------
   // Salesman-level (No Call / Overdue Target)
   // -------------------------------------------------------------------
@@ -62,23 +124,15 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
     final priority = isNoCall ? 'HIGH' : 'MEDIUM';
     final color = isNoCall ? kRed : kOrange;
 
-    final notes = store.notesForItem(refId);
     final salesmanActions = <_ActionOption>[
       _ActionOption(Icons.call_outlined, kBlue, 'Contact Salesman', 'Call $refId directly for an update.', () => _contactSalesman(context, s)),
       _ActionOption(Icons.assignment_outlined, kNavy, 'Assign Task', 'Create a follow-up task tied to their top overdue customer.', () => _assignTask(context, store, s, owned)),
     ];
-    final events = <TimelineEvent>[
-      if (isNoCall)
-        TimelineEvent(icon: Icons.phone_missed_outlined, color: kRed, title: 'No call made today', date: DateTime.now(), tag: 'High Priority', tagColor: kRed)
-      else
-        TimelineEvent(icon: Icons.trending_down, color: kOrange, title: 'Collection behind target', subtitle: '${s['collectionAchievedPercent']}% of ${_rupee.format(s['collectionTarget'])}', date: DateTime.now(), tag: 'Medium Priority', tagColor: kOrange),
-      ...notes.map((n) => TimelineEvent(icon: Icons.sticky_note_2_outlined, color: kBlue, title: 'Note added', subtitle: n['note'], date: n['timestamp'], tag: n['author'], tagColor: kBlue)),
-    ]..sort((a, b) => b.date.compareTo(a.date));
 
     return RequestDetailScaffold(
       title: 'Task Details',
       subtitle: isNoCall ? 'Salesman No Call' : 'Overdue Target Review',
-      bannerText: isNoCall ? 'Salesman has not connected with any overdue customer today.' : 'Salesman has not achieved today\'s collection target.',
+      bannerText: isNoCall ? 'Salesman made no calls today.' : 'Salesman is behind today\'s collection target.',
       priorityLabel: '$priority PRIORITY',
       color: color,
       bannerIcon: isNoCall ? Icons.phone_missed_outlined : Icons.trending_down,
@@ -121,10 +175,11 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
           KeyValueRow('Avg Debtor Days', '$avgDebtorDays Days', valueColor: kOrange),
         ]),
         const SizedBox(height: 18),
-        NotesSection(refId: refId),
+        TodoCallout(isNoCall
+            ? 'Call $salesmanDisplay and ask why no calls were made, or tap Assign Task.'
+            : 'Call $salesmanDisplay about their collections, or tap Assign Task.'),
         const SizedBox(height: 18),
-        const SectionLabel('ACTIVITY / HISTORY'),
-        ActivityTimeline(events),
+        NotesSection(refId: refId),
       ],
     );
   }
@@ -220,6 +275,19 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
   // Customer-level (real task / visit review / extension / dispute / ptp correction / outcome edit / ptp missed)
   // -------------------------------------------------------------------
   Widget _buildCustomerLevelView(BuildContext context, AppStore store) {
+    // A task can legitimately be missing from store.tasks by the time this
+    // screen opens (synced data moved on since the list that linked here
+    // was built). `.firstWhere(..., orElse: () => store.tasks.first)` used
+    // to silently substitute a COMPLETELY unrelated task as a stand-in —
+    // wrong customer, wrong salesman, wrong "what the salesperson
+    // recorded" text, all internally consistent with each other and so
+    // looking entirely plausible, which is exactly what makes it
+    // dangerous: an RE could act on the wrong account without any sign
+    // something was off. Show an honest "not found" screen instead.
+    if ((kind == TaskKind.realTask || kind == TaskKind.visitReview) &&
+        !store.tasks.any((t) => t.id == refId)) {
+      return _notFoundScaffold(context, 'This task could not be found anymore — it may have already been resolved, reassigned, or removed.');
+    }
     late Customer customer;
     late String subtitle;
     late String bannerText;
@@ -237,13 +305,26 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
     switch (kind) {
       case TaskKind.realTask:
         task = store.tasks.firstWhere((t) => t.id == refId, orElse: () => store.tasks.first);
-        customer = store.customers.firstWhere((c) => c.id == task!.customerId, orElse: () => store.customers.first);
+        customer = store.customers.firstWhere((c) => c.id == task!.customerId, orElse: () => _taskCustomerFallback(task!));
+        // Fire-and-forget: if the customer wasn't found above (inactive —
+        // see _taskCustomerFallback's doc comment), fetch the real one.
+        // Resolves after this build finishes; notifyListeners then
+        // rebuilds with the real name/salesman/phone in place of the
+        // placeholder.
+        store.ensureCustomerLoaded(task.customerId);
         subtitle = taskTypeLabel(task.type);
         priority = task.priority == 'Critical' || task.priority == 'High' ? 'HIGH' : (task.priority == 'Normal' ? 'MEDIUM' : 'LOW');
         color = priority == 'HIGH' ? kRed : (priority == 'MEDIUM' ? kOrange : kBlue);
         bannerIcon = taskTypeIcon(task.type);
-        bannerText = task.isOverdue ? 'This task is overdue — action is required.' : 'Due ${DateFormat('dd MMM, hh:mm a').format(task.deadline)}.';
-        dueDate = task.deadline;
+        // The due date/time and "Overdue by …" live in the Due strip below
+        // the banner — the banner itself only says what state the task is
+        // in, so the deadline isn't printed three times on one screen.
+        final isDoneTask = task.status == TaskStatus.completed || task.status == TaskStatus.closed;
+        bannerText = isDoneTask
+            ? 'Completed${task.completedAt != null ? ' on ${DateFormat('dd MMM yyyy, hh:mm a').format(task.completedAt!)}' : ''}${(task.outcome?.trim().isNotEmpty ?? false) ? ' — ${task.outcome!.trim()}' : '.'}'
+            : (task.isOverdue ? 'This task is overdue — action is required.' : 'Open — action required by the due date below.');
+        // A finished task is not "overdue" — no Due strip for it.
+        dueDate = isDoneTask ? null : task.deadline;
         description = friendlyTaskReason(task.reason);
         if (task.type == TaskType.paymentVerification) {
           final claim = store.paymentClaims.cast<Map<String, dynamic>?>().firstWhere((p) => p != null && p['customer'] == customer.name, orElse: () => null);
@@ -274,6 +355,17 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
             _ActionOption(Icons.call_outlined, kBlue, 'Call Salesman', 'A 5-day non-response cycle passed on this Customer Refused case with nothing recorded.', () => contactActions(context, store.salesmanPhone(customer.assignedSalesmanId))),
             _ActionOption(Icons.check_circle_outline, kGreen, 'Mark Done', 'Close this task out.', () => _completeTask(context, store, task!)),
           ];
+        } else if (task.type == TaskType.physicalVisit && task.source == 'Record Outcome') {
+          // Salesman-requested visit (Internal Action → "Physical Visit",
+          // see customerService.applyOutcome) — distinct from the
+          // 3rd-No-Answer physicalVisit task, which is owned by the
+          // salesperson and never reaches this RE-only screen with this
+          // source. Closing it requires BOTH a photo and notes
+          // (taskService.completeTask enforces this server-side too).
+          actionOptions = [
+            _ActionOption(Icons.check_circle_outline, kGreen, 'Complete Visit', 'Attach a photo and notes from the visit — both required.', () => _completeVisit(context, store, task!)),
+            _ActionOption(Icons.cancel_outlined, kRed, 'Reject Visit', 'Could not carry out the visit — a reason is required.', () => _rejectVisit(context, store, task!)),
+          ];
         } else if (task.type == TaskType.financialTeamFollowUp && task.source == 'Record Outcome' && task.status != TaskStatus.completed && task.status != TaskStatus.closed) {
           // An "Internal Action" outcome — a real Approve/Reject decision,
           // not just generic complete/reschedule. Whichever way RE
@@ -289,10 +381,20 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
             _ActionOption(Icons.schedule, kBlue, 'Reschedule Deadline', 'Set a new deadline directly — RE approval is not required for RE\'s own changes.', () => _rescheduleTask(context, store, task!)),
           ];
         }
+        // A completed/closed task is history, not a request waiting on
+        // the RE — none of the branches above check this, so every
+        // action (Mark Completed, Call Salesman, Approve/Reject, …) was
+        // still offered on a task that's already done, as if it still
+        // needed a decision. Override to no actions here rather than
+        // threading the check through each branch above.
+        if (task.status == TaskStatus.completed || task.status == TaskStatus.closed) {
+          actionOptions = [];
+        }
         break;
       case TaskKind.visitReview:
         task = store.tasks.firstWhere((t) => t.id == refId, orElse: () => store.tasks.first);
-        customer = store.customers.firstWhere((c) => c.id == task!.customerId, orElse: () => store.customers.first);
+        customer = store.customers.firstWhere((c) => c.id == task!.customerId, orElse: () => _taskCustomerFallback(task!));
+        store.ensureCustomerLoaded(task.customerId);
         subtitle = 'Physical Visit — No Outcome Recorded';
         priority = 'MEDIUM';
         color = kPurple;
@@ -307,7 +409,7 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
         break;
       case TaskKind.dispute:
         dispute = store.disputes.firstWhere((d) => d['id'] == refId, orElse: () => store.disputes.first);
-        customer = store.customers.firstWhere((c) => c.name == dispute!['customer'], orElse: () => store.customers.first);
+        customer = store.customers.firstWhere((c) => c.id == '${dispute!['customerCode']}', orElse: () => _placeholderCustomer('${dispute!['customerCode']}', '${dispute['customer']}'));
         subtitle = 'Dispute Awaiting Review';
         priority = (dispute['priority'] as String?) == 'High' ? 'HIGH' : 'MEDIUM';
         color = kIndigo;
@@ -352,7 +454,7 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
         break;
       case TaskKind.ptpCorrection:
         ptp = store.ptps.firstWhere((p) => p.id == refId, orElse: () => store.ptps.first);
-        customer = store.customers.firstWhere((c) => c.id == ptp!.customerId, orElse: () => store.customers.first);
+        customer = store.customers.firstWhere((c) => c.id == ptp!.customerId, orElse: () => _placeholderCustomer(ptp!.customerId, ptp.customerId));
         subtitle = 'PTP Correction Request';
         priority = 'MEDIUM';
         color = kTeal;
@@ -389,14 +491,14 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
         break;
       case TaskKind.ptpMissed:
         ptp = store.ptps.firstWhere((p) => p.id == refId, orElse: () => store.ptps.first);
-        customer = store.customers.firstWhere((c) => c.id == ptp!.customerId, orElse: () => store.customers.first);
+        customer = store.customers.firstWhere((c) => c.id == ptp!.customerId, orElse: () => _placeholderCustomer(ptp!.customerId, ptp.customerId));
         subtitle = 'PTP Missed';
         dueDate = ptp.promiseDate;
         priority = 'HIGH';
         color = kRed;
         bannerIcon = Icons.event_busy;
         bannerText = 'BUSY reconciliation found no qualifying payment for this PTP.';
-        description = 'Promised ${_rupee.format(ptp.amountPromised)} on ${DateFormat('dd MMM yyyy').format(ptp.promiseDate)} — broken.';
+        description = 'Promised ${_rupee.format(ptp.amountPromised)} for ${DateFormat('dd MMM').format(ptp.promiseDate)} (${ptp.paymentMode}) — not paid.';
         bannerText = 'BUSY reconciliation marked this PTP broken, and no follow-up task is open on the account.';
         actionOptions = [
           _ActionOption(Icons.add_task, kNavy, 'Create Task — Call Customer', 'Adds a call-customer task to the salesman\'s list for tomorrow, 9 PM.', () => _createCallTask(context, store, customer, 'Call customer — the PTP for ₹${ptp!.amountPromised.toStringAsFixed(0)} on "${customer.name}" was broken. Get a fresh commitment.', fallbackOwnerId: customer.assignedSalesmanId)),
@@ -410,13 +512,12 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
             orElse: () => null);
         customer = store.customers.firstWhere(
             (c) => c.id == (claim?['customerCode'] ?? ''),
-            orElse: () => store.customers.isNotEmpty ? store.customers.first : customer);
+            orElse: () => _placeholderCustomer('${claim?['customerCode'] ?? ''}', '${claim?['customer'] ?? 'Customer'}'));
         subtitle = 'Payment Already Made — Verify';
         priority = 'HIGH';
         color = kGreen;
         bannerIcon = Icons.receipt_long_outlined;
-        bannerText =
-            'The salesperson logged a payment the customer says they made. Check it against BUSY / with the operator, then confirm or reject — nothing moves until you do.';
+        bannerText = 'Salesman says the customer has paid.';
         dueDate = _reviewDeadlineFor((claim?['claimDateRaw'] as DateTime?) ?? DateTime.now());
         // Just the claimed amount — the salesman is already shown
         // separately as "Salesman" below, and a real reference (when the
@@ -459,7 +560,7 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
               ];
         break;
       case TaskKind.overdueTarget:
-        customer = store.customers.firstWhere((c) => c.id == refId, orElse: () => store.customers.first);
+        customer = store.customers.firstWhere((c) => c.id == refId, orElse: () => _placeholderCustomer(refId, refId));
         subtitle = 'Underperforming Salesman — Top Account';
         priority = 'MEDIUM';
         color = kOrange;
@@ -469,7 +570,7 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
         actionOptions = [
           _ActionOption(Icons.person_outline, kBlue, 'View Customer 360', 'Open the full account view and assign a task from there.', () => Navigator.push(context, MaterialPageRoute(builder: (_) => Customer360Screen(customer: customer))), outlined: true),
           _ActionOption(Icons.call_outlined, kBlue, 'Contact Salesman', 'Call or WhatsApp the assigned salesperson about this account.', () => contactActions(context, store.salesmanPhone(customer.assignedSalesmanId)), outlined: true),
-          _ActionOption(Icons.check_circle_outline, kGreen, 'Mark Complete', 'Clears this salesman for today. It returns tomorrow if they are still below target.', () => _dismissUnderperformance(context, store, customer.assignedSalesmanId)),
+          _ActionOption(Icons.check_circle_outline, kGreen, 'Mark Complete', 'Clears this salesman for the rest of this month. It returns on the 1st of next month if they are still below target.', () => _dismissUnderperformance(context, store, customer.assignedSalesmanId)),
         ];
         break;
       default:
@@ -495,17 +596,22 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
         actionOptions = [];
     }
 
-    final overdueInvoices = customer.invoices.where((i) => (i['status'] as String).toLowerCase().contains('overdue')).length;
     final notes = store.notesForItem(refId);
     final attachments = store.attachmentsForItem(refId);
     final requestDetail = _requestDetailSection(store, kind, task: task, ptp: ptp, dispute: dispute);
-    final events = customer.auditHistory.reversed
-        .map((a) => TimelineEvent(icon: Icons.history, color: kMuted, title: a.type, subtitle: a.description, date: a.timestamp, tag: a.actor, tagColor: kBlue))
-        .take(5)
-        .toList()
-      ..addAll(notes.map((n) => TimelineEvent(icon: Icons.sticky_note_2_outlined, color: kBlue, title: 'Note added', subtitle: n['note'], date: n['timestamp'], tag: n['author'], tagColor: kBlue)))
-      ..sort((a, b) => b.date.compareTo(a.date));
 
+    final taskClosed = task != null && (task.status == TaskStatus.completed || task.status == TaskStatus.closed);
+    // Same rule as Customer 360's RE button ("TASK ALREADY EXISTS"): a
+    // customer with an open task gets no second one from the broken-PTP /
+    // visit-review screens (SHIVA MISTRY PERSONAL, 24 Oct).
+    final customerHasOpenTask = store.tasks.any((t) =>
+        t.customerId == customer.id &&
+        t.id != task?.id &&
+        t.status != TaskStatus.completed &&
+        t.status != TaskStatus.closed);
+    if (customerHasOpenTask && (kind == TaskKind.ptpMissed || kind == TaskKind.visitReview)) {
+      actionOptions = actionOptions.where((a) => !a.title.startsWith('Create Task')).toList();
+    }
     return RequestDetailScaffold(
       title: 'Task Details',
       subtitle: subtitle,
@@ -513,79 +619,101 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
       priorityLabel: '$priority PRIORITY',
       color: color,
       bannerIcon: bannerIcon,
-      dueDate: dueDate,
+      // Same clean header as the salesman's Task Details — no coloured
+      // banner / due strip; the deadline lives in Task Information below.
+      showBanner: false,
       actions: actionOptions.map(_actionButton).toList(),
       children: [
-        InfoCard(children: [
-          Row(
+        // Customer card — avatar on the left; row 1: name (wraps by whole
+        // words) + Outstanding; row 2: branch + phone.
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: kBorder)),
+          child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              CircleAvatar(radius: 22, backgroundColor: avatarColorFor(customer.name).withValues(alpha: 0.15), child: Text(initialsFor(customer.name), style: TextStyle(color: avatarColorFor(customer.name), fontWeight: FontWeight.bold))),
-              const SizedBox(width: 10),
+              // Avatar with the branch underneath it.
+              SizedBox(
+                width: 72,
+                child: Column(
+                  children: [
+                    CircleAvatar(
+                        radius: 22,
+                        backgroundColor: avatarColorFor(customer.name).withValues(alpha: 0.15),
+                        child: Text(initialsFor(customer.name), style: TextStyle(color: avatarColorFor(customer.name), fontWeight: FontWeight.bold, fontSize: 14))),
+                    const SizedBox(height: 6),
+                    Text(customer.branch,
+                        textAlign: TextAlign.center,
+                        maxLines: 2,
+                        style: const TextStyle(fontSize: 10.5, color: kMuted, height: 1.2)),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    GestureDetector(
-                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => Customer360Screen(customer: customer))),
-                      child: Text(customer.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: kBlue, decoration: TextDecoration.underline)),
-                    ),
-                    const SizedBox(height: 3),
-                    Text('${customer.branch} Branch', style: const TextStyle(fontSize: 10.5, color: kMuted)),
-                    CallablePhoneNumber(phoneNumber: customer.contactNumber, iconSize: 12, style: const TextStyle(fontSize: 10.5)),
-                  ],
-                ),
-              ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  const Text('Total Outstanding', style: TextStyle(fontSize: 10, color: kMuted)),
-                  FittedBox(fit: BoxFit.scaleDown, child: Text(_rupee.format(customer.totalOutstanding), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: kRed))),
-                  Text('${customer.oldestOverdueDays} Days Overdue  ·  $overdueInvoices Invoices', style: const TextStyle(fontSize: 9.5, color: kMuted)),
-                ],
-              ),
-            ],
-          ),
-        ]),
-        const SizedBox(height: 18),
-        const SectionLabel('CUSTOMER SUMMARY'),
-        InfoCard(children: [
-          KeyValueRow('Last Payment', customer.lastPaymentDate != null ? '${_rupee.format(customer.lastPaymentAmount ?? 0)} on ${DateFormat('dd MMM yyyy').format(customer.lastPaymentDate!)}' : 'None recorded'),
-          KeyValueRow('Credit Days', '${customer.creditDays} Days'),
-          KeyValueRow('Overdue Days', '${customer.oldestOverdueDays} Days', valueColor: kOrange),
-          // The customer's assigned salesperson — NOT task.ownerId, which
-          // for an Internal Action task is the RE the task was routed to.
-          if (customer.assignedSalesmanId.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const SizedBox(width: 118, child: Text('Salesman', style: TextStyle(fontSize: 12, color: kMuted, fontWeight: FontWeight.w500))),
-                  Expanded(
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Flexible(
-                          child: Text(store.salesmanDisplayName(customer.assignedSalesmanId),
-                              textAlign: TextAlign.right, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: kDark)),
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => Customer360Screen(customer: customer))),
+                            child: Text(customer.name,
+                                softWrap: true,
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: kBlue, decoration: TextDecoration.underline, height: 1.3)),
+                          ),
                         ),
-                        const SizedBox(width: 8),
-                        InkWell(
-                          borderRadius: BorderRadius.circular(20),
-                          onTap: () => contactActions(context, store.salesmanPhone(customer.assignedSalesmanId)),
-                          child: const Padding(padding: EdgeInsets.all(2), child: Icon(Icons.call, size: 16, color: kBlue)),
+                        const SizedBox(width: 12),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            const Text('Outstanding', style: TextStyle(fontSize: 10.5, color: kMuted)),
+                            const SizedBox(height: 2),
+                            Text(_rupee.format(customer.totalOutstanding), style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.bold, color: kRed)),
+                          ],
                         ),
                       ],
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 10),
+                    // Wrap, not Row: two phone numbers ("7202940640,9375922678")
+                    // drop to the next line instead of overflowing.
+                    Wrap(
+                      spacing: 14,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        CallablePhoneNumber(phoneNumber: customer.contactNumber, iconSize: 12, style: const TextStyle(fontSize: 11.5)),
+                      ],
+                    ),
+                  ],
+                ),
               ),
-            ),
-        ]),
+            ],
+          ),
+        ),
         const SizedBox(height: 18),
-        const SectionLabel('WHAT THE SALESPERSON RECORDED'),
-        InfoCard(children: [Text(description, style: const TextStyle(fontSize: 12.5, color: kDark, height: 1.4))]),
+        const SectionLabel('TASK INFORMATION'),
+        InfoCard(children: [
+          KeyValueRow('Task Type', subtitle),
+          KeyValueRow('Priority', priority[0] + priority.substring(1).toLowerCase(), valueColor: color),
+          KeyValueRow('Status', task == null ? 'Pending' : (task.status.name[0].toUpperCase() + task.status.name.substring(1))),
+          if (dueDate != null)
+            KeyValueRow('Deadline', '${DateFormat('dd MMM yyyy, hh:mm a').format(dueDate)}  ·  ${_dueStatus(dueDate, taskClosed)}', valueColor: color),
+        ]),
+        ..._recordedSection(context, store, task, description, customer),
+        // "To do" sits right below what was recorded / why this task exists.
+        const SizedBox(height: 18),
+        TodoCallout(
+          taskClosed
+              ? 'Nothing to do. This task is closed.'
+              : (customerHasOpenTask && (kind == TaskKind.ptpMissed || kind == TaskKind.visitReview))
+                  ? 'A task is already open for this customer. Check it in Tasks — no new task needed.'
+                  : _todoFor(store, customer, task: task, dispute: dispute),
+          done: taskClosed,
+        ),
         // Per-kind breakdown: exactly what is being requested / what
         // changed, so the RE can decide without opening another screen.
         ...requestDetail,
@@ -617,11 +745,6 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
         if (notes.isNotEmpty) ...[
           const SizedBox(height: 18),
           NotesSection(refId: refId, readOnly: true),
-        ],
-        if (events.isNotEmpty) ...[
-          const SizedBox(height: 18),
-          const SectionLabel('ACTIVITY / HISTORY'),
-          ActivityTimeline(events),
         ],
       ],
     );
@@ -705,7 +828,7 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
     try {
       await store.dismissUnderperformance(salesmanId);
       navigator.pop();
-      showAppMessageAfter(navigator, message: 'Marked complete for today. It will return tomorrow if ${store.salesmanDisplayName(salesmanId)} is still below target.');
+      showAppMessageAfter(navigator, message: 'Marked complete for this month. It will return on the 1st of next month if ${store.salesmanDisplayName(salesmanId)} is still below target.');
     } catch (e) {
       showAppMessageAfter(navigator, message: 'Could not mark complete: $e', isError: true);
     }
@@ -1045,6 +1168,9 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
     required Color accent,
     required String submitLabel,
     required Future<void> Function(ApproveRejectResult result) action,
+    bool requireNote = false,
+    bool requirePhoto = false,
+    bool allowPdf = true,
   }) async {
     final result = await showApproveRejectForm(
       context,
@@ -1052,9 +1178,57 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
       title: title,
       accent: accent,
       submitLabel: submitLabel,
+      requireNote: requireNote,
+      requirePhoto: requirePhoto,
+      allowPdf: allowPdf,
     );
     if (result == null) return;
     await action(result);
+  }
+
+  void _completeVisit(BuildContext context, AppStore store, AppTask task) {
+    _decideWithEvidence(
+      context,
+      refId: task.id,
+      title: 'Complete Visit',
+      accent: kGreen,
+      submitLabel: 'Complete',
+      requireNote: true,
+      requirePhoto: true,
+      allowPdf: false,
+      action: (result) async {
+        final navigator = Navigator.of(context);
+        try {
+          await store.completeTaskWithEvidence(task.id, note: result.note, attachmentPath: result.attachmentPath);
+          navigator.pop();
+          showAppMessageAfter(navigator, message: 'Visit completed — the salesperson has a new follow-up call task.');
+        } catch (e) {
+          showAppMessageAfter(navigator, message: 'Could not complete: $e', isError: true);
+        }
+      },
+    );
+  }
+
+  void _rejectVisit(BuildContext context, AppStore store, AppTask task) {
+    _decideWithEvidence(
+      context,
+      refId: task.id,
+      title: 'Reject Visit',
+      accent: kRed,
+      submitLabel: 'Reject',
+      requireNote: true,
+      allowPdf: false,
+      action: (result) async {
+        final navigator = Navigator.of(context);
+        try {
+          await store.rejectTaskVisit(task.id, reason: result.note, attachmentPath: result.attachmentPath);
+          navigator.pop();
+          showAppMessageAfter(navigator, message: 'Visit rejected — the salesperson has a new follow-up call task.');
+        } catch (e) {
+          showAppMessageAfter(navigator, message: 'Could not reject: $e', isError: true);
+        }
+      },
+    );
   }
 
   // Every task action is now a real button pinned to the bottom bar (see
@@ -1153,6 +1327,197 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
     return InfoCard(children: rows);
   }
 
+  /// "Customer refused to commit — call again. Reason: Other Notes: …" /
+  /// "Details: Updated Ledger Required" / "Dispute Raised — Reason: x,
+  /// Amt: ₹1000" → labelled rows, so the RE reads fields, not a run-on line.
+  List<(String, String)> _recordedRows(String text) {
+    final re = RegExp(r'\b(Reason|Notes?|Details?|Amt|Amount|Ref|Date|Time|Contact)\s*:\s*', caseSensitive: false);
+    final ms = re.allMatches(text).toList();
+    String clean(String v) => v.trim().replaceAll(RegExp(r'^[\s,—\-–]+|[\s,—\-–]+$'), '').trim();
+    final rows = <(String, String)>[];
+    final lead = clean(ms.isEmpty ? text : text.substring(0, ms.first.start));
+    if (lead.isNotEmpty) rows.add(('Summary', lead));
+    for (var i = 0; i < ms.length; i++) {
+      final raw = ms[i].group(1)!.toLowerCase();
+      final label = raw.startsWith('amt') || raw == 'amount'
+          ? 'Amount'
+          : raw.startsWith('note')
+              ? 'Notes'
+              : raw.startsWith('detail')
+                  ? 'Details'
+                  : raw == 'ref'
+                      ? 'Reference'
+                      : raw[0].toUpperCase() + raw.substring(1);
+      final v = clean(text.substring(ms[i].end, i + 1 < ms.length ? ms[i + 1].start : text.length));
+      if (v.isNotEmpty) rows.add((label, v));
+    }
+    return rows;
+  }
+
+  /// Which salesman outcome raised this task (null = a system task).
+  String? _outcomeLabel(AppTask t) {
+    if (t.type == TaskType.financialTeamFollowUp && t.source == 'Record Outcome') return 'Internal Action';
+    if (t.type == TaskType.physicalVisit && t.source == 'Record Outcome') return 'Physical Visit Requested';
+    if (t.type == TaskType.paymentVerification) return 'Payment Already Made';
+    switch (t.source) {
+      case 'Customer Refused':
+        return 'Unable / Refused to Pay';
+      case 'No Answer':
+        return 'No Answer';
+      case 'Dispute Review':
+        return 'Dispute';
+      case 'Record Outcome':
+        return 'Recorded Outcome';
+    }
+    return null;
+  }
+
+  /// "Overdue by 2 days" / "Due today" / "Due in 3 days" / "Completed".
+  static String _dueStatus(DateTime due, bool closed) {
+    if (closed) return 'Completed';
+    final now = DateTime.now();
+    if (due.isBefore(now)) {
+      final d = now.difference(due);
+      return d.inDays >= 1 ? 'Overdue by ${d.inDays} day${d.inDays == 1 ? '' : 's'}' : 'Overdue by ${d.inHours < 1 ? '${d.inMinutes} min' : '${d.inHours} hr'}';
+    }
+    final days = DateTime(due.year, due.month, due.day).difference(DateTime(now.year, now.month, now.day)).inDays;
+    return days == 0 ? 'Due today' : days == 1 ? 'Due tomorrow' : 'Due in $days days';
+  }
+
+  /// One short, plain line for the Summary — e.g. "Missed the scheduled
+  /// call on 23 Oct, 06:00 PM." Null keeps the original text.
+  String? _shortSummary(AppTask? task, String description, Customer customer) {
+    if (task == null) return null;
+    if (task.source == 'Missed Deadline') {
+      final m = RegExp(r'scheduled (call|physical visit|visit) \(due (\d{1,2})/(\d{1,2})/(\d{4}),\s*(\d{1,2}):(\d{2})(?::\d{2})?\s*([ap]m)', caseSensitive: false).firstMatch(description);
+      if (m == null) return 'Missed the scheduled call.';
+      var h = int.parse(m.group(5)!);
+      final pm = m.group(7)!.toLowerCase() == 'pm';
+      if (pm && h < 12) h += 12;
+      if (!pm && h == 12) h = 0;
+      final when = DateTime(int.parse(m.group(4)!), int.parse(m.group(3)!), int.parse(m.group(2)!), h, int.parse(m.group(6)!));
+      return 'Missed the scheduled ${m.group(1)!.toLowerCase()} on ${DateFormat('dd MMM, hh:mm a').format(when)}.';
+    }
+    if (task.source == 'Refused Cycle') return 'Customer refused to pay. 5 more days passed with no update.';
+    if (task.type == TaskType.financialTeamFollowUp) return null;
+    final why = plainTask(description, customer.name).why;
+    return why.isEmpty ? null : why;
+  }
+
+  List<Widget> _recordedSection(BuildContext context, AppStore store, AppTask? task, String description, Customer customer) {
+    var rows = _recordedRows(description);
+    final short = _shortSummary(task, description, customer);
+    if (short != null) {
+      rows = [('Summary', short), ...rows.where((r) => r.$1 != 'Summary')];
+      // Missed-deadline / refused-cycle text has nothing else worth showing.
+      if (task?.source == 'Missed Deadline' || task?.source == 'Refused Cycle') rows = [('Summary', short)];
+    }
+    final outcome = task == null ? null : _outcomeLabel(task);
+    // Non-task requests (dispute, PTP correction, claim…) are always the
+    // salesman's own submission.
+    final title = outcome != null || task == null ? 'WHAT THE SALESMAN RECORDED' : 'WHY THIS TASK EXISTS';
+    return [
+      const SizedBox(height: 18),
+      SectionLabel(title),
+      InfoCard(children: [
+        // The customer's current salesman — name plus a phone icon only;
+        // tapping it opens the Call / WhatsApp chooser (contactActions).
+        if (customer.assignedSalesmanId.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Row(
+              children: [
+                const SizedBox(width: 120, child: Text('Salesman', style: TextStyle(fontSize: 12, color: kMuted, fontWeight: FontWeight.w500))),
+                Expanded(
+                  child: Text(store.salesmanDisplayName(customer.assignedSalesmanId),
+                      textAlign: TextAlign.right, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: kDark)),
+                ),
+                const SizedBox(width: 8),
+                InkWell(
+                  borderRadius: BorderRadius.circular(20),
+                  onTap: () => contactActions(context, store.salesmanPhone(customer.assignedSalesmanId)),
+                  child: Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(color: kBlue.withValues(alpha: 0.1), shape: BoxShape.circle),
+                    child: const Icon(Icons.call, size: 16, color: kBlue),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        if (outcome != null) KeyValueRow('Outcome', outcome, valueColor: kBlue),
+        for (final (k, v) in rows)
+          k == 'Summary' || k == 'Notes' || k == 'Details'
+              ? Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(k, style: const TextStyle(fontSize: 11, color: kMuted, fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 2),
+                      Text(v, style: const TextStyle(fontSize: 12.5, color: kDark, height: 1.4)),
+                    ],
+                  ),
+                )
+              : KeyValueRow(k, v),
+        if (task != null) ...[
+          // Only these tasks are created at the moment the salesman records
+          // the outcome; the rest are raised later by the system (e.g. the
+          // visit after a 3rd No Answer), so their time is the task's own.
+          KeyValueRow(
+              (task.source == 'Record Outcome' || task.source == 'Customer Refused' || task.type == TaskType.paymentVerification)
+                  ? 'Recorded on'
+                  : 'Task created on',
+              DateFormat('dd MMM yyyy, hh:mm a').format(task.createdAt)),
+        ],
+      ]),
+    ];
+  }
+
+  /// What the RE does next — one plain sentence, shown in the coloured
+  /// header banner ("To do: …"), naming the button(s) at the bottom (same
+  /// branches as the actionOptions in build()).
+  String _whatToDo(AppStore store, AppTask task, Customer customer) {
+    final sm = store.salesmanDisplayName(customer.assignedSalesmanId);
+    if (task.type == TaskType.paymentVerification) return 'Check the payment in BUSY, then tap Verify Deposit or Fail Verification.';
+    if (task.type == TaskType.customerDetailCorrection) return 'Correct the customer\'s phone or address, then tap Update Customer Details.';
+    if (task.type == TaskType.customerCall && task.source == 'Missed Deadline') return 'Call $sm and ask them to record an outcome, then tap Mark Done.';
+    if (task.type == TaskType.customerCall && task.source == 'Refused Cycle') return 'Call $sm about this customer, then tap Mark Done.';
+    if (task.type == TaskType.physicalVisit && task.source == 'Record Outcome') return 'Visit the customer, then tap Complete Visit or Reject Visit.';
+    if (task.type == TaskType.financialTeamFollowUp && task.source == 'Record Outcome') return 'Solve the salesman\'s issue, then tap Approve or Reject.';
+    if (task.ownerId != store.currentSalesmanId) {
+      return task.isOverdue
+          ? 'Call $sm and ask them to record an outcome.'
+          : 'Nothing now. $sm must finish this by ${DateFormat('dd MMM, hh:mm a').format(task.deadline)}.';
+    }
+    return 'Do this task, then tap Mark Completed.';
+  }
+
+  /// The "To do" sentence for every customer-level task kind.
+  String _todoFor(AppStore store, Customer customer, {AppTask? task, Map<String, dynamic>? dispute}) {
+    final sm = store.salesmanDisplayName(customer.assignedSalesmanId);
+    switch (kind) {
+      case TaskKind.realTask:
+        return task == null ? 'Review this task.' : _whatToDo(store, task, customer);
+      case TaskKind.visitReview:
+        return 'Call $sm and ask what happened on the visit.';
+      case TaskKind.dispute:
+        return (dispute?['status'] == 'Awaiting Verification')
+            ? 'Check BUSY, then tap Verify & Resolve or Still Unpaid.'
+            : 'Check the dispute, then tap Approve & Assign or Reject.';
+      case TaskKind.ptpCorrection:
+        return 'Check the new PTP details, then tap Approve Correction or Reject Correction.';
+      case TaskKind.ptpMissed:
+        return 'The promise was broken. Tap Create Task — Call Customer.';
+      case TaskKind.paymentClaim:
+        return 'Check this payment in BUSY, then tap Confirm Payment or No Payment Found.';
+      case TaskKind.overdueTarget:
+        return 'Call $sm about this account, then tap Mark Complete.';
+      default:
+        return 'Review the details below.';
+    }
+  }
+
   List<Widget> _requestDetailSection(
     AppStore store,
     TaskKind kind, {
@@ -1194,29 +1559,13 @@ class UnifiedTaskDetailScreen extends StatelessWidget {
           ]),
         ];
       case TaskKind.ptpMissed:
-        if (ptp == null) return const [];
-        return [
-          const SizedBox(height: 18),
-          const SectionLabel('BROKEN PTP'),
-          InfoCard(children: [
-            KeyValueRow('Amount promised', _rupee.format(ptp.amountPromised)),
-            KeyValueRow('Promised for', DateFormat('dd MMM yyyy').format(ptp.promiseDate)),
-            KeyValueRow('Payment mode', ptp.paymentMode),
-          ]),
-        ];
+        // Already said in one line in the Summary above.
+        return const [];
       case TaskKind.realTask:
       case TaskKind.visitReview:
-        if (task == null) return const [];
-        return [
-          const SizedBox(height: 18),
-          const SectionLabel('TASK DETAILS'),
-          InfoCard(children: [
-            KeyValueRow('Type', taskTypeLabel(task.type)),
-            KeyValueRow('Priority', task.priority),
-            KeyValueRow('Deadline', DateFormat('dd MMM yyyy, hh:mm a').format(task.deadline)),
-            if (task.source.isNotEmpty) KeyValueRow('Raised from', task.source),
-          ]),
-        ];
+        // Type, priority and deadline are in the header/banner/Due strip;
+        // source and created-on are inside the "recorded" section.
+        return const [];
       default:
         return const [];
     }

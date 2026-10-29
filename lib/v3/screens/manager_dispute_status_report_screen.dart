@@ -23,6 +23,8 @@ String _disputeBucket(String status) {
       return 'Resolved';
     case 'Rejected':
     case 'Returned to Recovery':
+    // The customer vanished from BUSY — nothing left to review or resolve.
+    case 'Auto-Closed':
       return 'Rejected';
     default:
       return 'Awaiting Review';

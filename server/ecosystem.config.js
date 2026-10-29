@@ -22,7 +22,11 @@ module.exports = {
       autorestart: true,
       max_restarts: 10,
       min_uptime: '10s',
-      max_memory_restart: '300M',
+      // Raised from 300M (28 Oct): the noon BUSY sync and dashboard
+      // refresh bursts legitimately peak just above 300 MB and were
+      // triggering restarts. The machine has 16 GB; 600M still catches
+      // a real leak.
+      max_memory_restart: '600M',
       watch: false,
       env: { NODE_ENV: 'development' },
       env_production: { NODE_ENV: 'production' },
@@ -40,7 +44,11 @@ module.exports = {
       autorestart: true,
       max_restarts: 10,
       min_uptime: '10s',
-      max_memory_restart: '300M',
+      // Raised from 300M (28 Oct): the noon BUSY sync and dashboard
+      // refresh bursts legitimately peak just above 300 MB and were
+      // triggering restarts. The machine has 16 GB; 600M still catches
+      // a real leak.
+      max_memory_restart: '600M',
       watch: false,
       env: { NODE_ENV: 'development' },
       env_production: { NODE_ENV: 'production' },

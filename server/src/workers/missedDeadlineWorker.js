@@ -5,6 +5,7 @@ const { ping: pingDb } = require('../config/db');
 const { QUEUE_NAME } = require('../queues/missedDeadlineQueue');
 const { sweepMissedDeadlines, sweepNoAnswerCycle, sweepRESlaBreaches, sweepRefusedCycle } = require('../services/missedDeadlineService');
 const { beat } = require('../services/heartbeatService');
+const { enforceOutcomeRules } = require('../services/recoveryTaskService');
 const notificationRepository = require('../repositories/notificationRepository');
 const logger = require('../config/logger');
 
@@ -17,8 +18,10 @@ function createMissedDeadlineWorker() {
       const refused = await sweepRefusedCycle();
       const result = await sweepMissedDeadlines();
       const reSla = await sweepRESlaBreaches();
+      // Last, so it also catches anything the sweeps above just created.
+      const rules = await enforceOutcomeRules();
       await beat('sweeps-2h');
-      logger.info('[missedDeadlineWorker] sweep complete', { ...noAnswer, ...refused, ...result, ...reSla });
+      logger.info('[missedDeadlineWorker] sweep complete', { ...noAnswer, ...refused, ...result, ...reSla, ...rules });
       return { ...noAnswer, ...refused, ...result, ...reSla };
     },
     { connection, prefix: env.redis.prefix, concurrency: 1 }

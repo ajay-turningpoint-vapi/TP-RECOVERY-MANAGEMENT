@@ -10,6 +10,7 @@ const router = Router();
 const loginSchema = z.object({
   username: z.string().min(1),
   password: z.string().min(1),
+  client: z.enum(['mobile', 'web']).optional(),
 });
 
 const refreshSchema = z.object({

@@ -12,11 +12,11 @@ function generateRawToken() {
   return crypto.randomBytes(32).toString('base64url');
 }
 
-async function insert(userId, rawToken, expiresAt) {
+async function insert(userId, rawToken, expiresAt, channel = 'mobile') {
   const id = uuid();
   await query(
-    'INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at) VALUES (:id, :userId, :tokenHash, :expiresAt)',
-    { id, userId, tokenHash: hashToken(rawToken), expiresAt }
+    'INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at, channel) VALUES (:id, :userId, :tokenHash, :expiresAt, :channel)',
+    { id, userId, tokenHash: hashToken(rawToken), expiresAt, channel }
   );
   return id;
 }
@@ -38,8 +38,15 @@ async function revokeByRawToken(rawToken) {
   await query('UPDATE refresh_tokens SET revoked_at = NOW() WHERE token_hash = :tokenHash', { tokenHash: hashToken(rawToken) });
 }
 
-/** "Log out everywhere" — e.g. if a device is lost, or on a password change (not wired up yet, but the primitive exists). */
-async function revokeAllForUser(userId) {
+/** "Log out everywhere" — e.g. on a password change. Pass `channel` to revoke only that channel's tokens (a fresh login on one channel leaves the other alone). */
+async function revokeAllForUser(userId, channel = null) {
+  if (channel) {
+    await query(
+      'UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = :userId AND channel = :channel AND revoked_at IS NULL',
+      { userId, channel }
+    );
+    return;
+  }
   await query('UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = :userId AND revoked_at IS NULL', { userId });
 }
 

@@ -5,6 +5,7 @@ import 'package:salesman_mobile/v2/models/ptp.dart';
 import 'package:salesman_mobile/v2/models/task.dart';
 import 'package:salesman_mobile/widgets/data_loading.dart' show LoadingAppBarStrip;
 import 'package:salesman_mobile/v2/screens/customer_360_screen.dart';
+import 'package:salesman_mobile/v3/screens/task_details_screen_v3.dart';
 import 'package:salesman_mobile/v2/stores/app_store.dart';
 import 'package:intl/intl.dart';
 
@@ -404,8 +405,6 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                       final showOutcomeAction = (isDone || ptpEditRow) &&
                           !hasOpenPhysicalVisit &&
                           (c.isPendingNoAnswerEdit || canEditPtp);
-                      final ptpPartial = ptpEditRow &&
-                          c.currentRecoveryState != 'Waiting / Monitoring';
 
                       return Card(
                         margin: const EdgeInsets.only(bottom: 12),
@@ -420,7 +419,20 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                         child: InkWell(
                           borderRadius: BorderRadius.circular(16),
                           onTap: () {
-                            Navigator.push(context, MaterialPageRoute(builder: (_) => Customer360Screen(customer: c)));
+                            // An open Physical Visit for this salesman opens
+                            // straight into that task's Details screen.
+                            final visit = store.tasks.where((t) =>
+                                t.customerId == c.id &&
+                                t.type == TaskType.physicalVisit &&
+                                t.ownerId == store.currentSalesmanId &&
+                                t.status != TaskStatus.completed &&
+                                t.status != TaskStatus.closed);
+                            Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                    builder: (_) => visit.isNotEmpty
+                                        ? TaskDetailsScreenV3(task: visit.first)
+                                        : Customer360Screen(customer: c)));
                           },
                           child: Builder(builder: (_) {
                             final money = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
@@ -534,26 +546,10 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                                         Icon(Icons.directions_walk, size: 15, color: Color(0xFFE53935)),
                                         SizedBox(width: 6),
                                         Expanded(
-                                          child: Text('Physical visit required — non-response threshold reached. Visit, then record what happened.',
+                                          child: Text('Physical visit needed — customer did not answer 3 calls. Tap to open the task.',
                                               style: TextStyle(fontSize: 11.5, color: Color(0xFFE53935), fontWeight: FontWeight.w600)),
                                         ),
                                       ],
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Align(
-                                      alignment: Alignment.centerLeft,
-                                      child: OutlinedButton.icon(
-                                        onPressed: () => Navigator.push(context, MaterialPageRoute(
-                                            builder: (_) => Customer360Screen(customer: c, editOutcome: true))),
-                                        icon: const Icon(Icons.add_circle_outline, size: 18),
-                                        label: const Text('Record Visit Outcome'),
-                                        style: OutlinedButton.styleFrom(
-                                          foregroundColor: const Color(0xFF0052CC),
-                                          side: const BorderSide(color: Color(0xFF0052CC)),
-                                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                        ),
-                                      ),
                                     ),
                                   ],
                                   // One-time PTP edit already spent — locked
@@ -582,12 +578,10 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                                         children: [
                                           const Icon(Icons.hourglass_bottom, size: 14, color: Color(0xFF0052CC)),
                                           const SizedBox(width: 6),
-                                          Expanded(
+                                          const Expanded(
                                             child: Text(
-                                                ptpPartial
-                                                    ? 'Promise recorded — still recovering the uncovered balance.'
-                                                    : 'Promise to Pay recorded — awaiting the payment date.',
-                                                style: const TextStyle(fontSize: 11.5, color: Color(0xFF0052CC), fontWeight: FontWeight.w600)),
+                                                'Promise to Pay recorded — awaiting the payment date.',
+                                                style: TextStyle(fontSize: 11.5, color: Color(0xFF0052CC), fontWeight: FontWeight.w600)),
                                           ),
                                         ],
                                       ),

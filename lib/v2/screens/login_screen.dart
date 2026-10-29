@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:salesman_mobile/v2/screens/maintenance_screen.dart';
 import 'package:salesman_mobile/v2/stores/app_store.dart';
@@ -11,6 +12,18 @@ class LoginScreen extends StatefulWidget {
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
+}
+
+/// Forces the username field to always read lowercase, even when the user
+/// types/pastes upper or camel case — keyboards that auto-capitalize the
+/// first letter (or a pasted email) would otherwise silently produce a
+/// username that doesn't match the account on the server until the trim/
+/// lowercase normalization in _handleLogin runs on submit.
+class _LowercaseTextFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
+    return newValue.copyWith(text: newValue.text.toLowerCase());
+  }
 }
 
 class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStateMixin {
@@ -189,6 +202,8 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
               controller: _usernameController,
               keyboardType: TextInputType.emailAddress,
               autocorrect: false,
+              textCapitalization: TextCapitalization.none,
+              inputFormatters: [_LowercaseTextFormatter()],
               onChanged: (_) => setState(() => _errorMessage = null),
               style: const TextStyle(fontSize: 14, color: Color(0xFF0F172A)),
               decoration: _inputDecoration(

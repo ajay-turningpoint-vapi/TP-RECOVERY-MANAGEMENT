@@ -20,6 +20,7 @@ const getAuditHistory = asyncHandler(async (req, res) => {
   const page = await customerService.getAuditHistoryPage(req.params.id, req.user, {
     cursor: req.query.cursor,
     limit: req.query.limit,
+    view: req.query.view,
   });
   res.json(page);
 });

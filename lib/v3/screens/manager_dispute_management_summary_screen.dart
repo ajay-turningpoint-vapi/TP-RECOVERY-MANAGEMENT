@@ -19,6 +19,9 @@ String _summaryBucket(String status) {
     case 'Resolved':
       return 'Approved';
     case 'Rejected':
+    // The customer vanished from BUSY — nothing was approved, and nothing
+    // is left pending either; closest real bucket is "closed, no action".
+    case 'Auto-Closed':
       return 'Rejected';
     case 'Pending Approval':
       return 'Pending Approval';

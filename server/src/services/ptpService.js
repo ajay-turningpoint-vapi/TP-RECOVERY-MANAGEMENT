@@ -148,11 +148,28 @@ const LEVEL_SEVERITY = { none: 0, L1: 1, L2: 2, L3: 3, L4: 4 };
  */
 async function applyPtpOutcomeTx(
   conn,
-  { ptp, customer, outcome, received, brokenReason, moveBalance, actor, source, description, previousState, newState }
+  { ptp, customer, outcome, received, paid, brokenReason, moveBalance, actor, source, description, previousState, newState }
 ) {
+  // Advance Amount is finalized here, at maturity, against the real BUSY
+  // total (`paid`) — never from the provisional value the salesman entered
+  // at PTP creation (see customerService.applyOutcome). Only a kept PTP can
+  // carry an advance: `received` (decideOutcome's PTP-portion) is already
+  // capped at the promised amount, so the excess BUSY payment is exactly
+  // what the PTP itself doesn't account for. Recomputed from scratch every
+  // time this runs (never incremented), so re-running finalizeDuePtps or a
+  // reverify upgrade on the same PTP is idempotent and self-corrects if a
+  // later sync reports a different BUSY total — it never adds the same
+  // advance twice or leaves a stale provisional figure behind.
+  const advanceAmount = outcome === 'kept' && typeof paid === 'number' ? Math.max(0, paid - ptp.amountPromised) : 0;
+
   await ptpRepository.update(
     ptp.id,
-    { status: outcome, amountReceived: outcome === 'broken' ? null : received, brokenReason: outcome === 'broken' ? (brokenReason || null) : null },
+    {
+      status: outcome,
+      amountReceived: outcome === 'broken' ? null : received,
+      brokenReason: outcome === 'broken' ? (brokenReason || null) : null,
+      advanceAmount,
+    },
     conn
   );
 

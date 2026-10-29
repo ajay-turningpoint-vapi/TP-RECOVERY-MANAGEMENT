@@ -63,7 +63,9 @@ function daysSinceLastFollowUp(customer, customerTasks, customerAuditEvents) {
 function hasValidNextAction(customer, customerPtps, customerTasks) {
   if (customer.totalDue <= 0) return true;
   const hasOpenTask = customerTasks.some((t) => t.status !== 'completed' && t.status !== 'closed');
-  const hasActivePtp = customerPtps.some((p) => p.status === 'scheduled' || p.status === 'financialSyncPending');
+  // 'pendingVerification' = promise date reached, waiting for the 12:10 BUSY
+  // check — still an open PTP, not "no next action".
+  const hasActivePtp = customerPtps.some((p) => ['scheduled', 'pendingVerification', 'financialSyncPending'].includes(p.status));
   return hasOpenTask || hasActivePtp;
 }
 
@@ -181,7 +183,53 @@ function creditHealthBand(score) {
  * `ownedCustomers`/`ownedPtps`/`ownedTasks`/`ownedAuditEvents` are already
  * filtered to the one salesperson by the caller.
  */
-function computeRecoveryScoreComponents({ ownedCustomers, ownedPtps, ownedTasks, auditByCustomer, taskByCustomer }) {
+
+// Claim / dispute statuses that are still with the RE.
+const OPEN_CLAIM_STATUSES = ['Awaiting Verification', 'Sync Pending'];
+const OPEN_DISPUTE_STATUSES = ['Pending Approval', 'Approved', 'Need More Information', 'Awaiting Verification', 'In Resolution'];
+
+/** Sets of customer ids with a claim / dispute still with the RE. */
+function openClaimAndDisputeIds(claims = [], disputes = []) {
+  return {
+    openClaimIds: new Set(claims.filter((c) => OPEN_CLAIM_STATUSES.includes(c.status)).map((c) => c.customerId)),
+    openDisputeIds: new Set(disputes.filter((d) => OPEN_DISPUTE_STATUSES.includes(d.status)).map((d) => d.customerId)),
+  };
+}
+
+/**
+ * The salesman's recorded outcome is still waiting on its own trigger, so
+ * under the Record Outcome rules it deliberately has no task yet — it IS
+ * the customer's next step: a claim / dispute with the RE, a Will Confirm
+ * time still ahead, or a No Answer inside its 2-hour window. `lastOutcome`
+ * is the customer's latest `source = 'Record Outcome'` audit row
+ * ({ type, description, occurredAt }).
+ */
+function waitingOnOutcome(customerId, { lastOutcome, openClaimIds, openDisputeIds } = {}) {
+  if ((openClaimIds && openClaimIds.has(customerId)) || (openDisputeIds && openDisputeIds.has(customerId))) return true;
+  if (!lastOutcome) return false;
+  const rts = require('./recoveryTaskService');
+  const now = Date.now();
+  if (lastOutcome.type === rts.WILL_CONFIRM_AUDIT_TYPE) {
+    const at = rts.parseWillConfirmAt(lastOutcome.description);
+    return !!at && at.getTime() > now;
+  }
+  if (lastOutcome.type === rts.NO_ANSWER_AUDIT_TYPE) {
+    return new Date(lastOutcome.occurredAt).getTime() + rts.NO_ANSWER_WINDOW_MS > now;
+  }
+  return false;
+}
+
+/** Latest Record Outcome audit row from a customer's audit list (any order). */
+function lastRecordedOutcome(audits = []) {
+  let last = null;
+  for (const a of audits) {
+    if (a.source !== 'Record Outcome') continue;
+    if (!last || new Date(a.occurredAt) > new Date(last.occurredAt)) last = a;
+  }
+  return last;
+}
+
+function computeRecoveryScoreComponents({ ownedCustomers, ownedPtps, ownedTasks, auditByCustomer, taskByCustomer, openClaimIds = new Set(), openDisputeIds = new Set() }) {
   // Every component below defaults to its "no problems found" value (100,
   // or 75 for PTP discipline) when its underlying collection is empty —
   // correct for an RMS salesperson who's simply caught up on a real
@@ -253,8 +301,12 @@ function computeRecoveryScoreComponents({ ownedCustomers, ownedPtps, ownedTasks,
   const oldOutstandingReduction = agedCustomers.length === 0 ? 100 : (agedCleared / agedCustomers.length) * 100;
 
   const ownedPtpsByCustomer = groupBy(ownedPtps, (p) => p.customerId);
-  const validNextActionCount = ownedCustomers.filter((c) =>
-    hasRealFollowUpAction(c, ownedPtpsByCustomer.get(c.id) || [], taskByCustomer.get(c.id) || [])
+  // A recorded outcome still waiting on its own trigger (Will Confirm,
+  // No Answer window, claim / dispute with the RE) counts as a next step.
+  const validNextActionCount = ownedCustomers.filter(
+    (c) =>
+      hasRealFollowUpAction(c, ownedPtpsByCustomer.get(c.id) || [], taskByCustomer.get(c.id) || []) ||
+      waitingOnOutcome(c.id, { lastOutcome: lastRecordedOutcome(auditByCustomer.get(c.id) || []), openClaimIds, openDisputeIds })
   ).length;
   const noFollowUpControl = ownedCustomers.length === 0 ? 100 : (validNextActionCount / ownedCustomers.length) * 100;
 
@@ -312,6 +364,9 @@ function compareByRecoveryPriority(a, b) {
 }
 
 module.exports = {
+  waitingOnOutcome,
+  lastRecordedOutcome,
+  openClaimAndDisputeIds,
   isTaskOverdue,
   groupBy,
   daysSinceLastFollowUp,

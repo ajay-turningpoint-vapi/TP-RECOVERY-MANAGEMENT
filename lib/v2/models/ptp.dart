@@ -18,6 +18,10 @@ class PromiseToPay {
   final String paymentMode;
   final PtpStatus status;
   final double? amountReceived;
+  // Extra money the customer paid at the time this PTP was raised, beyond
+  // the promised amount — counts toward Total Collected immediately (never
+  // re-verified against BUSY the way amountReceived is at PTP maturity).
+  final double? advanceAmount;
 
   // PTP correction request (spec §20)
   final double? correctionRequestedAmount;
@@ -38,6 +42,7 @@ class PromiseToPay {
     required this.paymentMode,
     this.status = PtpStatus.scheduled,
     this.amountReceived,
+    this.advanceAmount,
     this.correctionRequestedAmount,
     this.correctionRequestedDate,
     this.correctionRequestedPaymentMode,
@@ -62,6 +67,7 @@ class PromiseToPay {
       correctionReason: json['correctionReason'] as String?,
       correctionStatus: json['correctionStatus'] as String? ?? 'none',
       amountReceived: (json['amountReceived'] as num?)?.toDouble(),
+      advanceAmount: (json['advanceAmount'] as num?)?.toDouble(),
       brokenReason: json['brokenReason'] as String?,
     );
   }
@@ -74,6 +80,7 @@ class PromiseToPay {
     String? paymentMode,
     PtpStatus? status,
     double? amountReceived,
+    double? advanceAmount,
     double? correctionRequestedAmount,
     DateTime? correctionRequestedDate,
     String? correctionRequestedPaymentMode,
@@ -89,6 +96,7 @@ class PromiseToPay {
       paymentMode: paymentMode ?? this.paymentMode,
       status: status ?? this.status,
       amountReceived: amountReceived ?? this.amountReceived,
+      advanceAmount: advanceAmount ?? this.advanceAmount,
       correctionRequestedAmount: correctionRequestedAmount ?? this.correctionRequestedAmount,
       correctionRequestedDate: correctionRequestedDate ?? this.correctionRequestedDate,
       correctionRequestedPaymentMode: correctionRequestedPaymentMode ?? this.correctionRequestedPaymentMode,

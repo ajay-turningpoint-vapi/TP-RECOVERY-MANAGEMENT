@@ -23,34 +23,49 @@ class ReScaffoldV3 extends StatefulWidget {
 
 class _ReScaffoldV3State extends State<ReScaffoldV3> {
   int _currentIndex = 0;
+  // Pages are built only once first opened — unvisited heavy tabs (Tasks,
+  // Reports) never compute over the whole company's data.
+  final Set<int> _visited = {0};
 
   void _goTo(int index) {
-    setState(() => _currentIndex = index);
-    // Pull fresh lists on every tab switch so a page that's been sitting
-    // in the IndexedStack (e.g. the dashboard) reflects what other users
-    // have done since it was last shown.
-    context.read<AppStore>().refreshLiveData();
+    setState(() {
+      _currentIndex = index;
+      _visited.add(index);
+    });
+    // Deferred past this frame so the tab switches instantly; throttled
+    // because SSE push events already keep lists live.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) context.read<AppStore>().refreshLiveDataIfStale();
+    });
+  }
+
+  Widget _page(int i) {
+    if (!_visited.contains(i)) return const SizedBox.shrink();
+    switch (i) {
+      case 0:
+        return ControlDashboardScreen(onNavigate: _goTo);
+      case 1:
+        return const CompanyRecoveryQueueScreen();
+      case 2:
+        return const ReTasksScreen();
+      case 3:
+        return const DisputesTab();
+      case 4:
+        return const ReportsScreen();
+      default:
+        return const ProfileScreen();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final store = context.watch<AppStore>();
-    final openTasks = store.totalOpenTaskItemsCount;
-    final disputesAwaitingReview = store.disputesAwaitingReviewCount;
-
-    final pages = [
-      ControlDashboardScreen(onNavigate: _goTo),
-      const CompanyRecoveryQueueScreen(),
-      const ReTasksScreen(),
-      const DisputesTab(),
-      const ReportsScreen(),
-      const ProfileScreen(),
-    ];
+    final openTasks = context.select<AppStore, int>((s) => s.totalOpenTaskItemsCount);
+    final disputesAwaitingReview = context.select<AppStore, int>((s) => s.disputesAwaitingReviewCount);
 
     return Scaffold(
       body: SafeArea(
         child: InitialDataLoader(
-          child: IndexedStack(index: _currentIndex, children: pages),
+          child: IndexedStack(index: _currentIndex, children: List.generate(6, _page)),
         ),
       ),
       bottomNavigationBar: BottomNavigationBar(

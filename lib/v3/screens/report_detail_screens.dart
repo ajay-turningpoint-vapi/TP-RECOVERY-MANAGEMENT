@@ -8,6 +8,8 @@ import 'package:salesman_mobile/v2/models/ptp.dart';
 import 'package:salesman_mobile/v2/models/task.dart';
 import 'package:salesman_mobile/v2/screens/customer_360_screen.dart';
 import 'package:salesman_mobile/v3/screens/request_detail_scaffold.dart';
+import 'package:salesman_mobile/v3/screens/ptp_list_screen.dart';
+import 'package:salesman_mobile/v2/screens/total_collected_screen.dart';
 import 'package:salesman_mobile/widgets/call_helper.dart';
 
 final _rupee = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
@@ -585,7 +587,7 @@ class _SalesmanPerformanceReportState extends State<SalesmanPerformanceReport> {
           (Icons.notifications_active_outlined, kOrange, _rupee.format(noFollowUpAmount), 'No Follow-Up Accounts', '${noFollowUpCustomers.length} customers'),
         ]),
         const SizedBox(height: 20),
-        const Text('Recovery Score Trend (Last 6 Months)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: kNavy)),
+        const Text('Recovery Score Trend (Last 7 Days)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: kNavy)),
         const SizedBox(height: 10),
         InfoCard(children: [
           SizedBox(
@@ -888,6 +890,18 @@ class _SalesmanScoreDetailScreenState extends State<SalesmanScoreDetailScreen> {
     final broken = ownedPtps.where((p) => p.status == PtpStatus.broken).toList();
     final matured = ownedPtps.where((p) => p.status != PtpStatus.scheduled && p.status != PtpStatus.pendingVerification && p.status != PtpStatus.financialSyncPending).toList();
     final totalReceived = kept.fold<double>(0, (s, p) => s + (p.amountReceived ?? 0));
+    // Same three non-overlapping components as the salesman's own Total
+    // Collected card (dashboard_screen.dart) — PTP amount actually
+    // received, finalized Advance Amount (only a 'kept' PTP ever carries
+    // one; ptpService.applyPtpOutcomeTx computes it server-side at
+    // maturity), and any "Payment Already Made" claim the RE has
+    // verified. Scoped to this one salesman's own customers (`ids`).
+    final totalAdvance = kept.fold<double>(0, (s, p) => s + (p.advanceAmount ?? 0));
+    final verifiedClaims = store.paymentClaims
+        .where((c) => c['status'] == 'Verified' && ids.contains(c['customerCode']))
+        .toList();
+    final totalPaymentClaims = verifiedClaims.fold<double>(0, (s, c) => s + (c['amount'] as double));
+    final totalCollected = totalReceived + totalAdvance + totalPaymentClaims;
     final scheduledAmt = scheduled.fold<double>(0, (s, p) => s + p.amountPromised);
     final brokenAmt = broken.fold<double>(0, (s, p) => s + p.amountPromised);
     final brokenRate = matured.isEmpty ? 0.0 : broken.length / matured.length * 100;
@@ -922,11 +936,42 @@ class _SalesmanScoreDetailScreenState extends State<SalesmanScoreDetailScreen> {
         _statGrid([
           (Icons.account_balance_wallet_outlined, kBlue, _rupee.format(totalOutstanding), 'Total Outstanding', '${owned.length} customers'),
           (Icons.currency_rupee, kRed, _rupee.format(totalOverdue), 'Total Overdue', '$overdueCustomers overdue'),
-          (Icons.savings_outlined, kGreen, _rupee.format(totalReceived), 'Total Received', '${kept.length} kept'),
+          (Icons.savings_outlined, kGreen, _rupee.format(totalCollected), 'Total Received', 'PTP + Advance + Verified Claims'),
           (Icons.handshake_outlined, kPurple, '${ownedPtps.length}', 'Total PTPs', '${_rupee.format(scheduledAmt)} active'),
           (Icons.link_off, kRed, '${broken.length}', 'Broken PTPs', '${brokenRate.toStringAsFixed(0)}% of matured'),
           (Icons.event_available_outlined, kOrange, _rupee.format(dueTodayAmt), 'PTP Due Today', '$dueTodayCount PTPs'),
-        ]),
+        ], onTap: {
+          2: () => Navigator.push(context, MaterialPageRoute(builder: (_) => TotalCollectedScreen(
+                ptpTotal: totalReceived,
+                advanceTotal: totalAdvance,
+                paymentClaimTotal: totalPaymentClaims,
+                ptpRows: [
+                  for (final p in kept)
+                    if ((p.amountReceived ?? 0) > 0)
+                      CollectedRow(
+                          customer: owned.firstWhere((c) => c.id == p.customerId),
+                          amount: p.amountReceived!,
+                          subtitle: 'Promised ${DateFormat('dd MMM yyyy').format(p.promiseDate)}'),
+                ],
+                advanceRows: [
+                  for (final p in kept)
+                    if ((p.advanceAmount ?? 0) > 0)
+                      CollectedRow(
+                          customer: owned.firstWhere((c) => c.id == p.customerId),
+                          amount: p.advanceAmount!,
+                          subtitle: 'Advance on PTP of ${DateFormat('dd MMM yyyy').format(p.promiseDate)}'),
+                ],
+                paymentClaimRows: [
+                  for (final c in verifiedClaims)
+                    CollectedRow(
+                        customer: owned.firstWhere((cc) => cc.id == c['customerCode']),
+                        amount: c['amount'] as double,
+                        subtitle: 'Claimed ${c['date']}'),
+                ],
+              ))),
+          3: () => Navigator.push(context, MaterialPageRoute(builder: (_) => PtpListScreen(title: 'Total PTPs', subtitle: '$displayName · ${ownedPtps.length} PTP(s)', ptps: ownedPtps, amountColor: kPurple))),
+          4: () => Navigator.push(context, MaterialPageRoute(builder: (_) => PtpListScreen(title: 'Broken PTPs', subtitle: '$displayName · ${broken.length} broken PTP(s)', ptps: broken, amountColor: kRed))),
+        }),
         const SizedBox(height: 20),
 
         _sectionTitle('How they are performing'),
@@ -1062,38 +1107,49 @@ class _SalesmanScoreDetailScreenState extends State<SalesmanScoreDetailScreen> {
     );
   }
 
-  Widget _statGrid(List<(IconData, Color, String, String, String)> cards) {
+  Widget _statGrid(List<(IconData, Color, String, String, String)> cards, {Map<int, VoidCallback>? onTap}) {
     return Wrap(
       spacing: 10,
       runSpacing: 10,
-      children: cards.map((c) {
-        final (icon, color, value, label, sub) = c;
+      children: cards.asMap().entries.map((entry) {
+        final i = entry.key;
+        final (icon, color, value, label, sub) = entry.value;
+        final tap = onTap?[i];
         return SizedBox(
           width: 160,
           child: ClipRRect(
             borderRadius: BorderRadius.circular(14),
-            child: Container(
-              decoration: BoxDecoration(color: Colors.white, border: Border.all(color: kBorder)),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(height: 4, color: color),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(11, 10, 10, 11),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: color.withValues(alpha: 0.1), shape: BoxShape.circle), child: Icon(icon, size: 13, color: color)),
-                        const SizedBox(height: 8),
-                        Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10, color: kMuted, fontWeight: FontWeight.w700)),
-                        const SizedBox(height: 3),
-                        FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: color))),
-                        const SizedBox(height: 2),
-                        Text(sub, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 9, color: kMuted)),
-                      ],
+            child: InkWell(
+              onTap: tap,
+              child: Container(
+                decoration: BoxDecoration(color: Colors.white, border: Border.all(color: kBorder)),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(height: 4, color: color),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(11, 10, 10, 11),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: color.withValues(alpha: 0.1), shape: BoxShape.circle), child: Icon(icon, size: 13, color: color)),
+                              if (tap != null) const Icon(Icons.chevron_right, size: 15, color: kMuted),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10, color: kMuted, fontWeight: FontWeight.w700)),
+                          const SizedBox(height: 3),
+                          FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: color))),
+                          const SizedBox(height: 2),
+                          Text(sub, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 9, color: kMuted)),
+                        ],
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -1317,7 +1373,7 @@ class _PtpReportState extends State<PtpReport> {
           ],
         ),
         const SizedBox(height: 20),
-        const Text('PTP Trend (Last 6 Months)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: kNavy)),
+        const Text('PTP Trend (Last 7 Days)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: kNavy)),
         const SizedBox(height: 10),
         InfoCard(children: [
           SizedBox(
@@ -1708,7 +1764,7 @@ class _BrokenPtpReportState extends State<BrokenPtpReport> {
           ],
         ),
         const SizedBox(height: 20),
-        const Text('Broken PTP Trend (Last 6 Months)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: kNavy)),
+        const Text('Broken PTP Trend (Last 7 Days)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: kNavy)),
         const SizedBox(height: 10),
         InfoCard(children: [
           SizedBox(
@@ -1960,6 +2016,8 @@ String _disputeBucket(String status) {
       return 'Resolved';
     case 'Rejected':
     case 'Returned to Recovery':
+    // The customer vanished from BUSY — nothing left to review or resolve.
+    case 'Auto-Closed':
       return 'Rejected';
     default:
       return 'Awaiting Review';
@@ -2662,7 +2720,7 @@ class _ExpectedVsActualCollectionReportState extends State<ExpectedVsActualColle
           ],
         ),
         const SizedBox(height: 20),
-        const Text('Collection Trend (Last 6 Months)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: kNavy)),
+        const Text('Collection Trend (Last 7 Days)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: kNavy)),
         const SizedBox(height: 10),
         InfoCard(children: [
           SizedBox(

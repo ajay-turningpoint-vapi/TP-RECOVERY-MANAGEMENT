@@ -11,12 +11,35 @@ import 'package:salesman_mobile/v2/widgets/voice_translate_field.dart';
 
 final _money = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
 
-/// Shared rule for the three amount inputs (PTP promise, dispute, payment
-/// already made): a salesman can never record an amount larger than what
-/// the customer actually owes. Returns an error string, or null if OK.
-/// [maxOutstanding] <= 0 means "unknown" — skip the ceiling check.
+const int kMaxNotesWords = 1000;
+
+int wordCount(String text) {
+  final trimmed = text.trim();
+  if (trimmed.isEmpty) return 0;
+  return trimmed.split(RegExp(r'\s+')).length;
+}
+
+/// Blocks typing/pasting past a word-count ceiling (PTP notes, dispute
+/// reason, payment reference, internal-action notes, …) — rejects the edit
+/// outright rather than truncating mid-word, so a salesman never sees their
+/// own text silently cut off.
+class WordCountLimitFormatter extends TextInputFormatter {
+  final int max;
+  const WordCountLimitFormatter({this.max = kMaxNotesWords});
+
+  @override
+  TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
+    if (wordCount(newValue.text) > max) return oldValue;
+    return newValue;
+  }
+}
+
 String? _amountCeilingError(double amt, double maxOutstanding) {
-  if (maxOutstanding > 0 && amt > maxOutstanding) {
+  // Compare at the same whole-rupee precision the error message itself
+  // displays (_money uses decimalDigits: 0) — otherwise a customer owing
+  // e.g. ₹6,783.50 shows as "₹6,784" here but still rejects a salesman
+  // typing exactly 6784, since 6784 > 6783.50 at full precision.
+  if (maxOutstanding > 0 && amt.round() > maxOutstanding.round()) {
     return 'Cannot exceed total outstanding (${_money.format(maxOutstanding)})';
   }
   return null;
@@ -397,14 +420,17 @@ class PtpOutcomeForm extends StatefulWidget {
 
 class _PtpOutcomeFormState extends State<PtpOutcomeForm> {
   final _amountCtrl = TextEditingController();
+  final _advanceAmountCtrl = TextEditingController();
   late final _personCtrl = TextEditingController(text: widget.initialPerson ?? '');
   final _notesCtrl = TextEditingController();
   String _mode = 'Phone Call';
   DateTime? _selectedDate;
   TimeOfDay? _selectedTime;
   String? _amountError;
+  String? _advanceAmountError;
   String? _personError;
   String? _dateTimeError;
+  String? _notesError;
 
   Widget _buildLabel(String text) {
     return Padding(
@@ -437,8 +463,10 @@ class _PtpOutcomeFormState extends State<PtpOutcomeForm> {
       onSave: () async {
         setState(() {
           _amountError = null;
+          _advanceAmountError = null;
           _personError = null;
           _dateTimeError = null;
+          _notesError = null;
         });
         bool hasError = false;
 
@@ -454,6 +482,17 @@ class _PtpOutcomeFormState extends State<PtpOutcomeForm> {
           setState(() => _amountError = _amountCeilingError(amt, widget.maxOutstanding));
           hasError = true;
         }
+        // Advance is optional — money the customer is paying beyond this PTP's
+        // promised amount (e.g. against future invoices), so it isn't capped
+        // by the outstanding ceiling the way Promise Amount is.
+        double advanceAmt = 0.0;
+        if (_advanceAmountCtrl.text.trim().isNotEmpty) {
+          advanceAmt = double.tryParse(_advanceAmountCtrl.text) ?? -1;
+          if (advanceAmt < 0) {
+            setState(() => _advanceAmountError = 'Enter a valid amount');
+            hasError = true;
+          }
+        }
         if (_personCtrl.text.trim().isEmpty) {
           setState(() => _personError = 'Required');
           hasError = true;
@@ -463,6 +502,7 @@ class _PtpOutcomeFormState extends State<PtpOutcomeForm> {
 
         await widget.onSubmit({
           'amount': amt,
+          'advanceAmount': advanceAmt,
           'person': _personCtrl.text.trim(),
           'mode': _mode,
           'date': _selectedDate,
@@ -477,7 +517,18 @@ class _PtpOutcomeFormState extends State<PtpOutcomeForm> {
           _buildLabel('Promise Amount *'),
           TextField(controller: _amountCtrl, decoration: _getInputDeco('Enter promised amount').copyWith(errorText: _amountError, helperText: widget.maxOutstanding > 0 ? 'Max ${_money.format(widget.maxOutstanding)} (total outstanding)' : null), keyboardType: TextInputType.number),
           const SizedBox(height: 16),
-          
+
+          _buildLabel('Advance Amount (Optional)'),
+          TextField(
+            controller: _advanceAmountCtrl,
+            decoration: _getInputDeco('Enter advance amount, if any').copyWith(
+              errorText: _advanceAmountError,
+              helperText: 'Extra the customer is paying beyond the Promise Amount',
+            ),
+            keyboardType: TextInputType.number,
+          ),
+          const SizedBox(height: 16),
+
           Row(
             children: [
               Expanded(
@@ -552,7 +603,12 @@ class _PtpOutcomeFormState extends State<PtpOutcomeForm> {
           const SizedBox(height: 16),
           
           _buildLabel('Notes (Optional)'),
-          TextField(controller: _notesCtrl, maxLines: 2, decoration: _getInputDeco('Add any additional notes here')),
+          VoiceTranslateField(
+            controller: _notesCtrl,
+            maxLines: 3,
+            inputFormatters: const [WordCountLimitFormatter()],
+            decoration: _getInputDeco('Add any additional notes here').copyWith(errorText: _notesError, alignLabelWithHint: true),
+          ),
         ],
       ),
     );
@@ -561,7 +617,7 @@ class _PtpOutcomeFormState extends State<PtpOutcomeForm> {
 
 // 2. Will Confirm
 class WillConfirmForm extends StatefulWidget {
-  final Future<void> Function(DateTime, TimeOfDay) onSubmit;
+  final Future<void> Function(DateTime, TimeOfDay, String notes) onSubmit;
   const WillConfirmForm({super.key, required this.onSubmit});
   @override
   State<WillConfirmForm> createState() => _WillConfirmFormState();
@@ -571,6 +627,13 @@ class _WillConfirmFormState extends State<WillConfirmForm> {
   DateTime? _selectedDate;
   TimeOfDay? _selectedTime;
   String? _dateTimeError;
+  final _notesCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _notesCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -585,7 +648,7 @@ class _WillConfirmFormState extends State<WillConfirmForm> {
           setState(() => _dateTimeError = 'Please select Date and Time');
           return false;
         }
-        await widget.onSubmit(_selectedDate!, _selectedTime!);
+        await widget.onSubmit(_selectedDate!, _selectedTime!, _notesCtrl.text.trim());
         return true;
       },
       child: Column(
@@ -611,6 +674,16 @@ class _WillConfirmFormState extends State<WillConfirmForm> {
             label: Text(timeStr),
           ),
           if (_dateTimeError != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(_dateTimeError!, style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12))),
+          const SizedBox(height: 16),
+          VoiceTranslateField(
+            controller: _notesCtrl,
+            maxLines: 3,
+            inputFormatters: const [WordCountLimitFormatter()],
+            decoration: const InputDecoration(
+              labelText: 'Notes (Optional)',
+              hintText: 'e.g. Remind after 2 days for ₹20,000',
+            ),
+          ),
         ],
       ),
     );
@@ -632,6 +705,7 @@ class _PaymentAlreadyMadeFormState extends State<PaymentAlreadyMadeForm> {
   XFile? _imageFile;
   String? _amountError;
   String? _imageError;
+  String? _referenceError;
 
   @override
   Widget build(BuildContext context) {
@@ -641,6 +715,7 @@ class _PaymentAlreadyMadeFormState extends State<PaymentAlreadyMadeForm> {
         setState(() {
           _amountError = null;
           _imageError = null;
+          _referenceError = null;
         });
         bool hasError = false;
 
@@ -656,7 +731,6 @@ class _PaymentAlreadyMadeFormState extends State<PaymentAlreadyMadeForm> {
           setState(() => _imageError = 'Evidence screenshot is required');
           hasError = true;
         }
-
         if (hasError) return false;
         await widget.onSubmit(amt, _referenceCtrl.text.trim(), _imageFile);
         return true;
@@ -668,13 +742,15 @@ class _PaymentAlreadyMadeFormState extends State<PaymentAlreadyMadeForm> {
           const SizedBox(height: 16),
           TextField(controller: _amountCtrl, decoration: InputDecoration(labelText: 'Claimed Amount (₹)', errorText: _amountError, helperText: widget.maxOutstanding > 0 ? 'Max ${_money.format(widget.maxOutstanding)} (total outstanding)' : null), keyboardType: TextInputType.number),
           const SizedBox(height: 16),
-          TextField(
+          VoiceTranslateField(
             controller: _referenceCtrl,
-            decoration: const InputDecoration(
+            inputFormatters: const [WordCountLimitFormatter()],
+            decoration: InputDecoration(
               labelText: 'Payment Reference / UPI / UTR No. (optional)',
               helperText: 'Anything that helps RE match this against BUSY — transaction ID, mode, who paid, etc.',
+              errorText: _referenceError,
             ),
-            maxLines: 2,
+            maxLines: 3,
           ),
           const SizedBox(height: 16),
           if (_imageFile == null)
@@ -750,7 +826,12 @@ class _DisputeFormState extends State<DisputeForm> {
         children: [
           TextField(controller: _amountCtrl, decoration: InputDecoration(labelText: 'Disputed Amount (₹)', errorText: _amountError, helperText: widget.maxOutstanding > 0 ? 'Max ${_money.format(widget.maxOutstanding)} (total outstanding)' : null), keyboardType: TextInputType.number),
           const SizedBox(height: 16),
-          VoiceTranslateField(controller: _reasonCtrl, decoration: InputDecoration(labelText: 'Detailed Reason for Dispute', errorText: _reasonError), maxLines: 3),
+          VoiceTranslateField(
+            controller: _reasonCtrl,
+            inputFormatters: const [WordCountLimitFormatter()],
+            decoration: InputDecoration(labelText: 'Detailed Reason for Dispute', errorText: _reasonError),
+            maxLines: 3,
+          ),
           const SizedBox(height: 16),
           if (_imageFile == null)
             OutlinedButton.icon(
@@ -777,7 +858,7 @@ class _DisputeFormState extends State<DisputeForm> {
 
 // 5. Internal Action
 class InternalActionForm extends StatefulWidget {
-  final Future<void> Function(String, XFile?) onSubmit;
+  final Future<void> Function(String dependency, String notes, XFile?) onSubmit;
   const InternalActionForm({super.key, required this.onSubmit});
   @override
   State<InternalActionForm> createState() => _InternalActionFormState();
@@ -789,17 +870,25 @@ class _InternalActionFormState extends State<InternalActionForm> {
   String? _otherError;
   XFile? _attachment;
 
+  // Mandatory free text for 'Other' (what the dependency actually is) and
+  // for 'Physical Visit' (why one's needed) — every other fixed dependency
+  // is self-explanatory and needs no notes.
+  bool get _notesRequired => _dependency == 'Other' || _dependency == 'Physical Visit';
+
   @override
   Widget build(BuildContext context) {
     return BaseOutcomeForm(
       title: 'Internal Action Required',
       onSave: () async {
         setState(() => _otherError = null);
-        if (_dependency == 'Other' && _otherCtrl.text.trim().isEmpty) {
-          setState(() => _otherError = 'Please enter the dependency');
+        if (_notesRequired && _otherCtrl.text.trim().isEmpty) {
+          setState(() => _otherError = _dependency == 'Physical Visit' ? 'Please enter the reason for the visit' : 'Please enter the dependency');
           return false;
         }
-        await widget.onSubmit(_dependency == 'Other' ? _otherCtrl.text.trim() : _dependency, _attachment);
+        // A fixed (non-Other, non-Physical-Visit) dependency carries no
+        // notes of its own — only Other/Physical Visit have free text to
+        // send, matching the mandatory-field check above.
+        await widget.onSubmit(_dependency, _notesRequired ? _otherCtrl.text.trim() : '', _attachment);
         return true;
       },
       child: Column(
@@ -815,16 +904,21 @@ class _InternalActionFormState extends State<InternalActionForm> {
               'Document Required',
               'Financial Clarification',
               'Customer Detail Correction',
+              'Physical Visit',
               'Other',
             ].map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),
             onChanged: (v) => setState(() => _dependency = v!),
           ),
-          if (_dependency == 'Other') ...[
+          if (_notesRequired) ...[
             const SizedBox(height: 16),
-            TextField(
+            VoiceTranslateField(
               controller: _otherCtrl,
-              decoration: InputDecoration(labelText: 'Please specify', errorText: _otherError),
-              maxLines: 2,
+              inputFormatters: const [WordCountLimitFormatter()],
+              decoration: InputDecoration(
+                labelText: _dependency == 'Physical Visit' ? 'Reason for visit' : 'Please specify',
+                errorText: _otherError,
+              ),
+              maxLines: 3,
             ),
           ],
           const SizedBox(height: 16),
@@ -1079,7 +1173,12 @@ class _UnableToCommitFormState extends State<UnableToCommitForm> {
             onChanged: (v) => setState(() => _reason = v!),
           ),
           const SizedBox(height: 16),
-          VoiceTranslateField(controller: _notesCtrl, decoration: InputDecoration(labelText: 'Additional Notes', errorText: _notesError), maxLines: 2),
+          VoiceTranslateField(
+            controller: _notesCtrl,
+            inputFormatters: const [WordCountLimitFormatter()],
+            decoration: InputDecoration(labelText: 'Additional Notes', errorText: _notesError),
+            maxLines: 3,
+          ),
         ],
       ),
     );

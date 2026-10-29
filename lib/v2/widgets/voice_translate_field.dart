@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 /// A text field with an optional mic button: salesman speaks in Hindi and
@@ -10,12 +11,14 @@ class VoiceTranslateField extends StatefulWidget {
   final TextEditingController controller;
   final InputDecoration decoration;
   final int maxLines;
+  final List<TextInputFormatter>? inputFormatters;
 
   const VoiceTranslateField({
     super.key,
     required this.controller,
     required this.decoration,
     this.maxLines = 3,
+    this.inputFormatters,
   });
 
   @override
@@ -26,6 +29,13 @@ class _VoiceTranslateFieldState extends State<VoiceTranslateField> {
   final stt.SpeechToText _speech = stt.SpeechToText();
   bool _listening = false;
   bool _available = false;
+  // Whatever was already in the field (typed, or from a previous dictation
+  // session) before THIS listening session started. speech_to_text's
+  // onResult only ever reports words recognized in the current session, so
+  // without this, stopping and starting dictation again — or starting
+  // dictation after typing something — silently wiped out everything that
+  // came before it.
+  String _baseText = '';
 
   Future<bool> _ensureInitialized() async {
     if (_available) return true;
@@ -58,6 +68,7 @@ class _VoiceTranslateFieldState extends State<VoiceTranslateField> {
       return;
     }
 
+    _baseText = widget.controller.text;
     setState(() => _listening = true);
 
     await _speech.listen(
@@ -71,8 +82,20 @@ class _VoiceTranslateFieldState extends State<VoiceTranslateField> {
         listenMode: stt.ListenMode.dictation,
       ),
       onResult: (result) {
-        widget.controller.text = result.recognizedWords;
-        widget.controller.selection = TextSelection.collapsed(offset: widget.controller.text.length);
+        // result.recognizedWords is scoped to THIS session only — append it
+        // to whatever was already there, never replace it outright.
+        final combined = _baseText.isEmpty
+            ? result.recognizedWords
+            : (result.recognizedWords.isEmpty ? _baseText : '$_baseText ${result.recognizedWords}');
+        var value = TextEditingValue(text: combined);
+        // Dictation sets the controller directly, bypassing the TextField's
+        // own formatter pipeline — apply the same formatters (e.g. a
+        // word-count cap) here so speaking past the limit can't exceed it
+        // either.
+        for (final formatter in widget.inputFormatters ?? const []) {
+          value = formatter.formatEditUpdate(widget.controller.value, value);
+        }
+        widget.controller.value = value.copyWith(selection: TextSelection.collapsed(offset: value.text.length));
         if (mounted) setState(() {});
       },
     );
@@ -89,6 +112,7 @@ class _VoiceTranslateFieldState extends State<VoiceTranslateField> {
     return TextField(
       controller: widget.controller,
       maxLines: widget.maxLines,
+      inputFormatters: widget.inputFormatters,
       decoration: widget.decoration.copyWith(
         suffixIcon: IconButton(
           icon: Icon(_listening ? Icons.mic : Icons.mic_none, color: _listening ? Colors.red : null),

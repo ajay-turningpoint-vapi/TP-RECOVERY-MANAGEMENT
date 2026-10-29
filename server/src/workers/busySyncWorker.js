@@ -3,67 +3,20 @@ const { connection } = require('../config/redis');
 const env = require('../config/env');
 const logger = require('../config/logger');
 const { QUEUE_NAME } = require('../queues/busySyncQueue');
-const { runCustomerAgeingSync } = require('../busySync/sync/customerAgeingSync');
-const { runCustomerInvoiceSync } = require('../busySync/sync/customerInvoiceSync');
-const recoveryReconcileService = require('../services/recoveryReconcileService');
 const notificationRepository = require('../repositories/notificationRepository');
-const syncLockService = require('../services/syncLockService');
 const { beat } = require('../services/heartbeatService');
-const { publish, emitChange } = require('../realtime/eventBus');
+const { publish } = require('../realtime/eventBus');
+const { runFullBusySync } = require('../services/busySyncPipeline');
 
 function createBusySyncWorker() {
   const worker = new Worker(
     QUEUE_NAME,
     async () => {
-      // Set for the full job (ageing sync + invoice sync + PTP
-      // verification), not just the two steps sync_runs already tracks
-      // individually — see syncLockService's doc comment. Every active
-      // client polls this (GET /api/sync-status) and shows a full-screen
-      // "syncing, please wait" overlay for as long as it's set, since real
-      // customer/PTP/task data is being rewritten underneath them.
-      await syncLockService.beginSync();
-      try {
-        const resultAgeing = await runCustomerAgeingSync();
-        if (resultAgeing.ran) {
-          logger.info(`[busySyncWorker] customerAgeingSync completed. Run IDs: ${(resultAgeing.runIds || []).join(', ')}`);
-        } else {
-          logger.info(`[busySyncWorker] customerAgeingSync skipped (already in progress).`);
-        }
-
-        const resultInvoice = await runCustomerInvoiceSync();
-        if (resultInvoice.ran) {
-          logger.info(`[busySyncWorker] customerInvoiceSync completed. Run IDs: ${(resultInvoice.runIds || []).join(', ')}`);
-        } else {
-          logger.info(`[busySyncWorker] customerInvoiceSync skipped (already in progress).`);
-        }
-
-        // PTP promote + verify now runs as its own scheduled job at 12:10
-        // IST (queues/ptpVerifyQueue.js) — a few minutes after this sync so
-        // customer balances are fresh, with its own 5-min exponential
-        // backoff / retry. It is NOT run here any more.
-
-        // Backstop: with fresh balances, re-point
-        // every salesperson's recovery task at the still-uncovered slice of
-        // their customer's overdue (and un-park anyone the RE never got to).
-        try {
-          const resultReconcile = await recoveryReconcileService.reconcileAll();
-          logger.info('[busySyncWorker] recovery reconcile sweep completed.', resultReconcile);
-        } catch (reconcileErr) {
-          logger.error('[busySyncWorker] recovery reconcile sweep failed', { message: reconcileErr.message });
-        }
-
-        // A sync rewrites customers, the salesman roster, PTPs and
-        // invoices wholesale — every client should pull fresh lists once
-        // the freeze lifts.
-        emitChange(['customers', 'ptps', 'tasks', 'salesmen', 'escalations'], { reason: 'busy.sync' });
-
-        await beat('busy-sync');
-        return { resultAgeing, resultInvoice };
-      } finally {
-        // Cleared on success AND failure — a failed sync must never leave
-        // the whole app frozen indefinitely for every user.
-        await syncLockService.endSync();
-      }
+      // Same pipeline as the Admin "Sync" button and the CLI — see
+      // services/busySyncPipeline.js.
+      const result = await runFullBusySync({ logPrefix: '[busySyncWorker]' });
+      await beat('busy-sync');
+      return result;
     },
     { connection, prefix: env.redis.prefix, concurrency: 1 }
   );

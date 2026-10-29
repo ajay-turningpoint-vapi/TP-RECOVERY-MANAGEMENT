@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:salesman_mobile/widgets/call_helper.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:salesman_mobile/v2/stores/app_store.dart';
@@ -24,7 +25,7 @@ class PtpCorrectionReviewScreen extends StatelessWidget {
     return RequestDetailScaffold(
       title: 'PTP CORRECTION',
       subtitle: 'Correction Awaiting Review',
-      bannerText: isPending ? 'Salesperson requested a correction to this PTP commitment.' : 'This correction request is ${p.correctionStatus}.',
+      bannerText: isPending ? 'Salesman asked to change this PTP.' : 'This correction request is ${p.correctionStatus}.',
       priorityLabel: isPending ? 'Needs Decision' : p.correctionStatus,
       color: _teal,
       bannerIcon: Icons.swap_horiz,
@@ -74,7 +75,13 @@ class PtpCorrectionReviewScreen extends StatelessWidget {
                       child: Text(customer.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15.5, color: kBlue, decoration: TextDecoration.underline)),
                     ),
                     const SizedBox(height: 4),
-                    Text('Salesman: ${store.salesmanDisplayName(customer.assignedSalesmanId)}', style: const TextStyle(fontSize: 11, color: kMuted)),
+                    Row(
+                      children: [
+                        Flexible(child: Text('Salesman: ${store.salesmanDisplayName(customer.assignedSalesmanId)}', style: const TextStyle(fontSize: 11.5, color: kDark, fontWeight: FontWeight.w600))),
+                        const SizedBox(width: 6),
+                        SalesmanCallIcon(phone: store.salesmanPhone(customer.assignedSalesmanId)),
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -97,6 +104,8 @@ class PtpCorrectionReviewScreen extends StatelessWidget {
           KeyValueRow('Mode of the Communication', p.correctionRequestedPaymentMode ?? p.paymentMode, valueColor: _teal),
           KeyValueRow('Reason', p.correctionReason ?? '-'),
         ]),
+        const SizedBox(height: 18),
+        TodoCallout(isPending ? 'Check the new PTP details, then tap Approve or Reject.' : 'Nothing to do. This request is ${p.correctionStatus}.', done: !isPending),
       ],
     );
   }

@@ -135,6 +135,7 @@ async function getDashboard(user) {
         ownedTasks: allTasks,
         auditByCustomer,
         taskByCustomer: tasksByCustomer,
+        ...scoringService.openClaimAndDisputeIds(await paymentClaimRepository.findAll(), await disputeRepository.findAll()),
       })
       : null;
 
@@ -214,8 +215,54 @@ async function getDashboard(user) {
 }
 
 /** Real accumulated daily history — whatever the snapshot job has genuinely recorded so far. No fabricated backfill. */
-async function getTrends() {
-  return metricsRepository.listRecent(90);
+/**
+ * Last-7-days trend series for every report chart, one row per IST day
+ * (oldest first), computed from real records so the charts work right away:
+ *  - ptpAmountTotal     — new promises recorded that day (PTP created_at)
+ *  - collectionExpected — promises due that day (promise_date)
+ *  - collectionActual   — money received on promises due that day
+ *  - brokenPtpCount     — promises marked broken that day (PTP_BROKEN audit)
+ *  - avgRecoveryScore / noFollowUpCount — from the daily snapshot recorded
+ *    after each BUSY sync; null on days with no snapshot.
+ */
+async function getTrends(days = 7) {
+  const { query } = require('../config/db');
+  const dayKey = (d) => new Date(new Date(d).getTime() + 5.5 * 3600e3).toISOString().slice(0, 10); // IST date
+  const keys = [];
+  for (let i = days - 1; i >= 0; i--) keys.push(dayKey(Date.now() - i * DAY_MS));
+
+  // Light queries only — this runs on every report refresh. (A version that
+  // rebuilt the whole roster + every customer's history per call pushed the
+  // API past pm2's 300 MB limit and caused restart loops on 26 Oct.)
+  const [dueRows, createdRows, brokenRows, snapshots] = await Promise.all([
+    query(
+      `SELECT promise_date, amount_promised, amount_received, status FROM ptps
+       WHERE promise_date >= NOW() - INTERVAL ${days + 1} DAY AND promise_date < NOW() + INTERVAL 1 DAY`
+    ),
+    query(`SELECT created_at, amount_promised FROM ptps WHERE created_at >= NOW() - INTERVAL ${days + 1} DAY`),
+    query(`SELECT occurred_at FROM audit_events WHERE type = 'PTP_BROKEN' AND occurred_at >= NOW() - INTERVAL ${days + 1} DAY`),
+    metricsRepository.listRecent(days + 1),
+  ]);
+  const snapByDay = new Map(snapshots.map((s) => [dayKey(s.date), s]));
+
+  return keys.map((k) => {
+    const created = createdRows.filter((r) => dayKey(r.created_at) === k);
+    const due = dueRows.filter((r) => dayKey(r.promise_date) === k);
+    const snap = snapByDay.get(k);
+    return {
+      date: `${k}T00:00:00+05:30`,
+      ptpAmountTotal: created.reduce((s, r) => s + (Number(r.amount_promised) || 0), 0),
+      collectionExpected: due.reduce((s, r) => s + (Number(r.amount_promised) || 0), 0),
+      collectionActual: due
+        .filter((r) => r.status === 'kept' || r.status === 'partiallyKept')
+        .reduce((s, r) => s + (Number(r.amount_received) || 0), 0),
+      brokenPtpCount: brokenRows.filter((r) => dayKey(r.occurred_at) === k).length,
+      // Recorded once a day after the BUSY sync (busySyncWorker →
+      // snapshotWorker.recordDailyMetrics); null on days with no record.
+      avgRecoveryScore: snap ? snap.avgRecoveryScore : null,
+      noFollowUpCount: snap ? snap.noFollowUpCount : null,
+    };
+  });
 }
 
 const DAY_MS = 86400000;

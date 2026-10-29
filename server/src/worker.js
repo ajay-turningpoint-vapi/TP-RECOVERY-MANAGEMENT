@@ -10,6 +10,7 @@ const { scheduleMissedDeadlineSweep } = require('./queues/missedDeadlineQueue');
 const { createPtpVerifyWorker } = require('./workers/ptpVerifyWorker');
 const { schedulePtpVerify } = require('./queues/ptpVerifyQueue');
 const { createFollowUpWorker } = require('./workers/followUpWorker');
+const { createNoAnswerWorker } = require('./workers/noAnswerWorker');
 
 /**
  * Separate process from the API server (`server.js`) — run as its own
@@ -47,6 +48,12 @@ async function main() {
   // they come due.
   const followUpWorker = createFollowUpWorker();
 
+  // Same shape as followUpWorker, for the No-Answer 2-hour callback
+  // window (and the post-escalation 2nd-cycle callback) — jobs are added
+  // one-off by customerService.recordOutcome whenever a "No Answer"
+  // outcome is recorded.
+  const noAnswerWorker = createNoAnswerWorker();
+
   // The 5 PM control-batch snapshot is PERMANENTLY PAUSED — not scheduled,
   // worker not started. Its task-reopening half (a "no open action"
   // follow-up for every at-risk customer, every day → 500+ unworked tasks,
@@ -65,6 +72,7 @@ async function main() {
       missedDeadlineWorker.close(),
       ptpVerifyWorker.close(),
       followUpWorker.close(),
+      noAnswerWorker.close(),
     ])
       .then(() => db.closePool())
       .then(() => redis.connection.quit())

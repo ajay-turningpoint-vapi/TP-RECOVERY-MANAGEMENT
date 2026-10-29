@@ -61,6 +61,45 @@ function addDaysStr(dateStr, days) {
  * correction pass) call this, so the ₹1 EPS tolerance and the three
  * outcome bands can never drift apart between the two passes.
  */
+/**
+ * First day of a PTP's payment-check window: the day the salesman recorded
+ * the promise. A customer who pays early (after promising, before the
+ * promise date) has kept the promise — before 28 Oct only receipts dated on
+ * or after the promise date counted, so an early payment read as BROKEN
+ * (ASHRAF BHAI NATHANI: paid ₹15,862 on 15 Oct for a 16 Oct promise).
+ * Never later than the promise date itself.
+ */
+function checkWindowStart(ptp, dueDate) {
+  if (!ptp.createdAt) return dueDate;
+  const recorded = istDateStr(new Date(ptp.createdAt));
+  return recorded < dueDate ? recorded : dueDate;
+}
+
+/**
+ * Money in this PTP's window already credited to ANOTHER kept / partly-kept
+ * PTP of the same customer — one BUSY payment must only ever count once
+ * (MANISH PARMAR, 28 Oct: one ₹50,000 receipt had been counted for two
+ * overlapping promises). Only what was actually received inside the
+ * overlapping days can be shared, so per overlap the deduction is
+ * min(other PTP's credited amount, receipts in the overlap).
+ * `receiptsBetween(start, end)` returns this customer's BUSY receipt total.
+ */
+async function alreadyCreditedElsewhere(ptp, startDate, endDate, receiptsBetween) {
+  const others = await ptpRepository.findByCustomer(ptp.customerId);
+  let credited = 0;
+  for (const o of others) {
+    if (o.id === ptp.id || !['kept', 'partiallyKept'].includes(o.status) || !o.amountReceived) continue;
+    const oDue = istDateStr(new Date(o.promiseDate));
+    const oStart = checkWindowStart(o, oDue);
+    const oEnd = addDaysStr(oDue, 1);
+    const from = oStart > startDate ? oStart : startDate;
+    const to = oEnd < endDate ? oEnd : endDate;
+    if (from > to) continue;
+    credited += Math.min(o.amountReceived, await receiptsBetween(from, to));
+  }
+  return credited;
+}
+
 function decideOutcome(promised, paid) {
   if (paid + EPS >= promised) return { outcome: 'kept', received: Math.min(paid, promised) };
   if (paid > 0) return { outcome: 'partiallyKept', received: paid };
@@ -72,20 +111,20 @@ function autoDescription(outcome, ptp, paid, received) {
   const busyAmt = `₹${Math.round(paid)}`;
   if (outcome === 'kept') {
     return (
-      `System verified this PTP against real BUSY receipts/journal entries dated within its 1-day grace period (promised ` +
+      `System verified this PTP against real BUSY receipts/journal entries dated between the day the PTP was recorded and 1 day after the promise date (promised ` +
       `₹${promised.toFixed(0)}, BUSY total ${busyAmt}). Marked Kept — ₹${Math.round(received)} applied. ` +
       `No manual balance adjustment made; the BUSY sync already reflects this payment.`
     );
   }
   if (outcome === 'partiallyKept') {
     return (
-      `System verified this PTP against real BUSY receipts/journal entries dated within its 1-day grace period: BUSY total ` +
+      `System verified this PTP against real BUSY receipts/journal entries dated between the day the PTP was recorded and 1 day after the promise date: BUSY total ` +
       `${busyAmt}, less than the promised ₹${promised.toFixed(0)}. Marked Partially Kept — ₹${Math.round(received)} ` +
       `applied. No manual balance adjustment made; the BUSY sync already reflects this.`
     );
   }
   return (
-    `System verified this PTP against real BUSY receipts/journal entries dated within its 1-day grace period and found no qualifying ` +
+    `System verified this PTP against real BUSY receipts/journal entries dated between the day the PTP was recorded and 1 day after the promise date and found no qualifying ` +
     `entry (promised ₹${promised.toFixed(0)}, BUSY total ${busyAmt}). Marked Broken automatically; ` +
     `re-evaluating the broken-PTP escalation ladder.`
   );
@@ -126,9 +165,10 @@ async function promoteDuePtps() {
 /**
  * Pass B — finalize every 'pendingVerification' PTP whose 1-day grace
  * period has fully elapsed. For each, queries BUSY receipt totals for that
- * PTP's own eligible window [promise_date, promise_date + 1 day] — a
- * payment dated before the promise or after the grace window is never
- * counted — and matches the customer by ID (never name).
+ * PTP's own eligible window [day the PTP was recorded, promise_date + 1 day]
+ * (see checkWindowStart) — a payment dated before the promise was made or
+ * after the grace day is never counted — and matches the customer by ID
+ * (never name).
  *
  * `getReceiptTotals` is injectable (defaults to the real MSSQL repository)
  * so tests can stub BUSY responses without a live MSSQL connection.
@@ -172,9 +212,9 @@ async function finalizeDuePtps(getReceiptTotals = receiptTotalsRepository.getRec
       }
       const branch = branchForCustomer(customerForBranch);
 
-      // Eligible window per the business rule: payment must be dated on/
-      // after the promise date, and on/before the promise date + 1 day.
-      const startDate = dueDate;
+      // Eligible window: from the day the promise was recorded (early
+      // payment counts) to the promise date + 1 day.
+      const startDate = checkWindowStart(ptp, dueDate);
       const endDate = verificationDate;
       const cacheKey = `${branch.key}|${startDate}|${endDate}`;
       let rows = receiptTotalsCache.get(cacheKey);
@@ -191,7 +231,22 @@ async function finalizeDuePtps(getReceiptTotals = receiptTotalsRepository.getRec
         receiptTotalsCache.set(cacheKey, rows);
       }
       const match = rows.find((r) => r.customerId === ptp.customerId); // match by CUSTOMER_ID, never CUSTOMER_NAME
-      const paid = match ? match.totalAmount : 0; // no row for the customer ⇒ ₹0, only at this final-verification point
+      const paidInWindow = match ? match.totalAmount : 0; // no row for the customer ⇒ ₹0, only at this final-verification point
+      // One payment counts once: minus what overlapping kept PTPs already took.
+      const receiptsBetween = async (from, to) => {
+        const key = `${branch.key}|${from}|${to}`;
+        let r = receiptTotalsCache.get(key);
+        if (!r) {
+          r = await withRetry('BUSY receipt totals fetch (overlap)', () =>
+            getReceiptTotals({ startDate: from, endDate: to, database: branch.database, parentGroups: branch.parentGroups, conn: branch.conn })
+          );
+          receiptTotalsCache.set(key, r);
+        }
+        const hit = r.find((x) => x.customerId === ptp.customerId);
+        return hit ? hit.totalAmount : 0;
+      };
+      let paid = Math.max(0, paidInWindow - (await alreadyCreditedElsewhere(ptp, startDate, endDate, receiptsBetween)));
+      if (paid <= EPS) paid = 0;
 
       const decided = await withTransaction(async (conn) => {
         const customer = await customerRepository.findById(ptp.customerId);
@@ -200,7 +255,7 @@ async function finalizeDuePtps(getReceiptTotals = receiptTotalsRepository.getRec
         const { outcome, received } = decideOutcome(promised, paid);
         const brokenReason =
           outcome === 'broken'
-            ? 'Auto: no BUSY receipt or journal entry matching or covering the promised amount within the 1-day grace period (verified against BUSY receipt/journal totals).'
+            ? 'Auto: no BUSY receipt or journal entry matching or covering the promised amount between the day the PTP was recorded and 1 day after the promise date (verified against BUSY receipt/journal totals).'
             : null;
 
         await applyPtpOutcomeTx(conn, {
@@ -208,6 +263,7 @@ async function finalizeDuePtps(getReceiptTotals = receiptTotalsRepository.getRec
           customer,
           outcome,
           received,
+          paid,
           brokenReason,
           moveBalance: false,
           actor: 'System',
@@ -356,7 +412,7 @@ async function reverifyStalePtps({ branchLabel, getReceiptTotals = receiptTotals
 
       result.examined += 1;
 
-      const startDate = dueDate;
+      const startDate = checkWindowStart(ptp, dueDate);
       const endDate = verificationDate;
       const cacheKey = `${branch.key}|${startDate}|${endDate}`;
       let rows = receiptTotalsCache.get(cacheKey);
@@ -373,7 +429,22 @@ async function reverifyStalePtps({ branchLabel, getReceiptTotals = receiptTotals
         receiptTotalsCache.set(cacheKey, rows);
       }
       const match = rows.find((r) => r.customerId === ptp.customerId);
-      const paid = match ? match.totalAmount : 0;
+      const paidInWindow = match ? match.totalAmount : 0;
+      // One payment counts once: minus what overlapping kept PTPs already took.
+      const receiptsBetween = async (from, to) => {
+        const key = `${branch.key}|${from}|${to}`;
+        let r = receiptTotalsCache.get(key);
+        if (!r) {
+          r = await withRetry('BUSY receipt totals fetch (overlap)', () =>
+            getReceiptTotals({ startDate: from, endDate: to, database: branch.database, parentGroups: branch.parentGroups, conn: branch.conn })
+          );
+          receiptTotalsCache.set(key, r);
+        }
+        const hit = r.find((x) => x.customerId === ptp.customerId);
+        return hit ? hit.totalAmount : 0;
+      };
+      let paid = Math.max(0, paidInWindow - (await alreadyCreditedElsewhere(ptp, startDate, endDate, receiptsBetween)));
+      if (paid <= EPS) paid = 0;
 
       const { outcome, received } = decideOutcome(promised, paid);
       if (OUTCOME_RANK[outcome] <= OUTCOME_RANK[ptp.status]) {
@@ -389,12 +460,13 @@ async function reverifyStalePtps({ branchLabel, getReceiptTotals = receiptTotals
           customer,
           outcome,
           received,
+          paid,
           brokenReason: null,
           moveBalance: false,
           actor: 'System',
           source: 'PTP Re-Verification (Manual Sync)',
           description:
-            `Re-checked against BUSY receipts/journal entries dated within the original 1-day grace period ` +
+            `Re-checked against BUSY receipts/journal entries dated between the day the PTP was recorded and 1 day after the promise date ` +
             `(promised ₹${promised.toFixed(0)}, BUSY total ₹${Math.round(paid)}) — a late-entered receipt upgraded ` +
             `this PTP from ${ptp.status} to ${outcome}. ₹${Math.round(received)} applied; no manual balance ` +
             `adjustment made, the BUSY sync already reflects this payment.`,
@@ -477,4 +549,4 @@ async function verifyDuePtps({ getReceiptTotals } = {}) {
   return { promoted, ...finalized };
 }
 
-module.exports = { verifyDuePtps, promoteDuePtps, finalizeDuePtps, reverifyStalePtps };
+module.exports = { verifyDuePtps, promoteDuePtps, finalizeDuePtps, reverifyStalePtps, checkWindowStart, alreadyCreditedElsewhere, decideOutcome, branchForCustomer };

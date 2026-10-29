@@ -67,6 +67,10 @@ async function sweepMissedDeadlines() {
     userRepository.findAll(),
   ]);
 
+  // Retire stale ones first, so the per-customer dedupe below sees only
+  // follow-ups that are still current.
+  await closeStaleMissedDeadlineTasks();
+
   const re = users.find((u) => u.role === 'RECOVERY_EXECUTIVE');
   if (!re) {
     logger.warn('[missedDeadline] no Recovery Executive user — sweep skipped.');
@@ -158,6 +162,84 @@ async function sweepMissedDeadlines() {
 // immediately and waiting for a 2-hourly scan to notice it lapsed.
 
 const VISIT_REASON = 'Non-response threshold reached';
+
+/**
+ * Closes RE "salesman missed the deadline" follow-ups (source SOURCE) that
+ * no longer need the RE — before this nothing ever closed them, and ~790
+ * piled up as Overdue on the RE's Tasks screen (blocking CREATE TASK on
+ * those customers too). One is stale when:
+ *  1. the salesman has recorded an outcome on the customer since it was
+ *     raised (they acted);
+ *  2. the customer has no open, overdue salesman call/visit task left
+ *     (the lapse it was about is gone);
+ *  3. a newer one is open for the same customer (keep only the newest).
+ * Runs at the start of every 2-hourly sweep, and for one customer right
+ * after a Record Outcome (customerService.recordOutcome).
+ */
+async function closeStaleMissedDeadlineTasks({ customerId } = {}) {
+  const { query } = require('../config/db');
+  const [allTasks, users] = await Promise.all([
+    customerId ? taskRepository.findByCustomer(customerId) : taskRepository.findAll(),
+    userRepository.findAll(),
+  ]);
+  const followUps = allTasks.filter((t) => t.source === SOURCE && OPEN(t.status));
+  if (!followUps.length) return { reFollowUpsClosed: 0 };
+
+  const salesmanIds = new Set(users.filter((u) => u.role === 'SALESPERSON').map((u) => u.id));
+  const now = Date.now();
+  const lapsedCustomers = new Set(
+    allTasks
+      .filter(
+        (t) =>
+          OPEN(t.status) &&
+          SALESMAN_TASK_TYPES.includes(t.type) &&
+          salesmanIds.has(t.ownerId) &&
+          new Date(t.deadline).getTime() < now
+      )
+      .map((t) => t.customerId)
+  );
+  const outcomeRows = await query(
+    `SELECT customer_id, MAX(occurred_at) AS last_at FROM audit_events
+     WHERE source = 'Record Outcome' ${customerId ? 'AND customer_id = :customerId' : ''}
+     GROUP BY customer_id`,
+    { customerId }
+  );
+  const lastOutcomeAt = new Map(outcomeRows.map((r) => [r.customer_id, new Date(r.last_at).getTime()]));
+
+  const byCustomer = new Map();
+  for (const t of followUps) {
+    if (!byCustomer.has(t.customerId)) byCustomer.set(t.customerId, []);
+    byCustomer.get(t.customerId).push(t);
+  }
+
+  let closed = 0;
+  for (const [cid, list] of byCustomer) {
+    list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)); // newest first
+    const toClose = [];
+    list.forEach((t, i) => {
+      const acted = (lastOutcomeAt.get(cid) || 0) > new Date(t.createdAt).getTime();
+      if (acted) toClose.push([t, 'Auto-closed — the salesman has since recorded an outcome.']);
+      else if (!lapsedCustomers.has(cid)) toClose.push([t, 'Auto-closed — the salesman task it was about is no longer overdue.']);
+      else if (i > 0) toClose.push([t, 'Auto-closed — superseded by a newer follow-up for this customer.']);
+    });
+    if (!toClose.length) continue;
+    for (const [t, outcome] of toClose) {
+      await taskRepository.update(t.id, { status: 'completed', completedAt: new Date(), outcome });
+    }
+    await auditRepository.record(cid, {
+      type: 'RE_FOLLOWUP_AUTO_CLOSED',
+      description: `${toClose.length} RE "missed deadline" follow-up(s) auto-closed — ${toClose[0][1].replace('Auto-closed — ', '')}`,
+      actor: 'System',
+      source: SOURCE,
+    });
+    closed += toClose.length;
+  }
+  if (closed > 0) {
+    emitChange(['tasks'], { reason: 'missed.deadline.cleanup' });
+    logger.info(`[missedDeadline] ${closed} stale RE follow-up(s) auto-closed.`);
+  }
+  return { reFollowUpsClosed: closed };
+}
 
 /**
  * Runs on the 2-hourly sweep. Keeps the single `source='No Answer'` call
@@ -423,4 +505,4 @@ async function ensureRefusedCycleReAlert(customerId, customer) {
   return true;
 }
 
-module.exports = { sweepMissedDeadlines, sweepNoAnswerCycle, sweepRESlaBreaches, sweepRefusedCycle, SOURCE };
+module.exports = { closeStaleMissedDeadlineTasks, sweepMissedDeadlines, sweepNoAnswerCycle, sweepRESlaBreaches, sweepRefusedCycle, SOURCE };

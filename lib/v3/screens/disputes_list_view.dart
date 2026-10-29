@@ -19,6 +19,9 @@ String _bucketOf(String status) {
     case 'Need More Information':
       return 'IN PROGRESS';
     case 'Resolved':
+    // The customer vanished from BUSY — nothing left to resolve against,
+    // so this reads the same as a genuinely resolved dispute, not an open one.
+    case 'Auto-Closed':
       return 'RESOLVED';
     case 'Rejected':
     case 'Returned to Recovery':
@@ -61,10 +64,16 @@ class DisputesListView extends StatefulWidget {
 }
 
 class _DisputesListViewState extends State<DisputesListView> {
-  String _bucket = 'ALL';
+  // Opens on OPEN — the disputes waiting for the RE.
+  String _bucket = 'OPEN';
   String _query = '';
-  bool _showBanner = true;
-  int _visible = 4;
+  // Sort options for the list (the "Sort by" button).
+  String _sort = 'Newest first';
+  static const _sorts = ['Newest first', 'Oldest first', 'Highest amount', 'Lowest amount', 'Customer A–Z'];
+  // Infinite scroll: show this many, add another page when the list is
+  // scrolled near its end.
+  static const _pageSize = 10;
+  int _visible = _pageSize;
 
   @override
   Widget build(BuildContext context) {
@@ -78,10 +87,11 @@ class _DisputesListViewState extends State<DisputesListView> {
           (d['id'] as String).toLowerCase().contains(q)).toList();
     }
 
+    // Tab order: Open, In Progress, All, then Resolved / Rejected.
     final buckets = {
-      'ALL': store.visibleDisputes.length,
       'OPEN': store.visibleDisputes.where((d) => _bucketOf(d['status']) == 'OPEN').length,
       'IN PROGRESS': store.visibleDisputes.where((d) => _bucketOf(d['status']) == 'IN PROGRESS').length,
+      'ALL': store.visibleDisputes.length,
       'RESOLVED': store.visibleDisputes.where((d) => _bucketOf(d['status']) == 'RESOLVED').length,
       'REJECTED': store.visibleDisputes.where((d) => _bucketOf(d['status']) == 'REJECTED').length,
     };
@@ -89,7 +99,15 @@ class _DisputesListViewState extends State<DisputesListView> {
     if (_bucket != 'ALL') {
       disputes = disputes.where((d) => _bucketOf(d['status']) == _bucket).toList();
     }
-    disputes = [...disputes]..sort((a, b) => (b['raisedDate'] as DateTime).compareTo(a['raisedDate'] as DateTime));
+    int byDate(Map a, Map b) => (b['raisedDate'] as DateTime).compareTo(a['raisedDate'] as DateTime);
+    double amt(Map d) => ((d['amount'] as num?) ?? 0).toDouble();
+    disputes = [...disputes]..sort((a, b) => switch (_sort) {
+          'Oldest first' => -byDate(a, b),
+          'Highest amount' => amt(b).compareTo(amt(a)),
+          'Lowest amount' => amt(a).compareTo(amt(b)),
+          'Customer A–Z' => (a['customer'] as String).toLowerCase().compareTo((b['customer'] as String).toLowerCase()),
+          _ => byDate(a, b),
+        });
 
     final shown = disputes.take(_visible).toList();
 
@@ -102,13 +120,6 @@ class _DisputesListViewState extends State<DisputesListView> {
         automaticallyImplyLeading: false,
         centerTitle: true,
         title: const Text('DISPUTES', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: _navy, letterSpacing: 0.3)),
-        actions: [
-          TextButton.icon(
-            onPressed: () {},
-            icon: const Icon(Icons.filter_alt_outlined, size: 16, color: _blue),
-            label: const Text('Filter', style: TextStyle(color: _blue, fontWeight: FontWeight.bold, fontSize: 12)),
-          ),
-        ],
         bottom: const LoadingAppBarStrip(color: _blue),
       ),
       body: Column(
@@ -127,7 +138,7 @@ class _DisputesListViewState extends State<DisputesListView> {
                   final key = buckets.keys.elementAt(i);
                   final active = _bucket == key;
                   return GestureDetector(
-                    onTap: () => setState(() { _bucket = key; _visible = 4; }),
+                    onTap: () => setState(() { _bucket = key; _visible = _pageSize; }),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -150,7 +161,7 @@ class _DisputesListViewState extends State<DisputesListView> {
                   child: SizedBox(
                     height: 38,
                     child: TextField(
-                      onChanged: (v) => setState(() => _query = v),
+                      onChanged: (v) => setState(() { _query = v; _visible = _pageSize; }),
                       style: const TextStyle(fontSize: 12, color: kDark),
                       decoration: InputDecoration(
                         isDense: true,
@@ -168,15 +179,47 @@ class _DisputesListViewState extends State<DisputesListView> {
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
-                const Icon(Icons.swap_vert, size: 15, color: _blue),
                 const SizedBox(width: 4),
-                const Text('Sort by', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: kDark)),
+                PopupMenuButton<String>(
+                  initialValue: _sort,
+                  tooltip: 'Sort by',
+                  onSelected: (v) => setState(() { _sort = v; _visible = _pageSize; }),
+                  itemBuilder: (_) => [
+                    for (final o in _sorts)
+                      PopupMenuItem(
+                        value: o,
+                        child: Row(children: [
+                          Icon(o == _sort ? Icons.check : Icons.sort, size: 16, color: o == _sort ? _blue : kMuted),
+                          const SizedBox(width: 8),
+                          Text(o, style: TextStyle(fontSize: 13, fontWeight: o == _sort ? FontWeight.bold : FontWeight.normal)),
+                        ]),
+                      ),
+                  ],
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      const Icon(Icons.swap_vert, size: 15, color: _blue),
+                      const SizedBox(width: 4),
+                      Text(_sort == 'Newest first' ? 'Sort by' : _sort,
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _sort == 'Newest first' ? kDark : _blue)),
+                    ]),
+                  ),
+                ),
               ],
             ),
           ),
           Expanded(
-            child: ListView(
+            child: NotificationListener<ScrollNotification>(
+              onNotification: (n) {
+                if (shown.length < disputes.length && n.metrics.pixels >= n.metrics.maxScrollExtent - 300) {
+                  // After this frame — scroll notifications fire during layout.
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted && _visible < disputes.length) setState(() => _visible += _pageSize);
+                  });
+                }
+                return false;
+              },
+              child: ListView(
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 90),
               children: [
                 Center(
@@ -185,46 +228,25 @@ class _DisputesListViewState extends State<DisputesListView> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        if (_showBanner)
-                          Container(
-                            margin: const EdgeInsets.only(bottom: 12),
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(color: const Color(0xFFEFF6FF), borderRadius: BorderRadius.circular(10), border: Border.all(color: const Color(0xFFBFDBFE))),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Icon(Icons.info, size: 16, color: _blue),
-                                const SizedBox(width: 8),
-                                const Expanded(child: Text('Disputes should be raised only for valid reasons.\nAll disputes are reviewed by Recovery Executive.', style: TextStyle(fontSize: 11.5, color: Color(0xFF1E40AF)))),
-                                GestureDetector(onTap: () => setState(() => _showBanner = false), child: const Icon(Icons.close, size: 16, color: _blue)),
-                              ],
-                            ),
-                          ),
                         if (shown.isEmpty)
                           const Padding(padding: EdgeInsets.symmetric(vertical: 40), child: Center(child: Text('No disputes in this category.', style: TextStyle(color: kMuted)))),
                         ...shown.map((d) => _disputeCard(context, d)),
-                        if (disputes.isNotEmpty)
+                        if (shown.length < disputes.length)
+                          const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 16),
+                            child: Center(child: SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.2, color: _blue))),
+                          )
+                        else if (disputes.isNotEmpty)
                           Padding(
                             padding: const EdgeInsets.symmetric(vertical: 12),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Text('Showing 1 to ${shown.length} of ${disputes.length} Disputes', style: const TextStyle(fontSize: 11.5, color: kMuted)),
-                                if (shown.length < disputes.length) ...[
-                                  const SizedBox(width: 10),
-                                  GestureDetector(
-                                    onTap: () => setState(() => _visible += 4),
-                                    child: const Text('Load More  ⌄', style: TextStyle(fontSize: 11.5, color: _blue, fontWeight: FontWeight.bold)),
-                                  ),
-                                ],
-                              ],
-                            ),
+                            child: Center(child: Text('${disputes.length} Disputes', style: const TextStyle(fontSize: 11.5, color: kMuted))),
                           ),
                       ],
                     ),
                   ),
                 ),
               ],
+            ),
             ),
           ),
         ],

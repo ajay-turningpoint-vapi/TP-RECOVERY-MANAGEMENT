@@ -20,15 +20,25 @@ function updatePasswordHash(id, passwordHash) {
   return query('UPDATE users SET password_hash = :passwordHash WHERE id = :id', { id, passwordHash });
 }
 
-/** Bumps `session_version` and returns the new value — invalidates every access token issued before this call (see migration 028). */
-async function bumpSessionVersion(id) {
-  await query('UPDATE users SET session_version = session_version + 1 WHERE id = :id', { id });
-  const rows = await query('SELECT session_version FROM users WHERE id = :id', { id });
-  return rows[0]?.session_version ?? 1;
+// One session-version column per login channel (migrations 028 / 040) —
+// the mobile app and the RE web dashboard each keep their own single session.
+const SESSION_COLUMN = { mobile: 'session_version', web: 'web_session_version' };
+
+function sessionColumn(channel) {
+  return SESSION_COLUMN[channel] || SESSION_COLUMN.mobile;
 }
 
-function getSessionVersion(id) {
-  return query('SELECT session_version FROM users WHERE id = :id', { id }).then((rows) => rows[0]?.session_version ?? null);
+/** Bumps the channel's session version and returns the new value — invalidates every access token that channel issued before this call (see migrations 028 / 040). */
+async function bumpSessionVersion(id, channel = 'mobile') {
+  const col = sessionColumn(channel);
+  await query(`UPDATE users SET ${col} = ${col} + 1 WHERE id = :id`, { id });
+  const rows = await query(`SELECT ${col} AS v FROM users WHERE id = :id`, { id });
+  return rows[0]?.v ?? 1;
+}
+
+function getSessionVersion(id, channel = 'mobile') {
+  const col = sessionColumn(channel);
+  return query(`SELECT ${col} AS v FROM users WHERE id = :id`, { id }).then((rows) => rows[0]?.v ?? null);
 }
 
 module.exports = { findByUsername, findById, listSalesmen, findAll, updatePasswordHash, bumpSessionVersion, getSessionVersion };

@@ -13,7 +13,7 @@ class TasksScreen extends StatefulWidget {
   /// card) deep-link straight into the matching filter.
   final String initialFilter;
 
-  const TasksScreen({super.key, this.initialFilter = 'All'});
+  const TasksScreen({super.key, this.initialFilter = 'Today'});
 
   @override
   State<TasksScreen> createState() => _TasksScreenState();
@@ -37,7 +37,9 @@ class _TasksScreenState extends State<TasksScreen> {
     // than sit unflagged in the Today tab for the rest of the day.
     final overdueTasks = notCompleted.where((t) => t.deadline.isBefore(now)).toList();
     final todayTasks = notCompleted.where((t) => !t.deadline.isBefore(now) && t.deadline.isBefore(endOfToday)).toList();
-    final upcomingTasks = notCompleted.where((t) => !t.deadline.isBefore(now) && t.deadline.isAfter(endOfToday)).toList();
+    // Matches the RE Tasks screen's "Upcoming" window (re_tasks_screen.dart)
+    // — due after today but within the next 7 days, not an unbounded future.
+    final upcomingTasks = notCompleted.where((t) => !t.deadline.isBefore(now) && t.deadline.isAfter(endOfToday) && t.deadline.difference(now).inDays <= 7).toList();
     final completedTasks = allTasks.where((t) => t.status == TaskStatus.completed).toList();
 
     List<AppTask> displayedTasks = allTasks;
@@ -81,9 +83,9 @@ class _TasksScreenState extends State<TasksScreen> {
                     physics: const BouncingScrollPhysics(),
                     child: Row(
                       children: [
-                        _buildTab('All', Icons.all_inbox, allTasks.length),
                         _buildTab('Today', Icons.today, todayTasks.length),
                         _buildTab('Overdue', Icons.warning_amber_rounded, overdueTasks.length),
+                        _buildTab('All', Icons.all_inbox, allTasks.length),
                         _buildTab('Completed', Icons.check_circle_outline, completedTasks.length),
                         _buildTab('Upcoming', Icons.next_plan_outlined, upcomingTasks.length),
                       ],

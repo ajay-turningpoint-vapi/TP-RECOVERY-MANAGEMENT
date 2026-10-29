@@ -103,4 +103,4 @@ function createSnapshotWorker() {
   return worker;
 }
 
-module.exports = { createSnapshotWorker, runSnapshot };
+module.exports = { createSnapshotWorker, runSnapshot, recordDailyMetrics };

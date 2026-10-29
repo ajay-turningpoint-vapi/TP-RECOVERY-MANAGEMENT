@@ -16,7 +16,7 @@ publish_to: "none" # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.1.0+2
+version: 1.1.3+5
 
 environment:
   sdk: ">=3.4.4 <4.0.0"
@@ -58,6 +58,11 @@ dependencies:
   # flutter_secure_storage's js ^0.6.3), and 7.x's Android build.gradle
   # assumes newer AGP than this project's AGP 7.3.0.
   speech_to_text: ^7.5.0
+  # iOS-only update nudge (see main_v3.dart) — this app isn't on the public
+  # App Store, so the package's default iTunes Search lookup can't find it;
+  # configured instead with a self-hosted appcast pointing at the
+  # TestFlight join link.
+  upgrader: ^13.7.0
 
   # Local cache (last-known customers/tasks/ptps/etc. for offline cold
   # starts) + the offline write queue (pending outcome/PTP/dispute/etc.

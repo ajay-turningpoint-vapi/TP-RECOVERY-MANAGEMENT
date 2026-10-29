@@ -26,9 +26,8 @@ class _MainScaffoldState extends State<MainScaffold> {
 
   @override
   Widget build(BuildContext context) {
-    final store = context.watch<AppStore>();
-    final openTasks = store.myOpenTaskCount;
-    final dueCustomers = store.myCustomers.length;
+    final openTasks = context.select<AppStore, int>((s) => s.myOpenTaskCount);
+    final dueCustomers = context.select<AppStore, int>((s) => s.myCustomers.length);
     return Scaffold(
       body: InitialDataLoader(child: _pages[_currentIndex]),
       bottomNavigationBar: BottomNavigationBar(
@@ -40,7 +39,10 @@ class _MainScaffoldState extends State<MainScaffold> {
           setState(() {
             _currentIndex = index;
           });
-          context.read<AppStore>().refreshLiveData();
+          // Deferred + throttled — see AppStore.refreshLiveDataIfStale.
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) context.read<AppStore>().refreshLiveDataIfStale();
+          });
         },
         items: [
           const BottomNavigationBarItem(

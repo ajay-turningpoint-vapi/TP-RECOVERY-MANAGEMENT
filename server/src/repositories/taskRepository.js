@@ -39,6 +39,35 @@ async function findAll() {
   return rows.map(mapTask);
 }
 
+// Same ACTIVE_FILTER customerRepository.js uses for customers — a BUSY-
+// sourced customer (busy_salesman_code set) who paid off / closed drops
+// out of BUSY's feed and is soft-deactivated (busy_still_active = 0); a
+// non-BUSY customer (busy_salesman_code NULL) is always active.
+const ACTIVE_CUSTOMER_JOIN = '(c.busy_salesman_code IS NULL OR c.busy_still_active = 1)';
+
+/**
+ * Same rows as findAll(), minus any task whose customer has since gone
+ * inactive. closeOrphanedTasks (customerRepository.upsertFromBusy) already
+ * auto-completes an inactive customer's still-OPEN tasks at sync time, so
+ * by the time a customer is inactive every one of their tasks is already
+ * 'completed'/'closed' history — nothing actionable is ever filtered out
+ * here, only stale completed rows that have nothing current to show (the
+ * RE/Manager Tasks list — taskService.listForUser's non-salesperson
+ * branch — is the only consumer; every other caller of findAll() keeps
+ * seeing the complete, unfiltered table, since escalation/reconcile/report
+ * logic elsewhere may still need a just-deactivated customer's tasks for
+ * one more pass).
+ */
+async function findAllForActiveCustomers() {
+  const rows = await query(
+    `SELECT t.* FROM tasks t
+     JOIN customers c ON c.id = t.customer_id
+     WHERE ${ACTIVE_CUSTOMER_JOIN}
+     ORDER BY t.created_at DESC`
+  );
+  return rows.map(mapTask);
+}
+
 async function findByOwner(ownerId) {
   const rows = await query('SELECT * FROM tasks WHERE owner_id = :ownerId ORDER BY created_at DESC', { ownerId });
   return rows.map(mapTask);
@@ -56,12 +85,21 @@ async function findById(id) {
   return mapTask(rows[0]);
 }
 
+/**
+ * The ONE place a task row is created. Refuses (returns null) when the
+ * customer no longer appears in BUSY (busy_still_active = 0): a removed
+ * customer must never get a task again, from any path — an RE acting on a
+ * leftover dispute, a delayed No-Answer / Will-Confirm job firing later,
+ * a sweep. Done in the same INSERT … SELECT statement, so it holds inside
+ * transactions too.
+ */
 async function insert(task, connection) {
   const id = task.id || uuid();
   const run = connection ? (sql, params) => connection.query(sql, params) : query;
-  await run(
+  const result = await run(
     `INSERT INTO tasks (id, type, customer_id, owner_id, deadline, priority, reason, status, source, is_routine, note, attachment_path, dispute_id)
-     VALUES (:id, :type, :customerId, :ownerId, :deadline, :priority, :reason, :status, :source, :isRoutine, :note, :attachmentPath, :disputeId)`,
+     SELECT :id, :type, :customerId, :ownerId, :deadline, :priority, :reason, :status, :source, :isRoutine, :note, :attachmentPath, :disputeId
+     FROM customers WHERE id = :customerId AND busy_still_active = 1`,
     {
       id,
       type: task.type,
@@ -81,6 +119,11 @@ async function insert(task, connection) {
       disputeId: task.disputeId || null,
     }
   );
+  const header = Array.isArray(result) ? result[0] : result;
+  if (!header || header.affectedRows === 0) {
+    require('../config/logger').warn('[taskRepository] task NOT created — customer no longer in BUSY', { customerId: task.customerId, type: task.type, source: task.source });
+    return null;
+  }
   return id;
 }
 
@@ -153,13 +196,15 @@ async function supersedeOpenTasks(customerId, outcomeNote, connection) {
 async function closeOrphanedTasks(customerIds, note, connection) {
   if (!customerIds || customerIds.length === 0) return 0;
   const run = connection ? (sql, params) => connection.query(sql, params) : query;
-  const [result] = await run(
+  const out = await run(
     `UPDATE tasks
      SET status = 'completed', outcome = :note, completed_at = NOW()
      WHERE customer_id IN (:customerIds)
        AND status NOT IN ('completed', 'closed')`,
     { customerIds, note }
   );
+  // connection.query → [header, fields]; the pool's query() → header.
+  const result = Array.isArray(out) ? out[0] : out;
   return result.affectedRows;
 }
 
@@ -173,4 +218,4 @@ async function hasOpenTaskForCustomer(customerId, connection) {
   return rows[0].cnt > 0;
 }
 
-module.exports = { mapTask, findAll, findByOwner, findByCustomer, findById, insert, update, supersedeOpenTasks, closeOrphanedTasks, hasOpenTaskForCustomer };
+module.exports = { mapTask, findAll, findAllForActiveCustomers, findByOwner, findByCustomer, findById, insert, update, supersedeOpenTasks, closeOrphanedTasks, hasOpenTaskForCustomer };

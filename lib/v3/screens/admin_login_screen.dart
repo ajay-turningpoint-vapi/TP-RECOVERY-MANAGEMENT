@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:salesman_mobile/v2/stores/app_store.dart';
 
@@ -12,6 +13,15 @@ class AdminLoginScreen extends StatefulWidget {
 
   @override
   State<AdminLoginScreen> createState() => _AdminLoginScreenState();
+}
+
+/// Forces the username field to always read lowercase, even when typed/
+/// pasted in upper or camel case — mirrors login_screen.dart's formatter.
+class _LowercaseTextFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
+    return newValue.copyWith(text: newValue.text.toLowerCase());
+  }
 }
 
 class _AdminLoginScreenState extends State<AdminLoginScreen> with SingleTickerProviderStateMixin {
@@ -133,6 +143,8 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> with SingleTickerPr
                         controller: _usernameController,
                         keyboardType: TextInputType.emailAddress,
                         autocorrect: false,
+                        textCapitalization: TextCapitalization.none,
+                        inputFormatters: [_LowercaseTextFormatter()],
                         onChanged: (_) => setState(() => _errorMessage = null),
                         style: const TextStyle(fontSize: 14, color: Color(0xFF0F172A)),
                         decoration: _inputDecoration(hint: 'Admin username', icon: Icons.person_outline, hasError: _errorMessage != null),

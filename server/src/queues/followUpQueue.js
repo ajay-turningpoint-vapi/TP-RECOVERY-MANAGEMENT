@@ -27,11 +27,11 @@ const followUpQueue = new Queue(QUEUE_NAME, {
  * jobId is deterministic per (customerId, dueAt) so a retried/duplicate
  * record-outcome call can't stack two jobs for the same follow-up.
  */
-async function scheduleFollowUpDue({ customerId, ownerId, dueAt }) {
+async function scheduleFollowUpDue({ customerId, ownerId, dueAt, note }) {
   const due = new Date(dueAt);
   const delay = Math.max(0, due.getTime() - Date.now());
   const jobId = `follow-up:${customerId}:${due.getTime()}`;
-  await followUpQueue.add('follow-up-due', { customerId, ownerId, dueAt: due.toISOString() }, { delay, jobId });
+  await followUpQueue.add('follow-up-due', { customerId, ownerId, dueAt: due.toISOString(), note: note || null }, { delay, jobId });
 }
 
 module.exports = { QUEUE_NAME, followUpQueue, scheduleFollowUpDue };

@@ -71,14 +71,79 @@ Future<void> whatsAppNumber(BuildContext context, String? phoneNumber) async {
   }
 }
 
+/// Every separate number in a (possibly multi-number) BUSY string, e.g.
+/// "9925015086 (a/c Mithun.bhai),9638867777" → [(label, digits), …].
+/// Parts with no usable digits are dropped; duplicates collapse.
+List<({String label, String digits})> splitPhoneNumbers(String? phoneNumber) {
+  if (phoneNumber == null) return const [];
+  final seen = <String>{};
+  final out = <({String label, String digits})>[];
+  for (final part in phoneNumber.split(RegExp(r'[,/;]'))) {
+    final digits = part.replaceAll(RegExp(r'[^0-9+]'), '');
+    if (digits.replaceAll('+', '').length < 6 || !seen.add(digits)) continue;
+    out.add((label: part.trim(), digits: digits));
+  }
+  return out;
+}
+
 /// Tapping a customer/salesman phone number: ask whether to Call or message
-/// on WhatsApp, then route to [callNumber] / [whatsAppNumber].
+/// on WhatsApp, then route to [callNumber] / [whatsAppNumber]. When the
+/// contact has more than one number, each number gets its own Call and
+/// WhatsApp buttons so the user picks which one.
 Future<void> contactActions(BuildContext context, String? phoneNumber) async {
   if (phoneNumber == null || phoneNumber.trim().isEmpty) {
     showAppMessage(context, message: 'No phone number on file for this contact.', isError: true);
     return;
   }
-  final display = phoneNumber.split(RegExp(r'[,/]')).first.trim();
+  final numbers = splitPhoneNumbers(phoneNumber);
+  if (numbers.length > 1) {
+    await showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (sheetCtx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 14),
+            const Text('Choose a number', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF1B2B48))),
+            const SizedBox(height: 4),
+            const Text('This contact has more than one number.', style: TextStyle(fontSize: 12, color: Color(0xFF5A6B87))),
+            const SizedBox(height: 8),
+            for (final n in numbers)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 6, 12, 6),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(n.label, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF1B2B48))),
+                    ),
+                    IconButton(
+                      tooltip: 'Call',
+                      icon: const CircleAvatar(radius: 18, backgroundColor: Color(0xFFE3EDFB), child: Icon(Icons.call, size: 18, color: Color(0xFF0052CC))),
+                      onPressed: () {
+                        Navigator.pop(sheetCtx);
+                        callNumber(context, n.digits);
+                      },
+                    ),
+                    IconButton(
+                      tooltip: 'WhatsApp',
+                      icon: const CircleAvatar(radius: 18, backgroundColor: Color(0xFFDCFCE7), child: Icon(Icons.chat, size: 18, color: Color(0xFF16A34A))),
+                      onPressed: () {
+                        Navigator.pop(sheetCtx);
+                        whatsAppNumber(context, n.digits);
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            const SizedBox(height: 10),
+          ],
+        ),
+      ),
+    );
+    return;
+  }
+  final display = numbers.isNotEmpty ? numbers.first.label : phoneNumber.trim();
   await showModalBottomSheet<void>(
     context: context,
     shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
@@ -152,6 +217,29 @@ class CallablePhoneNumber extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+
+/// Small round phone icon for a salesman — tapping it opens the Call /
+/// WhatsApp chooser ([contactActions]). Used next to a salesman's name on
+/// every RE task (list cards and detail screens), number never printed.
+class SalesmanCallIcon extends StatelessWidget {
+  final String? phone;
+  final double size;
+  const SalesmanCallIcon({super.key, required this.phone, this.size = 15});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(20),
+      onTap: () => contactActions(context, phone),
+      child: Container(
+        padding: const EdgeInsets.all(5),
+        decoration: BoxDecoration(color: const Color(0xFF0052CC).withValues(alpha: 0.1), shape: BoxShape.circle),
+        child: Icon(Icons.call, size: size, color: const Color(0xFF0052CC)),
       ),
     );
   }

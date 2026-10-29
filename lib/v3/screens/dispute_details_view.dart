@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:salesman_mobile/widgets/call_helper.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:image_picker/image_picker.dart';
@@ -198,8 +199,17 @@ class DisputeDetailsView extends StatelessWidget {
                       Row(
                         children: [
                           Expanded(
-                              child: _statBox(Icons.person_outline, _indigo,
-                                  'Raised By', raisedBy)),
+                              child: Stack(
+                            children: [
+                              _statBox(Icons.person_outline, _indigo, 'Salesman', raisedBy),
+                              if (customer.assignedSalesmanId.isNotEmpty)
+                                Positioned(
+                                  top: 6,
+                                  right: 6,
+                                  child: SalesmanCallIcon(phone: store.salesmanPhone(customer.assignedSalesmanId), size: 13),
+                                ),
+                            ],
+                          )),
                           const SizedBox(width: 10),
                           Expanded(
                               child: _statBox(
@@ -214,9 +224,15 @@ class DisputeDetailsView extends StatelessWidget {
                       const SectionLabel('DISPUTE SUMMARY'),
                       InfoCard(children: [
                         KeyValueRow('Reason', d['reason']),
-                        const KeyValueRow('Impact',
-                            'Recovery on disputed amount is paused after approval; undisputed amount continues normal recovery.'),
                       ]),
+                      const SizedBox(height: 18),
+                      TodoCallout(isPending
+                          ? 'Check the dispute, then tap Approve & Assign, Reject, or Clarify to ask the salesman.'
+                          : needsVerification
+                              ? 'Check BUSY, then tap Verify & Resolve or Still Unpaid.'
+                              : needsReassignment
+                                  ? 'The owner declined. Tap Approve & Assign to pick a new owner.'
+                                  : 'Nothing now. The resolution owner is working on it.'),
                       if ((d['attachmentPath'] as String?)?.isNotEmpty ?? false) ...[
                         const SizedBox(height: 18),
                         const SectionLabel('EVIDENCE FROM SALESMAN'),

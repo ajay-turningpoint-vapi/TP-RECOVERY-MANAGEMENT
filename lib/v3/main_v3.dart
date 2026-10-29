@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:upgrader/upgrader.dart';
 import 'package:salesman_mobile/services/api_client.dart';
 import 'package:salesman_mobile/widgets/app_message.dart';
 import 'package:salesman_mobile/v2/stores/app_store.dart';
@@ -174,9 +176,29 @@ class _TPRMSV3AppState extends State<TPRMSV3App> with WidgetsBindingObserver {
       debugShowCheckedModeBanner: false,
       home: getHomeScreen(),
       builder: (context, child) {
+        Widget body = SyncFreezeOverlay(child: MobileFrame(child: child!));
+        // iOS-only: this app is TestFlight-only (no public App Store
+        // listing for upgrader's default iTunes Search lookup to find), so
+        // it's configured with a self-hosted appcast instead — see
+        // server/public/downloads/appcast-ios.xml, whose version must be
+        // bumped by hand on every new TestFlight build. Android/other
+        // platforms never see this prompt.
+        if (!kIsWeb && Platform.isIOS) {
+          body = UpgradeAlert(
+            upgrader: Upgrader(
+              storeController: UpgraderStoreController(
+                oniOS: () => UpgraderAppcastStore(
+                  appcastURL: 'http://43.255.141.110/downloads/appcast-ios.xml',
+                ),
+              ),
+              durationUntilAlertAgain: const Duration(days: 1),
+            ),
+            child: body,
+          );
+        }
         return MediaQuery(
           data: MediaQuery.of(context).copyWith(textScaler: TextScaler.noScaling),
-          child: SyncFreezeOverlay(child: MobileFrame(child: child!)),
+          child: body,
         );
       },
     );

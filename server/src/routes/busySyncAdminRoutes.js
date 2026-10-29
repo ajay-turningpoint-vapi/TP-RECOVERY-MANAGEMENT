@@ -10,7 +10,9 @@ const mssqlDb = require('../busySync/config/mssqlClient').mssqlDb;
 const db = require('../config/db');
 const syncRunsRepository = require('../busySync/repositories/syncRunsRepository');
 const customerAgeingRepository = require('../busySync/repositories/customerAgeingRepository');
-const { startCustomerAgeingSyncInBackground, getSyncProgress } = require('../busySync/sync/customerAgeingSync');
+const { getSyncProgress } = require('../busySync/sync/customerAgeingSync');
+const { runFullBusySync, isSyncRunning } = require('../services/busySyncPipeline');
+const logger = require('../config/logger');
 const mssqlCustomerReportRepository = require('../busySync/reports/mssqlCustomerReportRepository');
 const mariaDbCustomerReportRepository = require('../busySync/reports/mariaDbCustomerReportRepository');
 const { compareCustomerReports } = require('../busySync/validation/customerReportComparator');
@@ -73,11 +75,16 @@ router.post(
       res.status(400).json({ message: `Unknown branch: ${branch}` });
       return;
     }
-    const { started } = await startCustomerAgeingSyncInBackground(branch);
-    if (!started) {
+    // The full pipeline — exactly what the daily 12:00 job runs (customers,
+    // PTP re-check, invoices, reconcile, Record Outcome rules, metrics), not
+    // just the customer step. See services/busySyncPipeline.js.
+    if (await isSyncRunning()) {
       res.status(409).json({ message: 'A sync run is already in progress.' });
       return;
     }
+    runFullBusySync({ branchLabel: branch, logPrefix: '[busySync:admin]' }).catch((err) =>
+      logger.error(`[busySync:admin] manual sync failed: ${err.message}`)
+    );
     res.status(202).json({ message: branch ? `Sync started for ${branch}.` : 'Sync started.' });
   })
 );

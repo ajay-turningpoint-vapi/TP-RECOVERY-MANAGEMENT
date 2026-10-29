@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:salesman_mobile/v2/stores/app_store.dart';
 import 'package:salesman_mobile/v2/screens/customer_360_screen.dart';
 import 'package:salesman_mobile/v2/screens/customer_list_screen.dart';
+import 'package:salesman_mobile/v2/screens/total_collected_screen.dart';
 import 'package:salesman_mobile/v2/widgets/recovery_score_breakdown.dart';
 import 'package:salesman_mobile/v2/models/task.dart';
 import 'package:salesman_mobile/v2/models/customer.dart';
@@ -51,10 +52,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
   /// assigned customer still actionable ("Start Recovery" queue), PLUS any
   /// already worked today (now parked in Waiting / Monitoring but still shown
   /// so their recorded outcome can be reviewed / edited). Actionable ones
-  /// first, then today's done ones — deduped.
+  /// first, then today's done ones — deduped. A customer with an open
+  /// Physical Visit (owned by this salesman) is excluded entirely — they
+  /// have their own dedicated "Physical Visits" card/screen, so showing
+  /// them here too would be a duplicate entry for the same next step.
   List<Customer> _todaysRecoveryCustomers(AppStore store) {
+    final physicalVisitCustomerIds = store.myTasks
+        .where((t) =>
+            t.type == TaskType.physicalVisit &&
+            t.status != TaskStatus.completed)
+        .map((t) => t.customerId)
+        .toSet();
     final actionable = store.myCustomers
-        .where((c) => c.currentRecoveryState != 'Waiting / Monitoring')
+        .where((c) =>
+            store.isInRecoveryQueue(c) &&
+            !physicalVisitCustomerIds.contains(c.id))
         .toList();
     final seen = actionable.map((c) => c.id).toSet();
     // Grounded in the real audit trail (store.recoveryDoneTodayCustomerIds),
@@ -65,7 +77,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         .where((c) =>
             c.currentRecoveryState == 'Waiting / Monitoring' &&
             store.recoveryDoneTodayCustomerIds.contains(c.id) &&
-            !seen.contains(c.id))
+            !seen.contains(c.id) &&
+            !physicalVisitCustomerIds.contains(c.id))
         .toList();
     return [...actionable, ...done];
   }
@@ -130,6 +143,31 @@ class _DashboardScreenState extends State<DashboardScreen> {
             myCustomerIds.contains(p.customerId))
         .fold<double>(0.0, (s, p) => s + (p.amountReceived ?? 0));
     final aboveTarget = myRecovered >= myRecoveryTarget;
+    // Total Collected = PTP amount actually received (above) + finalized
+    // Advance Amount + any "Payment Already Made" claim the RE has
+    // verified. See total_collected_screen.dart for the drill-down that
+    // shows these three components separately.
+    //
+    // advanceAmount is only meaningful once a PTP is finalized 'kept' —
+    // ptpService.applyPtpOutcomeTx (server) recalculates it at maturity
+    // from the real BUSY receipt total, overwriting whatever provisional
+    // figure the salesman entered at PTP creation time, and forces it to 0
+    // for partiallyKept/broken. A still-scheduled/pendingVerification PTP's
+    // advanceAmount is that unverified provisional entry — counting it here
+    // would show unverified money as collected, so only 'kept' PTPs
+    // contribute.
+    final myAdvanceCollected = store.ptps
+        .where((p) =>
+            p.status == PtpStatus.kept &&
+            myCustomerIds.contains(p.customerId))
+        .fold<double>(0.0, (s, p) => s + (p.advanceAmount ?? 0));
+    final myVerifiedPaymentClaims = store.paymentClaims
+        .where((p) =>
+            p['status'] == 'Verified' &&
+            myCustomerIds.contains(p['customerCode']))
+        .fold<double>(0.0, (s, p) => s + (p['amount'] as double));
+    final myTotalCollected =
+        myRecovered + myAdvanceCollected + myVerifiedPaymentClaims;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8F9FB),
@@ -320,33 +358,62 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   _buildStatCard(
                     context,
                     'Total Collected',
-                    _rupee.format(myRecovered),
+                    _rupee.format(myTotalCollected),
                     Icons.payments_outlined,
                     const Color(0xFF2E7D32),
                     const Color(0xFFE8F5E9),
                     onTap: () {
-                      final amountByCustomer = <String, double>{};
+                      final customerById = {for (final c in store.myCustomers) c.id: c};
+
+                      final ptpRows = <CollectedRow>[];
                       for (final p in store.ptps) {
-                        if ((p.status == PtpStatus.kept ||
-                                p.status == PtpStatus.partiallyKept) &&
-                            myCustomerIds.contains(p.customerId)) {
-                          amountByCustomer[p.customerId] =
-                              (amountByCustomer[p.customerId] ?? 0) +
-                                  (p.amountReceived ?? 0);
+                        final c = customerById[p.customerId];
+                        if (c == null) continue;
+                        if ((p.status == PtpStatus.kept || p.status == PtpStatus.partiallyKept) &&
+                            (p.amountReceived ?? 0) > 0) {
+                          ptpRows.add(CollectedRow(
+                              customer: c,
+                              amount: p.amountReceived!,
+                              subtitle: 'Promised ${DateFormat('dd MMM yyyy').format(p.promiseDate)}'));
                         }
                       }
-                      final filtered = store.myCustomers
-                          .where((c) => amountByCustomer.containsKey(c.id))
-                          .toList();
+
+                      final advanceRows = <CollectedRow>[];
+                      for (final p in store.ptps) {
+                        final c = customerById[p.customerId];
+                        if (c == null) continue;
+                        // Only a finalized ('kept') PTP's advanceAmount is
+                        // verified money — see myAdvanceCollected above.
+                        if (p.status == PtpStatus.kept && (p.advanceAmount ?? 0) > 0) {
+                          advanceRows.add(CollectedRow(
+                              customer: c,
+                              amount: p.advanceAmount!,
+                              subtitle: 'Advance on PTP of ${DateFormat('dd MMM yyyy').format(p.promiseDate)}'));
+                        }
+                      }
+
+                      final paymentClaimRows = <CollectedRow>[];
+                      for (final claim in store.paymentClaims) {
+                        if (claim['status'] != 'Verified') continue;
+                        final c = customerById[claim['customerCode']];
+                        if (c == null) continue;
+                        paymentClaimRows.add(CollectedRow(
+                            customer: c,
+                            amount: claim['amount'] as double,
+                            subtitle: 'Claimed ${claim['date']}'));
+                      }
+
                       Navigator.push(
                           context,
                           MaterialPageRoute(
-                              builder: (_) => CustomerListScreen(
-                                  title: 'Total Collected',
-                                  customers: filtered,
-                                  highlightAmountByCustomerId: amountByCustomer,
-                                  highlightAmountLabel: 'COLLECTED',
-                                  sortControlsView: true)));
+                              builder: (_) => TotalCollectedScreen(
+                                    ptpTotal: myRecovered,
+                                    advanceTotal: myAdvanceCollected,
+                                    paymentClaimTotal: myVerifiedPaymentClaims,
+                                    ptpRows: ptpRows,
+                                    advanceRows: advanceRows,
+                                    paymentClaimRows: paymentClaimRows,
+                                  )));
                     },
                   ),
                 ],

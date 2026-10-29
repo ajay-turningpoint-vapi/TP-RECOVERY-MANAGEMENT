@@ -187,9 +187,14 @@ class _Customer360ScreenState extends State<Customer360Screen> {
       _showEditPtpSheet(ptp);
       return;
     }
+    // Scoped to the viewing salesman's OWN task — an open visit task owned
+    // by the RE (the visit was already handed off) must NOT reopen this as
+    // editable; only the salesman's own still-open 3rd-No-Answer visit
+    // should.
     final hasOpenPhysicalVisit = store.tasks.any((t) =>
         t.customerId == c.id &&
         t.type == TaskType.physicalVisit &&
+        t.ownerId == store.currentSalesmanId &&
         t.status != TaskStatus.completed);
     if (c.isPendingNoAnswerEdit || hasOpenPhysicalVisit) {
       // A No Answer / 3rd-No-Answer Physical Visit never resolved anything —
@@ -220,8 +225,22 @@ class _Customer360ScreenState extends State<Customer360Screen> {
     // actually happened once the customer calls back (or another No
     // Answer, which just bumps the attempt count).
     final isNoAnswerRerecord = currentCustomer.isPendingNoAnswerEdit;
+    // The server marks an account 'Nothing Pending' (see
+    // recoveryTaskService.js's driveRecoveryTask park branch) only once
+    // whatever instrument was open against it — a PTP, a dispute, a
+    // payment claim — has actually been decided and nothing is left
+    // actionable. At that point there's nothing further to show or lock:
+    // no stale "Recorded Outcome" card, and the salesman can freely record
+    // a fresh outcome rather than staying stuck behind a closed loop.
+    final nothingPending = currentCustomer.primaryNextAction == 'Nothing Pending';
+    // A PTP already checked against BUSY (kept / partly kept / broken) is
+    // finished — it no longer locks Record Outcome (its card is hidden too),
+    // even if the server hasn't released the customer yet (ASHWIN M PATEL,
+    // 28 Oct: broken at 12:10 with ₹0 overdue → locked with no reason).
     final outcomeRecorded =
-        currentCustomer.currentRecoveryState == 'Waiting / Monitoring' ||
+        (currentCustomer.currentRecoveryState == 'Waiting / Monitoring' &&
+                !nothingPending &&
+                !_ptpOutcomeAlreadyChecked(currentCustomer, store)) ||
             store.recoveryDoneTodayCustomerIds.contains(currentCustomer.id);
     // An open "Recovery" task ("Collect ₹X — record a new outcome", raised
     // automatically after a PTP verifies) explicitly asks for the next
@@ -231,16 +250,32 @@ class _Customer360ScreenState extends State<Customer360Screen> {
         t.customerId == currentCustomer.id &&
         t.source == 'Recovery' &&
         t.status != TaskStatus.completed);
-    // A 3rd-No-Answer Physical Visit is open — the salesman must visit and
-    // record the outcome, so keep the button live.
+    // A 3rd-No-Answer Physical Visit is open and still owned by THIS
+    // salesman — they haven't yet handed it to the RE, so keep the button
+    // live. Once handed off (or raised via Internal Action), the open
+    // physicalVisit task is RE-owned, not the salesman's — that must stay
+    // locked, not live, until the RE decides it.
     final hasOpenPhysicalVisit = store.tasks.any((t) =>
         t.customerId == currentCustomer.id &&
         t.type == TaskType.physicalVisit &&
+        t.ownerId == store.currentSalesmanId &&
         t.status != TaskStatus.completed);
-    final isLocked = outcomeRecorded &&
-        !isNoAnswerRerecord &&
-        !hasOpenRecoveryTask &&
-        !hasOpenPhysicalVisit;
+    // A PTP that only PARTIALLY covers the balance leaves real uncovered
+    // money — the nightly reconcile sweep correctly flips the customer
+    // back to 'Action Required' for that uncovered slice (see
+    // recoveryReconcileService.reconcileState), which otherwise wipes out
+    // `outcomeRecorded` entirely and leaves Record Outcome looking fully
+    // fresh/unlocked, with no sign a PTP is even open. A scheduled PTP
+    // (full OR partial) must lock Record Outcome regardless — the
+    // salesman can't re-promise or overwrite it; only the 12:10 IST job
+    // (ptpVerificationService, checked against BUSY) or the RE deciding a
+    // correction can resolve it and re-open Record Outcome.
+    final openPtp = _openScheduledPtp(store, currentCustomer.id);
+    final isLocked = (outcomeRecorded &&
+            !isNoAnswerRerecord &&
+            !hasOpenRecoveryTask &&
+            !hasOpenPhysicalVisit) ||
+        openPtp != null;
     // "No next action set" — the account has nothing operational queued.
     // The inline button that used to live in the red alert card is gone;
     // the bottom CREATE TASK button turns red instead to carry that urgency.
@@ -321,9 +356,16 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                       effectiveReadOnly) ...[
                     const SizedBox(height: 16),
                     _buildAssignedSalesmanRow(currentCustomer, store),
-                    const SizedBox(height: 16),
-                    _buildNextActionCard(
-                        context, currentCustomer, store, effectiveReadOnly),
+                    // The Recorded Outcome card (below) already says what
+                    // happens next — the Next Action card only stays as the
+                    // red "No next action set" call-to-action for a customer
+                    // with nothing recorded and nothing set.
+                    if (noNextActionSet &&
+                        _lastRecordedOutcome(currentCustomer) == null) ...[
+                      const SizedBox(height: 16),
+                      _buildNextActionCard(
+                          context, currentCustomer, store, effectiveReadOnly),
+                    ],
                     const SizedBox(height: 16),
                     _buildFreshnessAndHealth(currentCustomer),
                     if (currentCustomer.ownerMappingRequired) ...[
@@ -334,27 +376,38 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                         Icons.person_off_outlined,
                       ),
                     ],
-                    if (currentCustomer.escalationLevel != 'none' ||
-                        currentCustomer.currentRecoveryState == 'RE Control' ||
-                        currentCustomer.currentRecoveryState ==
-                            'RE Supervision' ||
-                        currentCustomer.ownerMappingRequired) ...[
-                      const SizedBox(height: 16),
-                      _buildSupervisoryContext(currentCustomer, store),
-                    ],
                     if (currentCustomer.escalationLevel != 'none') ...[
                       const SizedBox(height: 16),
                       _buildEscalationSection(currentCustomer, store),
                     ],
                   ],
-                  if (store.userRole == 'SALESPERSON' &&
-                      ((currentCustomer.currentRecoveryState ==
+                  // Every recorded outcome shows here — including a No
+                  // Answer, which never parks the account — with what was
+                  // recorded and when (see _outcomeSummary).
+                  // An open PTP or any recorded outcome always shows (it's
+                  // dated, so never stale) — even on a 'Nothing Pending'
+                  // account, otherwise a locked Record Outcome button has
+                  // no visible reason (DR .PARIT BHATT, 24 Oct).
+                  // The RE sees the same card, read-only (no edit button).
+                  // Salesman: once the system has opened a new task AFTER the
+                  // last recorded outcome (e.g. the PTP broke), that outcome
+                  // is over — hide it until the salesman records a new one.
+                  // A PTP that has already been checked against BUSY (kept /
+                  // partly kept / broken) is finished — its card is hidden.
+                  if (!_ptpOutcomeAlreadyChecked(currentCustomer, store) &&
+                      (store.userRole == 'RECOVERY_EXECUTIVE' ||
+                          (store.userRole == 'SALESPERSON' &&
+                              !_outcomeSupersededByNewTask(currentCustomer, store))) &&
+                      ((!nothingPending &&
+                              currentCustomer.currentRecoveryState ==
                                   'Waiting / Monitoring' &&
                               currentCustomer.primaryNextAction.isNotEmpty) ||
                           _openScheduledPtp(store, currentCustomer.id) !=
-                              null)) ...[
+                              null ||
+                          _lastRecordedOutcome(currentCustomer) != null)) ...[
                     const SizedBox(height: 16),
-                    _buildRecordedOutcomeCard(context, currentCustomer, store),
+                    _buildRecordedOutcomeCard(context, currentCustomer, store,
+                        readOnly: store.userRole != 'SALESPERSON'),
                   ],
                   if (store.userRole == 'SALESPERSON') ...[
                     Builder(builder: (context) {
@@ -404,7 +457,11 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                     ],
                   )
                 : store.userRole == 'RECOVERY_EXECUTIVE'
-                    ? SizedBox(
+                    ? Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                        SizedBox(
                         width: double.infinity,
                         child: ElevatedButton(
                           style: ElevatedButton.styleFrom(
@@ -418,7 +475,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                                 borderRadius: BorderRadius.circular(8)),
                             elevation: 0,
                           ),
-                          onPressed: hasOpenTask
+                          onPressed: hasOpenTask || currentCustomer.outcomeWaitText != null
                               ? null
                               : () => _showCreateTaskDialog(
                                   context, store, currentCustomer),
@@ -431,14 +488,21 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                               Text(
                                   hasOpenTask
                                       ? 'TASK ALREADY EXISTS'
-                                      : 'CREATE TASK',
+                                      : currentCustomer.outcomeWaitText != null
+                                          // Dispute / claim / Internal Action
+                                          // wait on the RE's own decision.
+                                          ? (RegExp(r'^(Dispute|Payment Already Made|Internal Action):').hasMatch(currentCustomer.outcomeWaitText!)
+                                              ? 'WAITING FOR YOUR DECISION'
+                                              : 'WAITING FOR SALESMAN\'S OUTCOME')
+                                          : 'CREATE TASK',
                                   style: const TextStyle(
                                       fontWeight: FontWeight.bold,
                                       fontSize: 13)),
                             ],
                           ),
                         ),
-                      )
+                      ),
+                      ])
                     : ElevatedButton(
                         style: ElevatedButton.styleFrom(
                           backgroundColor: openTodoTask != null
@@ -470,100 +534,6 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                       ),
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _buildSupervisoryContext(Customer c, AppStore store) {
-    const levelLabels = {
-      'none': 'L1 — Salesperson Led',
-      'L1': 'L1 — Salesperson Led',
-      'L2': 'L2 — RE Supervision',
-      'L3': 'L3 — RE Control',
-      'L4': 'L4 — Management Attention',
-    };
-    final escLevel = c.escalationLevel == 'none' ? 'L1' : c.escalationLevel;
-    final escalation = levelLabels[c.escalationLevel] ?? c.escalationLevel;
-    final badgeColor = levelColor(escLevel);
-
-    Widget cell(String label, String value, {Color? valueColor}) => Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(label.toUpperCase(),
-                style: const TextStyle(
-                    fontSize: 9,
-                    letterSpacing: 0.5,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF97A3B6))),
-            const SizedBox(height: 3),
-            Text(value,
-                style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w700,
-                    color: valueColor ?? const Color(0xFF1B2B48))),
-          ],
-        );
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: badgeColor.withValues(alpha: 0.25), width: 1.4),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.shield_outlined, color: badgeColor, size: 18),
-              const SizedBox(width: 8),
-              const Expanded(
-                child: Text('Supervisory Control Context',
-                    style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                        color: Color(0xFF1B2B48))),
-              ),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                    color: badgeColor.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(6)),
-                child: Text(escLevel,
-                    style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w800,
-                        color: badgeColor)),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          const Divider(height: 1, color: Color(0xFFEDF2F7)),
-          const SizedBox(height: 12),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(child: cell('Recovery State', c.currentRecoveryState)),
-              Expanded(
-                  child: cell('Assigned Agent',
-                      store.salesmanDisplayName(c.assignedSalesmanId))),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                  child: cell('Escalation Level', escalation,
-                      valueColor: badgeColor)),
-              Expanded(
-                  child: cell('Oldest Overdue', '${c.oldestOverdueDays} Days',
-                      valueColor: const Color(0xFFE53935))),
-            ],
-          ),
-        ],
       ),
     );
   }
@@ -937,14 +907,75 @@ class _Customer360ScreenState extends State<Customer360Screen> {
     );
   }
 
+  /// The server's escalation reason in plain words, plus the reason /
+  /// notes the salesman typed when the escalation came from their own
+  /// outcome (Customer Refused: "Customer refused to commit: Reason: Other
+  /// Notes: …"). System-raised ones (broken PTPs, unreachable) carry none.
+  (String, String?, String?) _plainEscalationReason(String raw) {
+    String? grab(String pattern) {
+      final v = RegExp(pattern, caseSensitive: false).firstMatch(raw)?.group(1)?.trim();
+      return (v == null || v.isEmpty) ? null : v;
+    }
+    final broken = RegExp(r'(\d+)\s+confirmed Broken PTP', caseSensitive: false).firstMatch(raw);
+    if (broken != null) return ('${broken.group(1)} promises to pay were broken — no payment found in BUSY.', null, null);
+    final unreachable = RegExp(r'unreachable\D*(\d+)\s+full non-response', caseSensitive: false).firstMatch(raw);
+    if (unreachable != null) return ('Customer can\'t be reached — ${unreachable.group(1)} rounds of calls and visits with no contact.', null, null);
+    if (raw.toLowerCase().contains('refused')) {
+      return ('Customer refused to pay.', grab(r'Reason:\s*(.+?)\s*(?:Notes?:|$)'), grab(r'Notes?:\s*(.+?)\s*$'));
+    }
+    return (raw, null, null);
+  }
+
+  /// "₹1,43,484 for 10 Oct (Phone Call) — notes" per broken PTP, oldest
+  /// first. Notes come from that promise's Record Outcome audit entry.
+  List<String> _brokenPromiseLines(Customer c, AppStore store) {
+    final money = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
+    final broken = store.ptps
+        .where((p) => p.customerId == c.id && p.status == PtpStatus.broken)
+        .toList()
+      ..sort((a, b) => a.promiseDate.compareTo(b.promiseDate));
+    return [
+      for (final p in broken)
+        () {
+          final entry = c.auditHistory.where((e) =>
+              e.source == 'Record Outcome' &&
+              e.type.toLowerCase().contains('promise') &&
+              RegExp('Date:\\s*0?${p.promiseDate.day}/0?${p.promiseDate.month}/${p.promiseDate.year}').hasMatch(e.description));
+          final notes = entry.isEmpty
+              ? null
+              : RegExp(r'Notes?:\s*(.+?)\s*$').firstMatch(entry.first.description)?.group(1)?.trim();
+          final base = '${money.format(p.amountPromised)} for ${DateFormat('dd MMM').format(p.promiseDate)} (${p.paymentMode})';
+          return (notes == null || notes.isEmpty) ? base : '$base — $notes';
+        }(),
+    ];
+  }
+
   Widget _buildEscalationSection(Customer c, AppStore store) {
-    final EscalationCase? escalation =
-        store.escalationCases.cast<EscalationCase?>().firstWhere(
-              (e) => e != null && e.customerId == c.id && e.isOpen,
-              orElse: () => null,
-            );
+    // The HIGHEST open level (L3 over L2) — not just the first open case.
+    const severity = {'L1': 1, 'L2': 2, 'L3': 3, 'L4': 4};
+    final open = store.escalationCases.where((e) => e.customerId == c.id && e.isOpen).toList()
+      ..sort((a, b) => (severity[b.level] ?? 0).compareTo(severity[a.level] ?? 0));
+    final EscalationCase? escalation = open.isEmpty ? null : open.first;
     if (escalation == null) return const SizedBox();
     final color = levelColor(escalation.level);
+    const levelName = {'L1': 'Salesman led', 'L2': 'RE supervision', 'L3': 'RE control'};
+    final (why, smReason, smNotes) = _plainEscalationReason(escalation.reason);
+    final now = DateTime.now();
+    final late = escalation.deadline.isBefore(now);
+    final lateDays = now.difference(escalation.deadline).inDays;
+    Widget row(String label, String value, {Color? valueColor}) => Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(width: 118, child: Text(label, style: const TextStyle(fontSize: 12, color: Color(0xFF5A6B87)))),
+              Expanded(
+                child: Text(value,
+                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, height: 1.35, color: valueColor ?? const Color(0xFF1B2B48))),
+              ),
+            ],
+          ),
+        );
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -957,23 +988,24 @@ class _Customer360ScreenState extends State<Customer360Screen> {
           Row(children: [
             Icon(Icons.trending_up, color: color, size: 18),
             const SizedBox(width: 8),
-            Text('${escalation.level} Escalation Case',
-                style: TextStyle(
-                    fontWeight: FontWeight.bold, fontSize: 14, color: color)),
+            Expanded(
+              child: Text('Escalated — ${escalation.level} (${levelName[escalation.level] ?? escalation.level})',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: color)),
+            ),
           ]),
-          const SizedBox(height: 10),
-          Text('Reason: ${escalation.reason}',
-              style: const TextStyle(fontSize: 12, color: Color(0xFF5A6B87))),
-          const SizedBox(height: 4),
-          Text('Plan: ${escalation.plan}',
-              style: const TextStyle(fontSize: 12, color: Color(0xFF5A6B87))),
-          const SizedBox(height: 4),
-          Text(
-              'Owner: ${store.salesmanDisplayName(escalation.ownerId)}  •  Deadline: ${DateFormat('dd MMM, hh:mm a').format(escalation.deadline)}',
-              style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF1B2B48))),
+          const SizedBox(height: 12),
+          row('Why', why),
+          if (smReason != null) row('Salesman\'s reason', smReason),
+          if (smNotes != null) row('Salesman\'s notes', smNotes),
+          // Broken-PTP escalations are system-raised (no salesman text), so
+          // list the promises the salesman recorded that were broken, with
+          // their notes when they typed any.
+          for (final (i, line) in _brokenPromiseLines(c, store).indexed)
+            row(i == 0 ? 'Broken promises' : '', line),
+          row(
+              'Deadline',
+              '${DateFormat('dd MMM yyyy, hh:mm a').format(escalation.deadline)}${late ? '  ·  ${lateDays < 1 ? 'overdue' : 'overdue by $lateDays day${lateDays == 1 ? '' : 's'}'}' : ''}',
+              valueColor: late ? const Color(0xFFDC2626) : null),
         ],
       ),
     );
@@ -995,7 +1027,10 @@ class _Customer360ScreenState extends State<Customer360Screen> {
               // money was never actually received — a concluded outcome,
               // same as Resolved/Rejected, not something still "open" and
               // worth showing the salesperson as if it were in progress.
-              d['status'] != 'Returned to Recovery',
+              d['status'] != 'Returned to Recovery' &&
+              // The customer vanished from BUSY — nothing left to show as
+              // "in progress" either.
+              d['status'] != 'Auto-Closed',
           orElse: () => null,
         );
     final reTasks = store.tasks
@@ -1031,41 +1066,65 @@ class _Customer360ScreenState extends State<Customer360Screen> {
     // what's actually happening from the raiser's side.
     String raiserStatusLabel(String status) {
       switch (status) {
+        case 'Pending Approval':
+          return 'Waiting for approval';
         case 'Approved':
-          return 'In Progress — With Resolution Owner';
-        case 'Awaiting Verification':
-          return 'Resolution Submitted — RE Verifying';
         case 'In Resolution':
-          return 'In Progress';
+          return 'Being sorted out';
+        case 'Need More Information':
+          return 'More details needed from you';
+        case 'Awaiting Verification':
+          return 'Almost done — being checked';
         default:
           return status;
       }
     }
 
+    // Escalated → the block becomes a warning (amber for L2, red for L3+)
+    // with a plain sentence saying why; otherwise a neutral info block.
+    const severity = {'L1': 1, 'L2': 2, 'L3': 3, 'L4': 4};
+    final openCases = store.escalationCases.where((e) => e.customerId == c.id && e.isOpen).toList()
+      ..sort((a, b) => (severity[b.level] ?? 0).compareTo(severity[a.level] ?? 0));
+    final level = openCases.isNotEmpty ? openCases.first.level : c.escalationLevel;
+    final escalated = level != 'none';
+    final severe = level == 'L3' || level == 'L4';
+    final Color tone = !escalated ? const Color(0xFF0052CC) : (severe ? const Color(0xFFDC2626) : const Color(0xFFD97706));
+    final Color bg = !escalated ? const Color(0xFFF0F7FF) : (severe ? const Color(0xFFFEF2F2) : const Color(0xFFFFFBEB));
+    final levelNum = level.replaceAll(RegExp(r'[^0-9]'), '');
+    String escalationSentence() {
+      final raw = openCases.isNotEmpty ? openCases.first.reason : '';
+      final broken = RegExp(r'(\d+)\s+confirmed Broken PTP', caseSensitive: false).firstMatch(raw)?.group(1);
+      final unreachable = RegExp(r'unreachable\D*(\d+)\s+full non-response', caseSensitive: false).firstMatch(raw)?.group(1);
+      return broken != null
+          ? '$broken payment promises broken.'
+          : unreachable != null
+              ? 'Customer not reachable.'
+              : raw.toLowerCase().contains('refused')
+                  ? 'Customer refused to pay.'
+                  : 'Payment badly delayed.';
+    }
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFFF0F7FF),
+        color: bg,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFBFDBFE)),
+        border: Border.all(color: tone.withValues(alpha: escalated ? 0.55 : 0.3), width: escalated ? 1.5 : 1),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
+          Row(
             children: [
-              Icon(Icons.shield_outlined, color: Color(0xFF0052CC), size: 18),
-              SizedBox(width: 8),
-              Text('Recovery Executive Status',
-                  style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14,
-                      color: Color(0xFF1B2B48))),
+              Icon(escalated ? Icons.warning_amber_rounded : Icons.info_outline, color: tone, size: 20),
+              const SizedBox(width: 8),
+              Text(escalated ? 'Warning — Level $levelNum Escalation' : 'Account Status',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: escalated ? tone : const Color(0xFF1B2B48))),
             ],
           ),
           const SizedBox(height: 10),
           if (openDispute != null) ...[
-            Text('Dispute raised: ₹${openDispute['amount']}',
+            Text('Dispute of ${NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0).format((openDispute['amount'] as num?) ?? 0)}',
                 style: const TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 12.5,
@@ -1086,26 +1145,24 @@ class _Customer360ScreenState extends State<Customer360Screen> {
             ]),
             const SizedBox(height: 10),
           ],
-          if (c.escalationLevel != 'none') ...[
-            Text('Escalated: ${c.escalationLevel}',
-                style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 12.5,
-                    color: Color(0xFF1B2B48))),
-            const SizedBox(height: 2),
-            const Text(
-                'Recovery Executive has taken supervisory/control action on this account.',
-                style: TextStyle(fontSize: 11.5, color: Color(0xFF5A6B87))),
+          if (escalated) ...[
+            Text(escalationSentence(),
+                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12.5, color: Color(0xFF1B2B48), height: 1.4)),
+            const SizedBox(height: 4),
+            Text(
+                severe
+                    ? 'Office is handling this customer now.'
+                    : 'Follow up closely. One more broken promise moves it to Level 3.',
+                style: const TextStyle(fontSize: 11.5, color: Color(0xFF5A6B87), height: 1.4)),
             const SizedBox(height: 10),
           ],
           for (final t in reTasks) ...[
-            Text('RE dependency: ${_taskTypeLabel(t.type)}',
+            Text('Waiting on the office: ${_officeWorkLabel(t.type)}',
                 style: const TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 12.5,
                     color: Color(0xFF1B2B48))),
-            Text(
-                'Owner: ${store.salesmanDisplayName(t.ownerId)} · Due ${DateFormat('dd MMM').format(t.deadline)}',
+            Text('Expected by ${DateFormat('dd MMM').format(t.deadline)}',
                 style:
                     const TextStyle(fontSize: 11.5, color: Color(0xFF5A6B87))),
             const SizedBox(height: 8),
@@ -1113,6 +1170,26 @@ class _Customer360ScreenState extends State<Customer360Screen> {
         ],
       ),
     );
+  }
+
+  /// Office-side work in plain words (no RE jargon) for the salesman.
+  String _officeWorkLabel(TaskType t) {
+    switch (t) {
+      case TaskType.financialTeamFollowUp:
+        return 'accounts check';
+      case TaskType.physicalVisit:
+        return 'customer visit';
+      case TaskType.paymentVerification:
+        return 'payment check';
+      case TaskType.disputeResolution:
+        return 'dispute check';
+      case TaskType.documentFollowUp:
+        return 'documents';
+      case TaskType.customerDetailCorrection:
+        return 'customer details update';
+      default:
+        return _taskTypeLabel(t).toLowerCase();
+    }
   }
 
   String _taskTypeLabel(TaskType t) {
@@ -1126,7 +1203,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
       case TaskType.documentFollowUp:
         return 'Document Follow-Up';
       case TaskType.financialTeamFollowUp:
-        return 'Financial Team Follow-Up';
+        return 'Internal Action';
       case TaskType.customerDetailCorrection:
         return 'Customer Detail Correction';
       case TaskType.paymentVerification:
@@ -1286,8 +1363,136 @@ class _Customer360ScreenState extends State<Customer360Screen> {
     );
   }
 
+  /// The last recorded outcome is a Promise to Pay and that promise is no
+  /// longer open — the BUSY check has already decided it (ASHRAF BHAI
+  /// NATHANI, 28 Oct: an old, already-checked PTP was still shown).
+  bool _ptpOutcomeAlreadyChecked(Customer c, AppStore store) {
+    final last = _lastRecordedOutcome(c);
+    if (last == null || !last.type.toLowerCase().contains('promise to pay')) return false;
+    return _openScheduledPtp(store, c.id) == null;
+  }
+
+  /// True when an open salesman call/visit task was created after the
+  /// latest recorded outcome — the system has moved on from that outcome
+  /// (broken PTP, Will Confirm time passed, RE decision…) and is asking for
+  /// a new one, so the old "Recorded Outcome" card must not show.
+  bool _outcomeSupersededByNewTask(Customer c, AppStore store) {
+    final last = _lastRecordedOutcome(c);
+    if (last == null) return false;
+    return store.tasks.any((t) =>
+        t.customerId == c.id &&
+        t.ownerId == store.currentSalesmanId &&
+        (t.type == TaskType.customerCall || t.type == TaskType.physicalVisit) &&
+        t.status != TaskStatus.completed &&
+        t.status != TaskStatus.closed &&
+        t.createdAt.isAfter(last.timestamp.add(const Duration(seconds: 5))));
+  }
+
+  /// The salesperson's most recent Record Outcome for this customer, from
+  /// the audit trail (source 'Record Outcome' — one row per outcome,
+  /// written by customerService.applyOutcome). Null if none is loaded yet.
+  AuditEvent? _lastRecordedOutcome(Customer c) {
+    AuditEvent? last;
+    for (final e in c.auditHistory) {
+      if (e.source != 'Record Outcome') continue;
+      if (last == null || e.timestamp.isAfter(last.timestamp)) last = e;
+    }
+    return last;
+  }
+
+  /// "2026-10-27" + "13:05" / "10:00 AM", or "28/10/2026" + "10:7" → a
+  /// readable "27 Oct 2026, 01:05 PM". Falls back to the raw text.
+  String _fmtOutcomeMoment(String date, String? time) {
+    try {
+      final d = date.contains('/')
+          ? DateFormat('d/M/yyyy').parseStrict(date)
+          : DateFormat('yyyy-MM-dd').parseStrict(date);
+      if (time == null || time.trim().isEmpty) return DateFormat('dd MMM yyyy').format(d);
+      final m = RegExp(r'(\d{1,2}):(\d{1,2})\s*([AaPp][Mm])?').firstMatch(time);
+      if (m == null) return '${DateFormat('dd MMM yyyy').format(d)}, $time';
+      var h = int.parse(m.group(1)!);
+      final ap = (m.group(3) ?? '').toUpperCase();
+      if (ap == 'PM' && h < 12) h += 12;
+      if (ap == 'AM' && h == 12) h = 0;
+      return DateFormat('dd MMM yyyy, hh:mm a')
+          .format(DateTime(d.year, d.month, d.day, h, int.parse(m.group(2)!)));
+    } catch (_) {
+      return time == null ? date : '$date $time';
+    }
+  }
+
+  /// What exactly was recorded, per outcome type — parsed from the audit
+  /// description each Record Outcome form writes (see outcome_forms.dart /
+  /// customer_360_screen.dart's _finish call sites). Returns a title and
+  /// label/value rows; "Recorded on" is added by the caller.
+  (String, List<(String, String)>) _outcomeSummary(AuditEvent e, Customer c) {
+    final d = e.description;
+    String? grab(String pattern) {
+      final m = RegExp(pattern, caseSensitive: false).firstMatch(d);
+      final v = m?.group(1)?.trim();
+      return (v == null || v.isEmpty) ? null : v;
+    }
+    final money = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
+    String? amount(String? raw) {
+      if (raw == null) return null;
+      final n = double.tryParse(raw.replaceAll(RegExp(r'[₹,\s]'), ''));
+      return n == null ? raw : money.format(n);
+    }
+    final notes = grab(r'Notes?:\s*(.+?)\s*$');
+    final date = grab(r'Date:\s*([\d/\-]+)');
+    final time = grab(r'Time:\s*([\d:]+\s*(?:[AaPp][Mm])?)');
+    final t = e.type.toLowerCase();
+    final rows = <(String, String)>[];
+    void add(String k, String? v) {
+      if (v != null && v.trim().isNotEmpty) rows.add((k, v.trim()));
+    }
+
+    if (t.startsWith('will confirm')) {
+      if (date != null) add('Follow-up on', _fmtOutcomeMoment(date, time));
+      add('Notes', notes);
+      return ('Will Confirm', rows);
+    }
+    if (t.contains('promise to pay')) {
+      add('Amount', amount(grab(r'PTP of\s*₹?\s*([\d,.]+)')));
+      if (date != null) add('Promised for', _fmtOutcomeMoment(date, time));
+      add('Mode', grab(r'via\s+([^.—]+)'));
+      add('Notes', notes);
+      return ('Promise to Pay', rows);
+    }
+    if (t.contains('no answer')) {
+      if (c.noAnswerAttempts > 0) add('Attempt', '${c.noAnswerAttempts}');
+      return ('No Answer', rows);
+    }
+    if (t.contains('dispute')) {
+      add('Disputed amount', amount(grab(r'Amt:\s*₹?\s*([\d,.]+)')));
+      add('Reason', grab(r'Reason:\s*(.+?)\s*,\s*Amt:'));
+      return ('Dispute Raised', rows);
+    }
+    if (t.contains('payment claim')) {
+      add('Amount paid', amount(grab(r'Amount:\s*₹?\s*([\d,.]+)')));
+      add('Reference', grab(r'Ref:\s*(.+?)\s*$'));
+      return ('Payment Already Made', rows);
+    }
+    if (t.contains('unable')) {
+      add('Reason', grab(r'Reason:\s*(.+?)\s*(?:Notes?:|$)'));
+      add('Notes', notes);
+      return ('Unable / Refused to Pay', rows);
+    }
+    if (t.contains('internal action')) {
+      add('Details', grab(r'Details?:\s*(.+?)\s*$'));
+      return ('Internal Action', rows);
+    }
+    if (t.contains('physical visit')) {
+      add('Notes', grab(r'Visit Requested\s*—\s*(.+?)\s*$'));
+      return ('Physical Visit Requested', rows);
+    }
+    add('Details', d);
+    return (e.type, rows);
+  }
+
   Widget _buildRecordedOutcomeCard(
-      BuildContext context, Customer c, AppStore store) {
+      BuildContext context, Customer c, AppStore store,
+      {bool readOnly = false}) {
     // If the account is still actionable (not parked) but carries an open
     // PTP, it's the covered/actionable case: a promise was recorded that
     // only covers part of the overdue. Show the PTP itself as the recorded
@@ -1301,15 +1506,39 @@ class _Customer360ScreenState extends State<Customer360Screen> {
     final ptpCorrectionPending =
         openPtp != null && openPtp.correctionStatus == 'Pending';
     final alreadyRequested = ptpCorrectionUsed;
-    final isPartial = c.currentRecoveryState != 'Waiting / Monitoring' && openPtp != null;
+    // "Edit recorded outcome" only ever does something for these three
+    // cases (see _openEditRecordedOutcome) — an open PTP to amend, a
+    // misrecorded No Answer to replace, or an open 3rd-No-Answer Physical
+    // Visit still awaiting its outcome. Once the account is fully resolved
+    // (e.g. a payment claim the RE already verified, nothing left
+    // actionable — headline reads 'Nothing Pending'), there is nothing to
+    // edit; showing the button then just leads to a "can't be edited here"
+    // dead end, so hide it entirely rather than offer an edit that goes
+    // nowhere. Scoped to the salesman's own task — once handed off to the
+    // RE (or raised via Internal Action), the open visit is RE-owned and
+    // must not offer an edit here while the RE is still working it.
+    final hasOpenPhysicalVisit = store.tasks.any((t) =>
+        t.customerId == c.id &&
+        t.type == TaskType.physicalVisit &&
+        t.ownerId == store.currentSalesmanId &&
+        t.status != TaskStatus.completed);
+    final canEditRecordedOutcome =
+        openPtp != null || c.isPendingNoAnswerEdit || hasOpenPhysicalVisit;
+    // Any open PTP — full or partial coverage alike — now fully pauses
+    // recovery (see recoveryTaskService.driveRecoveryTask's PTP guard), so
+    // there's no longer a "still actively recovering the uncovered
+    // remainder" state to distinguish; every open PTP is simply awaiting
+    // its payment date and the BUSY check.
+    final isPartial = openPtp != null;
     final money = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
     final headline = isPartial
         ? 'Promise to Pay — ${money.format(openPtp.amountPromised)}'
         : c.primaryNextAction;
     final subline = isPartial
-        ? 'Due ${DateFormat('EEE, dd MMM yyyy').format(openPtp.promiseDate)}'
-            '${c.actionableAmount > 0 ? ' · ${money.format(c.actionableAmount)} still to recover' : ''}'
+        ? 'Promise to Pay recorded — awaiting the payment date (${DateFormat('EEE, dd MMM yyyy').format(openPtp.promiseDate)}).'
         : c.reasonForAction;
+    final lastOutcome = _lastRecordedOutcome(c);
+    final lastSummary = lastOutcome == null ? null : _outcomeSummary(lastOutcome, c);
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -1333,14 +1562,54 @@ class _Customer360ScreenState extends State<Customer360Screen> {
             ],
           ),
           const SizedBox(height: 10),
-          Text(headline,
-              style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 13,
-                  color: Color(0xFF0052CC))),
-          const SizedBox(height: 2),
-          Text(subline,
-              style: const TextStyle(fontSize: 12, color: Color(0xFF5A6B87))),
+          // What was recorded and when — from the latest Record Outcome in
+          // the audit trail. Falls back to the customer's next-action text
+          // only if that history hasn't loaded.
+          if (lastOutcome != null) ...[
+            Text(lastSummary!.$1,
+                style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                    color: Color(0xFF0052CC))),
+            const SizedBox(height: 6),
+            for (final (k, v) in [
+              ...lastSummary.$2,
+              ('Recorded on',
+                  '${DateFormat('dd MMM yyyy, hh:mm a').format(lastOutcome.timestamp)}${lastOutcome.actor.isNotEmpty ? ' by ${lastOutcome.actor}' : ''}'),
+            ])
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                        width: 104,
+                        child: Text(k,
+                            style: const TextStyle(fontSize: 12, color: Color(0xFF5A6B87)))),
+                    Expanded(
+                        child: Text(v,
+                            style: const TextStyle(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF1B2B48)))),
+                  ],
+                ),
+              ),
+            if (isPartial) ...[
+              const SizedBox(height: 4),
+              Text(subline,
+                  style: const TextStyle(fontSize: 12, color: Color(0xFF388E3C), fontWeight: FontWeight.w600)),
+            ],
+          ] else ...[
+            Text(headline,
+                style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    color: Color(0xFF0052CC))),
+            const SizedBox(height: 2),
+            Text(subline,
+                style: const TextStyle(fontSize: 12, color: Color(0xFF5A6B87))),
+          ],
           const SizedBox(height: 10),
           if (alreadyRequested)
             Container(
@@ -1357,7 +1626,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                       color: Color(0xFFC2410C),
                       fontWeight: FontWeight.w600)),
             )
-          else
+          else if (canEditRecordedOutcome && !readOnly)
             Align(
               alignment: Alignment.centerLeft,
               child: OutlinedButton.icon(
@@ -2173,101 +2442,6 @@ class _Customer360ScreenState extends State<Customer360Screen> {
         .join(' ');
   }
 
-  /// Reconstructs the fields the Record Outcome form captured, from the
-  /// server's flattened audit description. Labels mirror the form
-  /// ("Promise Amount", "Promise Date/Time", "Mode of Communication",
-  /// "Spoken To", "Notes", "Reason", "Details"). Free-form / system
-  /// descriptions with no recognisable structure come back as one
-  /// 'Details' entry.
-  List<MapEntry<String, String>> _parseAuditDescription(AuditEvent audit) {
-    final desc = audit.description;
-    final tl = audit.type.toLowerCase();
-    final isPtp = tl.contains('ptp') || tl.contains('promise');
-    final isFollow = tl.contains('follow') ||
-        tl.contains('confirm') ||
-        tl.contains('callback');
-    final dateLabel =
-        isPtp ? 'Promise Date' : (isFollow ? 'Follow-up Date' : 'Date');
-    final timeLabel =
-        isPtp ? 'Promise Time' : (isFollow ? 'Follow-up Time' : 'Time');
-    final amountLabel = isPtp
-        ? 'Promise Amount'
-        : (tl.contains('dispute') ? 'Disputed Amount' : 'Amount');
-
-    var work = ' $desc ';
-    String? grab(RegExp re) {
-      final m = re.firstMatch(work);
-      if (m == null) return null;
-      work = work.replaceRange(m.start, m.end, '  ');
-      final v = m.group(1)?.trim();
-      return (v == null || v.isEmpty) ? null : v;
-    }
-
-    final amtField = grab(RegExp(
-        r'(?:Amount|Amt)\s*:\s*(₹?\s*[\d,][\d,.]*)',
-        caseSensitive: false));
-    final amtInline = grab(RegExp(
-        r'(?:PTP|Payment)\s+of\s+(₹?\s*[\d,][\d,.]*)',
-        caseSensitive: false));
-    final mode = grab(RegExp(
-        r'\bvia\s+([A-Za-z][\w /&+.\-]*?)\s*(?=[.\n]|—|Contact\s*:|$)',
-        caseSensitive: false));
-    final person = grab(RegExp(
-        r'Contact(?:\s*Person)?\s*:\s*([^\n—]+?)\s*(?=—|Date\s*:|Notes?\s*:|$)',
-        caseSensitive: false));
-    final date = grab(RegExp(
-        r'\bDate\s*:\s*([^\n—]+?)\s*(?=Time\s*:|—|Notes?\s*:|$)',
-        caseSensitive: false));
-    final time = grab(RegExp(
-        r'\bTime\s*:\s*([^\n—]+?)\s*(?=—|Notes?\s*:|$)',
-        caseSensitive: false));
-    final note =
-        grab(RegExp(r'Notes?\s*:\s*(.+?)\s*$', caseSensitive: false));
-    final reason = grab(RegExp(
-        r'Reason\s*:\s*([^\n—]+?)\s*(?=,\s*Amt|—|Notes?\s*:|$)',
-        caseSensitive: false));
-    final details =
-        grab(RegExp(r'Details?\s*:\s*(.+?)\s*$', caseSensitive: false));
-
-    final amount = amtField ?? amtInline;
-
-    var summary = work
-        .replaceAll(
-            RegExp(r'(?:PTP|Payment)\s+of\s+₹?\s*[\d,][\d,.]*',
-                caseSensitive: false),
-            ' ')
-        .replaceAll(RegExp(r'\s*—\s*'), ' ')
-        .replaceAll(RegExp(r'\s{2,}'), ' ')
-        .replaceAll(RegExp(r'^[\s.,]+|[\s.,]+$'), '')
-        .trim();
-
-    final structured = mode != null ||
-        person != null ||
-        date != null ||
-        time != null ||
-        note != null ||
-        amount != null ||
-        reason != null ||
-        details != null;
-    if (!structured) return [MapEntry('Details', desc.trim())];
-
-    final out = <MapEntry<String, String>>[];
-    void add(String k, String? v) {
-      if (v != null && v.trim().isNotEmpty) out.add(MapEntry(k, v.trim()));
-    }
-
-    if (summary.length > 3) add('Summary', summary);
-    add(amountLabel, amount);
-    add('Reason', reason);
-    add('Mode of Communication', mode);
-    add('Spoken To', person);
-    add(dateLabel, date);
-    add(timeLabel, time);
-    add('Notes', note);
-    add('Details', details);
-    return out;
-  }
-
   /// Icon + colour for an audit event, by type keyword. Shared by the
   /// History card and the timeline rail so the node dot matches the card.
   ({Color color, Color bg, IconData icon}) _auditVisuals(String type) {
@@ -2340,339 +2514,158 @@ class _Customer360ScreenState extends State<Customer360Screen> {
     );
   }
 
+  // Same keep-list as the server's simple history
+  // (auditRepository.SIMPLE_HISTORY_TYPES) — used for the header counts.
+  static const _simpleHistoryTypes = {
+    'FOLLOWUP_TIME_PASSED', 'NO_ANSWER_CALLBACK_DUE', 'NO_ANSWER_PHYSICAL_VISIT',
+    'PTP_KEPT_PAYMENT_APPLIED', 'PTP_PARTIALLY_KEPT_PAYMENT_APPLIED', 'PTP_BROKEN',
+    'PAYMENT_CLAIM_VERIFIED', 'PAYMENT_CLAIM_FAILED',
+    'RE_APPROVED_DISPUTE', 'RE_REJECTED_DISPUTE', 'RE_RESOLVED_DISPUTE', 'RE_RETURNED_DISPUTE_TO_RECOVERY', 'RE_REQUESTED_INFORMATION',
+    'INTERNAL_ACTION_APPROVED', 'INTERNAL_ACTION_REJECTED',
+    'RE_APPROVED_PTP_CORRECTION', 'RE_REJECTED_PTP_CORRECTION',
+    'RE_CREATED_TASK', 'RE_CREATED_INSTRUCTION',
+    'ESCALATION_RAISED', 'ESCALATION_RESOLVED',
+  };
+  bool _isSimpleEvent(AuditEvent e) =>
+      e.source == 'Record Outcome' ||
+      _simpleHistoryTypes.contains(e.type) ||
+      (e.type == 'TASK_COMPLETED' && (e.source == 'Physical Visit' || e.description.contains('"physicalVisit" task')));
+
+  /// One plain title + one short line for a history entry.
+  (String, String) _simpleHistory(AuditEvent e, Customer c) {
+    final d = e.description;
+    String? grab(String p) {
+      final v = RegExp(p, caseSensitive: false, dotAll: true).firstMatch(d)?.group(1)?.trim();
+      return (v == null || v.isEmpty) ? null : v;
+    }
+    if (e.source == 'Record Outcome') {
+      final (title, rows) = _outcomeSummary(e, c);
+      final m = {for (final (k, v) in rows) k: v};
+      String withNotes(String s) => m['Notes'] != null ? '$s Notes: ${m['Notes']}' : s;
+      switch (title) {
+        case 'Will Confirm':
+          return (title, withNotes(m['Follow-up on'] != null ? 'Customer will confirm on ${m['Follow-up on']}.' : 'Customer will confirm later.'));
+        case 'Promise to Pay':
+          return (title, withNotes('Promised ${m['Amount'] ?? ''}${m['Promised for'] != null ? ' for ${m['Promised for']}' : ''}.'));
+        case 'No Answer':
+          return (title, 'Customer did not answer. Call again after 2 hours.');
+        case 'Dispute Raised':
+          return (title, 'Disputed ${m['Disputed amount'] ?? ''}.${m['Reason'] != null ? ' Reason: ${m['Reason']}.' : ''}');
+        case 'Payment Already Made':
+          return (title, 'Customer says ${m['Amount paid'] ?? 'the amount'} was paid.${m['Reference'] != null ? ' Ref: ${m['Reference']}.' : ''}');
+        case 'Unable / Refused to Pay':
+          return ('Refused to Pay', withNotes(m['Reason'] != null ? 'Reason: ${m['Reason']}.' : 'Customer refused to pay.'));
+        case 'Internal Action':
+          return (title, 'Needs office help: ${m['Details'] ?? ''}');
+        case 'Physical Visit Requested':
+          return (title, m['Notes'] != null ? 'Asked the office for a visit. Notes: ${m['Notes']}' : 'Asked the office for a visit.');
+      }
+      return (title, rows.isEmpty ? '' : rows.map((r) => r.$2).join(' · '));
+    }
+    switch (e.type) {
+      case 'FOLLOWUP_TIME_PASSED':
+        final note = grab(r'Note:\s*"(.+?)"');
+        return ('Call the customer', 'Will Confirm time reached.${note != null ? ' Note: $note' : ''}');
+      case 'NO_ANSWER_CALLBACK_DUE':
+        return ('Call the customer', '2 hours passed after no answer.');
+      case 'NO_ANSWER_PHYSICAL_VISIT':
+        return ('Visit the customer', 'No answer 3 times — a visit is needed.');
+      case 'PTP_BROKEN':
+        return ('Promise broken', 'No payment received. Call the customer.');
+      case 'PTP_KEPT_PAYMENT_APPLIED':
+        return ('Payment received', 'Promise kept.');
+      case 'PTP_PARTIALLY_KEPT_PAYMENT_APPLIED':
+        return ('Part payment received', 'Promise only partly kept. Collect the rest.');
+      case 'PAYMENT_CLAIM_VERIFIED':
+        return ('Payment confirmed', 'The claimed payment was found.');
+      case 'PAYMENT_CLAIM_FAILED':
+        return ('Payment not found', 'The claimed payment was not found. Call the customer.');
+      case 'RE_APPROVED_DISPUTE':
+        return ('Dispute accepted', 'The office accepted the dispute and is sorting it out.');
+      case 'RE_REJECTED_DISPUTE':
+        return ('Dispute rejected', 'The full amount is due.');
+      case 'RE_RESOLVED_DISPUTE':
+        return ('Dispute resolved', 'The dispute is closed.');
+      case 'RE_RETURNED_DISPUTE_TO_RECOVERY':
+        return ('Dispute closed', 'Money not received — collect it.');
+      case 'RE_REQUESTED_INFORMATION':
+        return ('More details asked', 'The office asked for more details on the dispute.');
+      case 'INTERNAL_ACTION_APPROVED':
+        return ('Office issue solved', 'Continue collecting.');
+      case 'INTERNAL_ACTION_REJECTED':
+        return ('Office issue closed', 'Not needed. Continue collecting.');
+      case 'RE_APPROVED_PTP_CORRECTION':
+        return ('Promise change approved', 'The new promise details are now active.');
+      case 'RE_REJECTED_PTP_CORRECTION':
+        return ('Promise change rejected', 'The original promise stays.');
+      case 'RE_CREATED_TASK':
+      case 'RE_CREATED_INSTRUCTION':
+        return ('New task from the office', grab(r':\s*"(.+?)"\.?') ?? '');
+      case 'ESCALATION_RAISED':
+        final level = grab(r'raised an? (L\d)') ?? '';
+        final why = _plainEscalationReason(grab(r'escalation:\s*"(.+?)"') ?? '').$1;
+        return ('Escalated to Level ${level.replaceAll('L', '')}', why);
+      case 'ESCALATION_RESOLVED':
+        return ('Escalation closed', 'Back to normal follow-up.');
+      case 'TASK_COMPLETED':
+        return e.source == 'Physical Visit'
+            ? ('Visit not done', grab(r'Reason:\s*"(.+?)"') ?? '')
+            : ('Visit done', grab(r'Notes:\s*(.+)$') ?? '');
+    }
+    return (_humanizeAuditType(e.type), d);
+  }
+
   Widget _buildHistoryRow(AuditEvent audit) {
     final visuals = _auditVisuals(audit.type);
-    final Color iconColor = visuals.color;
-    final Color iconBg = visuals.bg;
-    final IconData icon = visuals.icon;
-
-    final showTransition = audit.previousState != null &&
-        audit.newState != null &&
-        audit.previousState!.trim().isNotEmpty &&
-        audit.previousState != audit.newState;
-
-    final descParts = _parseAuditDescription(audit);
-    final plainOnly = descParts.length == 1 && descParts.first.key == 'Details';
-    final tag = _typeTag(audit);
-
+    final c = context.read<AppStore>().customers.firstWhere((x) => x.id == widget.customer.id, orElse: () => widget.customer);
+    final (title, line) = _simpleHistory(audit, c);
+    final who = audit.actor.isEmpty || audit.actor == 'System' ? null : audit.actor;
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: const Color(0xFFE6EBF2)),
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withValues(alpha: 0.03),
-              blurRadius: 8,
-              offset: const Offset(0, 2)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(7),
+            decoration: BoxDecoration(color: visuals.bg, shape: BoxShape.circle),
+            child: Icon(visuals.icon, color: visuals.color, size: 16),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF1B2B48))),
+                if (line.isNotEmpty) ...[
+                  const SizedBox(height: 3),
+                  Text(line, style: const TextStyle(fontSize: 12, height: 1.4, color: Color(0xFF475569))),
+                ],
+                if (audit.attachmentPath != null) ...[
+                  const SizedBox(height: 8),
+                  _AttachmentThumbnail(path: audit.attachmentPath!),
+                ],
+                const SizedBox(height: 6),
+                Text(
+                  '${DateFormat('dd MMM yyyy, hh:mm a').format(audit.timestamp)}${who != null ? '  ·  by $who' : ''}',
+                  style: const TextStyle(fontSize: 10.5, color: Color(0xFF94A3B8)),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(height: 3, color: iconColor),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Header — icon, title + type tag, timestamp pill.
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration:
-                            BoxDecoration(color: iconBg, shape: BoxShape.circle),
-                        child: Icon(icon, color: iconColor, size: 18),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              _humanizeAuditType(audit.type),
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 13,
-                                  height: 1.25,
-                                  color: Color(0xFF1B2B48)),
-                            ),
-                            const SizedBox(height: 4),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 7, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: iconColor.withValues(alpha: 0.1),
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              child: Text(
-                                tag,
-                                style: TextStyle(
-                                    fontSize: 8,
-                                    fontWeight: FontWeight.w800,
-                                    letterSpacing: 0.4,
-                                    color: iconColor),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 5),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF1F5F9),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            Text(
-                              DateFormat('dd MMM yyyy').format(audit.timestamp),
-                              style: const TextStyle(
-                                  fontSize: 9.5,
-                                  fontWeight: FontWeight.w700,
-                                  color: Color(0xFF64748B)),
-                            ),
-                            Text(
-                              DateFormat('hh:mm a').format(audit.timestamp),
-                              style: const TextStyle(
-                                  fontSize: 9, color: Color(0xFF97A3B6)),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-
-                  // Body — free-form paragraph, or the labelled detail block.
-                  if (plainOnly)
-                    Text(
-                      descParts.first.value,
-                      style: const TextStyle(
-                          fontSize: 12,
-                          height: 1.45,
-                          color: Color(0xFF475569)),
-                    )
-                  else
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF8FAFC),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: const Color(0xFFEDF2F7)),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          for (int i = 0; i < descParts.length; i++) ...[
-                            if (i > 0)
-                              const Padding(
-                                padding: EdgeInsets.symmetric(vertical: 7),
-                                child: Divider(
-                                    height: 1, color: Color(0xFFEDF2F7)),
-                              ),
-                            // Title on the left, value on the right.
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Icon(
-                                    _detailIcon(descParts[i].key,
-                                        descParts[i].value),
-                                    size: 13,
-                                    color: iconColor.withValues(alpha: 0.75)),
-                                const SizedBox(width: 7),
-                                SizedBox(
-                                  width: 108,
-                                  child: Text(
-                                    descParts[i].key,
-                                    style: const TextStyle(
-                                        fontSize: 10.5,
-                                        fontWeight: FontWeight.w700,
-                                        height: 1.3,
-                                        color: Color(0xFF64748B)),
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Text(
-                                    descParts[i].value,
-                                    textAlign: TextAlign.right,
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      height: 1.35,
-                                      fontWeight: FontWeight.w600,
-                                      fontStyle: descParts[i].key == 'Notes'
-                                          ? FontStyle.italic
-                                          : FontStyle.normal,
-                                      color: const Color(0xFF1F2937),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-
-                  if (showTransition) ...[
-                    const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        _statePill(audit.previousState!, const Color(0xFF94A3B8)),
-                        const Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 6),
-                          child: Icon(Icons.arrow_forward,
-                              size: 12, color: Color(0xFF94A3B8)),
-                        ),
-                        _statePill(audit.newState!, iconColor),
-                      ],
-                    ),
-                  ],
-
-                  if (audit.attachmentPath != null) ...[
-                    const SizedBox(height: 10),
-                    _AttachmentThumbnail(path: audit.attachmentPath!),
-                  ],
-
-                  const SizedBox(height: 12),
-                  const Divider(height: 1, color: Color(0xFFEDF2F7)),
-                  const SizedBox(height: 10),
-
-                  // Footer — actor + where it came from.
-                  Row(
-                    children: [
-                      CircleAvatar(
-                        radius: 11,
-                        backgroundColor: iconColor.withValues(alpha: 0.12),
-                        child: Text(
-                          audit.actor.isNotEmpty
-                              ? audit.actor[0].toUpperCase()
-                              : '?',
-                          style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w800,
-                              color: iconColor),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Flexible(
-                        child: Text(
-                          audit.actor,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 11.5,
-                              color: Color(0xFF1B2B48)),
-                        ),
-                      ),
-                      if (audit.source != 'App') ...[
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 7, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF1F5F9),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            audit.source,
-                            style: const TextStyle(
-                                fontSize: 9,
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFF64748B)),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
     );
-  }
-
-  Widget _statePill(String text, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(
-            fontSize: 10, fontWeight: FontWeight.w800, color: color),
-      ),
-    );
-  }
-
-  IconData _detailIcon(String label, String value) {
-    final l = label.toLowerCase();
-    if (l.contains('summary')) return Icons.notes_outlined;
-    if (l.contains('reason')) return Icons.help_outline;
-    if (l.contains('amount')) return Icons.currency_rupee;
-    if (l.contains('details')) return Icons.description_outlined;
-    if (l.contains('spoken') || l.contains('contact person')) {
-      return Icons.person_outline;
-    }
-    if (l.contains('date')) return Icons.event_outlined;
-    if (l.contains('time')) return Icons.schedule;
-    if (l.contains('note')) return Icons.sticky_note_2_outlined;
-    if (l.contains('mode') || l.contains('medium') || l.contains('communication')) {
-      final v = value.toLowerCase();
-      if (v.contains('whatsapp')) return Icons.chat_outlined;
-      if (v.contains('call') || v.contains('phone') || v.contains('mobile')) {
-        return Icons.call_outlined;
-      }
-      if (v.contains('sms') || v.contains('text')) return Icons.sms_outlined;
-      if (v.contains('mail')) return Icons.mail_outline;
-      if (v.contains('visit') || v.contains('field') || v.contains('person')) {
-        return Icons.directions_walk;
-      }
-      return Icons.forum_outlined;
-    }
-    return Icons.fiber_manual_record;
-  }
-
-  String _typeTag(AuditEvent a) {
-    if (a.source.toLowerCase().contains('snapshot') ||
-        a.actor.toLowerCase() == 'system') {
-      return 'SYSTEM';
-    }
-    final t = a.type.toLowerCase();
-    if (t.contains('ptp') || t.contains('promise to pay')) return 'PTP';
-    if (t.contains('payment') || t.contains('paid') || t.contains('receipt')) {
-      return 'PAYMENT';
-    }
-    if (t.contains('dispute')) return 'DISPUTE';
-    if (t.contains('escalat')) return 'ESCALATION';
-    if (t.contains('no answer')) return 'NO ANSWER';
-    if (t.contains('task')) return 'TASK';
-    if (t.contains('control') || t.contains('supervis')) return 'RE CONTROL';
-    if (t.contains('reassign') || t.contains('owner')) return 'OWNERSHIP';
-    if (t.contains('follow') ||
-        t.contains('confirm') ||
-        t.contains('callback')) {
-      return 'FOLLOW-UP';
-    }
-    return 'UPDATE';
   }
 
   Widget _buildFullHistory(Customer c) {
-    final items = [...c.auditHistory]
+    // Only the simple-history events — same filter as the list below.
+    final items = c.auditHistory.where(_isSimpleEvent).toList()
       ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
 
     int total = items.length;
@@ -3128,6 +3121,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
             initialPerson: _lastContactPerson() ?? widget.customer.name,
             onSubmit: (data) {
           final amt = data['amount'];
+          final advanceAmt = (data['advanceAmount'] as num?) ?? 0;
           final DateTime? pickedDate = data['date'];
           final TimeOfDay? pickedTime = data['time'];
           final date = pickedDate != null
@@ -3147,18 +3141,24 @@ class _Customer360ScreenState extends State<Customer360Screen> {
             context,
             'PTP Scheduled',
             'PTP of ₹$amt via $mode. Contact: $contact',
-            'Date: $date Time: $time${notes.isNotEmpty ? ' — Notes: $notes' : ''}',
+            'Date: $date Time: $time'
+                '${advanceAmt > 0 ? ' — Advance: ₹$advanceAmt' : ''}'
+                '${notes.isNotEmpty ? ' — Notes: $notes' : ''}',
             ptpAmountValue: (amt as num?)?.toDouble(),
+            ptpAdvanceAmount: advanceAmt > 0 ? advanceAmt.toDouble() : null,
             ptpDate: combinedDateTime,
             ptpMode: mode as String?,
           );
         });
       case 'Will Confirm':
-        return WillConfirmForm(onSubmit: (date, time) {
+        return WillConfirmForm(onSubmit: (date, time, notes) {
           final followUpAt =
               DateTime(date.year, date.month, date.day, time.hour, time.minute);
+          // "Notes:" must stay the LAST segment — the server reads everything
+          // after it as the note to show on the task created at follow-up time.
           return _finish(context, 'Follow-up Scheduled', 'Customer will confirm',
-              'Date: ${DateFormat('yyyy-MM-dd').format(date)} Time: ${time.format(context)}',
+              'Date: ${DateFormat('yyyy-MM-dd').format(date)} Time: ${time.format(context)}'
+                  '${notes.isNotEmpty ? ' Notes: $notes' : ''}',
               followUpAt: followUpAt);
         });
       case 'Payment Already Made':
@@ -3198,10 +3198,21 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                 'Customer Refused',
                 'Reason: $reason Notes: $notes'));
       case 'Internal Action':
-        return InternalActionForm(
-            onSubmit: (action, file) => _finish(context, 'Action Required',
-                'Internal Task', 'Details: $action',
-                screenshot: file));
+        return InternalActionForm(onSubmit: (dependency, notes, file) {
+          if (dependency == 'Physical Visit') {
+            // Routed to the RE, not the usual financial-team follow-up —
+            // see customerService.applyOutcome's dedicated branch. The RE
+            // must visit in person and close this out with a photo + notes
+            // (taskService.completeTask), which is why notes are mandatory
+            // here unlike every other dependency.
+            return _finish(context, 'Physical Visit Requested',
+                'Physical Visit Requested', notes,
+                screenshot: file);
+          }
+          return _finish(context, 'Action Required', 'Internal Task',
+              'Details: $dependency${notes.isNotEmpty ? ' — $notes' : ''}',
+              screenshot: file);
+        });
       default:
         return const SizedBox();
     }
@@ -3211,6 +3222,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
       BuildContext context, String nextAction, String reason, String details,
       {DateTime? followUpAt,
       double? ptpAmountValue,
+      double? ptpAdvanceAmount,
       DateTime? ptpDate,
       String? ptpMode,
       XFile? screenshot}) async {
@@ -3230,6 +3242,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
         await store.recordOutcome(widget.customer.id, nextAction, reason, details,
             followUpAt: followUpAt,
             ptpAmountValue: ptpAmountValue,
+            ptpAdvanceAmount: ptpAdvanceAmount,
             ptpDate: ptpDate,
             ptpMode: ptpMode,
             screenshot: effectiveScreenshot);

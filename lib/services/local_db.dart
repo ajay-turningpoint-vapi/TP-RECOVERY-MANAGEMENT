@@ -132,8 +132,18 @@ class LocalDb extends _$LocalDb {
   /// Queued/retryable rows for this user, oldest first — what `flush()`
   /// processes, strictly in this order, one at a time.
   Future<List<PendingAction>> flushablePendingActions(String scopeUserId) {
+    // An 'inFlight' row older than 2 minutes is a send that never finished
+    // (app killed / connection dropped mid-request) — without picking it up
+    // again it sat as "1 action waiting to sync" forever. Resending is safe:
+    // every send carries the row id as X-Idempotency-Key, which the server
+    // de-duplicates (server/src/middleware/idempotency.js).
+    final staleInFlight = DateTime.now().subtract(const Duration(minutes: 2));
     return (select(pendingActions)
-          ..where((t) => t.scopeUserId.equals(scopeUserId) & t.status.isIn(const ['pending', 'failedRetryable']))
+          ..where((t) =>
+              t.scopeUserId.equals(scopeUserId) &
+              (t.status.isIn(const ['pending', 'failedRetryable']) |
+                  (t.status.equals('inFlight') &
+                      (t.lastAttemptAt.isNull() | t.lastAttemptAt.isSmallerThanValue(staleInFlight)))))
           ..orderBy([(t) => OrderingTerm.asc(t.createdAt)]))
         .get();
   }

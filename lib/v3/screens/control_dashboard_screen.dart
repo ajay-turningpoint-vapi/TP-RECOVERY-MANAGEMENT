@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:salesman_mobile/v2/stores/app_store.dart';
 import 'package:salesman_mobile/v2/models/ptp.dart';
-import 'package:salesman_mobile/v3/screens/needs_attention_screen.dart';
 import 'package:salesman_mobile/v3/screens/five_pm_control_screen.dart';
 import 'package:salesman_mobile/v3/screens/company_recovery_queue_screen.dart';
 import 'package:salesman_mobile/v3/screens/ptp_list_screen.dart';
@@ -90,11 +89,6 @@ class _ControlDashboardScreenState extends State<ControlDashboardScreen> {
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     child: _buildStatCards(context, store),
-                  ),
-                  const SizedBox(height: 20),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: _buildAttentionSection(context, store),
                   ),
                   const SizedBox(height: 20),
                   Padding(
@@ -273,49 +267,6 @@ class _ControlDashboardScreenState extends State<ControlDashboardScreen> {
               child: Text(c.sub, style: TextStyle(fontSize: 9.5, color: c.subColor, fontWeight: FontWeight.w600)),
             ),
           ],
-        ),
-      ),
-    );
-  }
-
-  // -------------------------------------------------------------------
-  // Needs Your Attention
-  // -------------------------------------------------------------------
-  Widget _buildAttentionSection(BuildContext context, AppStore store) {
-    const amber = Color(0xFFD97706);
-    return Material(
-      color: const Color(0xFFFFF7E6),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-        side: const BorderSide(color: Color(0xFFF59E0B), width: 1.2),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NeedsAttentionScreen())),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: const BoxDecoration(color: Color(0xFFFDE7B0), shape: BoxShape.circle),
-                child: const Icon(Icons.warning_amber_rounded, color: amber, size: 22),
-              ),
-              const SizedBox(width: 12),
-              const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Needs Your Attention', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5, color: Color(0xFF92400E))),
-                    SizedBox(height: 2),
-                    Text('Review customers that need your action', style: TextStyle(fontSize: 11.5, color: Color(0xFFB45309))),
-                  ],
-                ),
-              ),
-              const Text('View All', style: TextStyle(color: amber, fontSize: 12, fontWeight: FontWeight.bold)),
-              const Icon(Icons.chevron_right, color: amber, size: 20),
-            ],
-          ),
         ),
       ),
     );

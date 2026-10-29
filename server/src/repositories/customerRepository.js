@@ -1,5 +1,6 @@
 const { query, withTransaction } = require('../config/db');
 const taskRepository = require('./taskRepository');
+const disputeRepository = require('./disputeRepository');
 const auditRepository = require('./auditRepository');
 
 function mapCustomer(row) {
@@ -257,31 +258,96 @@ async function upsertFromBusy(rows, syncStartedAt, branch = { label: 'Turning Po
     if (deactivatedIds.length > 0) {
       await connection.query('UPDATE customers SET busy_still_active = 0 WHERE id IN (?)', [deactivatedIds]);
 
-      // A customer who vanishes from BUSY's feed entirely (fully paid /
-      // account closed) never gets its total_due corrected to 0 by the
-      // upsert loop above (there's no row for them to update) — so any
-      // open task referencing them would otherwise sit there forever,
-      // showing a salesman a customer they can no longer find or act on
-      // anywhere else in the app. Close those tasks here, in the same
-      // pass and the same transaction as the deactivation itself.
-      const note = 'Auto-closed — customer no longer appears in BUSY (balance cleared / account closed).';
-      await taskRepository.closeOrphanedTasks(deactivatedIds, note, connection);
-      for (const customerId of deactivatedIds) {
-        await auditRepository.record(
-          customerId,
-          {
-            type: 'TASK_AUTO_CLOSED',
-            description: 'Customer no longer appears in BUSY — open task(s) auto-closed.',
-            actor: 'System',
-            source: 'BUSY Sync',
-          },
-          connection
-        );
-      }
+      await closeOutRemovedCustomers(deactivatedIds, connection);
     }
 
     return { upserted: rows.length, deactivated: deactivatedIds.length, deactivatedIds };
   });
 }
 
-module.exports = { mapCustomer, mapInvoice, findAll, findBySalesman, findById, findByIds, findInvoices, update, upsertFromBusy };
+/**
+ * Close out every open task (any type, any owner — salesman or RE) and
+ * every open dispute of customers that no longer appear in BUSY. Called
+ * by upsertFromBusy for the customers a sync just deactivated, and by
+ * recoveryTaskService.enforceOutcomeRules on every sweep for any leftover
+ * (e.g. a customer removed before dispute auto-close existed).
+ */
+async function closeOutRemovedCustomers(customerIds, connection) {
+  if (!customerIds || customerIds.length === 0) return;
+  // A customer who vanishes from BUSY's feed entirely (fully paid /
+  // account closed) never gets its total_due corrected to 0 by the
+  // upsert loop in upsertFromBusy (there's no row for them to update) — so any
+  // open task referencing them would otherwise sit there forever,
+  // showing a salesman a customer they can no longer find or act on
+  // anywhere else in the app. Close those tasks here, in the same
+  // pass and the same transaction as the deactivation itself.
+  const note = 'Auto-closed — customer no longer appears in BUSY (balance cleared / account closed).';
+  await taskRepository.closeOrphanedTasks(customerIds, note, connection);
+  for (const customerId of customerIds) {
+    await auditRepository.record(
+      customerId,
+      {
+        type: 'TASK_AUTO_CLOSED',
+        description: 'Customer no longer appears in BUSY — open task(s) auto-closed.',
+        actor: 'System',
+        source: 'BUSY Sync',
+      },
+      connection
+    );
+  }
+
+  // A dispute still open (Pending Approval / Approved / Need More
+  // Information / Awaiting Verification) against a customer who just
+  // vanished from BUSY has nothing left to resolve against — there's no
+  // more balance, no more BUSY receipts to verify it against, and the
+  // RE would otherwise be left chasing a dispute for an account no one
+  // can act on anywhere else in the app. Close it out the same way
+  // tasks are, in the same transaction as the deactivation.
+  const openDisputes = await disputeRepository.findOpenByCustomerIds(customerIds, connection);
+  for (const dispute of openDisputes) {
+    await disputeRepository.update(
+      dispute.id,
+      { status: 'Auto-Closed', statusDetail: 'Auto-Closed — customer no longer appears in BUSY.' },
+      connection
+    );
+    await auditRepository.record(
+      dispute.customerId,
+      {
+        type: 'DISPUTE_AUTO_CLOSED',
+        description: `Dispute of ₹${Math.round(dispute.amount)} auto-closed — customer no longer appears in BUSY.`,
+        actor: 'System',
+        previousState: dispute.status,
+        newState: 'Auto-Closed',
+        source: 'BUSY Sync',
+      },
+      connection
+    );
+  }
+
+  // Open "Payment Already Made" claims too — nothing left to verify against
+  // (migration 041). Before this they stayed in the RE's queue forever and
+  // showed against the wrong customer (28 Oct, CHAMPALAL -TP's 4 claims).
+  const run = connection ? (sql, params) => connection.query(sql, params) : query;
+  const claimRes = await run(
+    "SELECT id, customer_id, amount, status FROM payment_claims WHERE customer_id IN (:customerIds) AND status IN ('Awaiting Verification', 'Sync Pending')",
+    { customerIds }
+  );
+  const openClaims = connection ? claimRes[0] : claimRes;
+  for (const claim of openClaims) {
+    await run("UPDATE payment_claims SET status = 'Auto-Closed' WHERE id = :id", { id: claim.id });
+    await auditRepository.record(
+      claim.customer_id,
+      {
+        type: 'PAYMENT_CLAIM_AUTO_CLOSED',
+        description: `Payment claim of ₹${Math.round(claim.amount)} auto-closed — customer no longer appears in BUSY.`,
+        actor: 'System',
+        previousState: claim.status,
+        newState: 'Auto-Closed',
+        source: 'BUSY Sync',
+      },
+      connection
+    );
+  }
+}
+
+module.exports = { closeOutRemovedCustomers, mapCustomer, mapInvoice, findAll, findBySalesman, findById, findByIds, findInvoices, update, upsertFromBusy };

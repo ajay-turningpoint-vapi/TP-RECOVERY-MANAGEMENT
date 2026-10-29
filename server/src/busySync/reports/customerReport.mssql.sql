@@ -497,14 +497,16 @@ FROM
 
                                 -
 
-                                /* CR NOTE + RECEIPT + RETURN */
+                                /* CR NOTE + RECEIPT + RETURN 
+                                PAYMENT ADDED 19 in vchtype
+                                */
                                 ISNULL(
                                 (
                                     SELECT SUM(ABS(ISNULL(P.VALUE1,0)))
                                     FROM TRAN3 P
                                     WHERE
                                         P.REFCODE = I.REFCODE
-                                        AND P.VCHTYPE IN (14,3,16,18)
+                                        AND P.VCHTYPE IN (14,3,16,18,19)
                                         AND P.TYPE = 2
                                         AND P.STATUS = 1
                                         AND P.METHOD = 2

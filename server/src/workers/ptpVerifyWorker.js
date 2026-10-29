@@ -14,6 +14,17 @@ function createPtpVerifyWorker() {
     async () => {
       await pingDb();
       const result = await verifyDuePtps();
+      // A PTP decided with nothing overdue gets no call task, so its
+      // customer would stay parked on "PTP Scheduled" (Record Outcome
+      // locked) until tomorrow's noon reconcile — which runs BEFORE this
+      // 12:10 job. Release such customers now. Safe: skips anyone with an
+      // open task, money to collect, or a Record Outcome wait.
+      try {
+        const { normalized } = await require('../services/recoveryReconcileService').reconcileStuckParked();
+        result.stuckParkedNormalized = normalized;
+      } catch (err) {
+        logger.error('[ptpVerifyWorker] stuck-parked release failed', { message: err.message });
+      }
       await beat('ptp-verify');
       logger.info('[ptpVerifyWorker] noon PTP promote + verify complete', result);
       return result;

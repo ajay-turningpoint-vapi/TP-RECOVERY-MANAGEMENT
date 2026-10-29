@@ -29,15 +29,18 @@ async function listRoster() {
   // this roster now — no longer excluded (that guard only made sense
   // under the earlier "read-only overlay" design, where they had zero RMS
   // footprint and every rate would've fallen back to a fabricated 100%).
-  const [salespersons, allCustomers, allPtps, allTasks, allAudit, dismissedTodayIds] = await Promise.all([
+  const [salespersons, allCustomers, allPtps, allTasks, allAudit, dismissedThisMonthIds, allClaims, allDisputes] = await Promise.all([
     salesmanRepository.findAllSalespersons(),
     customerRepository.findAll(),
     ptpRepository.findAll(),
     taskRepository.findAll(),
     auditRepository.listAll(),
-    underperformanceDismissalRepository.dismissedTodayIds(),
+    underperformanceDismissalRepository.dismissedThisMonthIds(),
+    require('../repositories/paymentClaimRepository').findAll(),
+    require('../repositories/disputeRepository').findAll(),
   ]);
-  const dismissedSet = new Set(dismissedTodayIds);
+  const { openClaimIds, openDisputeIds } = scoringService.openClaimAndDisputeIds(allClaims, allDisputes);
+  const dismissedSet = new Set(dismissedThisMonthIds);
 
   const ptpsByCustomer = scoringService.groupBy(allPtps, (p) => p.customerId);
   const tasksByCustomer = scoringService.groupBy(allTasks, (t) => t.customerId);
@@ -96,6 +99,8 @@ async function listRoster() {
       ownedTasks,
       auditByCustomer,
       taskByCustomer: tasksByCustomer,
+      openClaimIds,
+      openDisputeIds,
     }) ?? {
       collectionPerformance: 0,
       followUpDiscipline: 0,
@@ -138,9 +143,10 @@ async function listRoster() {
       escalatedCustomers,
       highRiskCustomers,
       // RE marked this salesman's underperformance nudge "complete" for
-      // today — the RE Tasks screen hides it until tomorrow (or until the
-      // collection % recovers).
-      underperformanceDismissedToday: dismissedSet.has(sp.id),
+      // this month — the nudge itself only ever appears on the 1st (see
+      // re_tasks_screen.dart), and the RE Tasks screen hides it until the
+      // 1st of next month (or until the collection % recovers).
+      underperformanceDismissedThisMonth: dismissedSet.has(sp.id),
     };
   });
 }

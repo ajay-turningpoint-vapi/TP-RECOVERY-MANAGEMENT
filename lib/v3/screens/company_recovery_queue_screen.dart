@@ -32,7 +32,7 @@ enum _QueueSort { priority, nameAsc, nameDesc, amountDesc, amountAsc }
 class _CompanyRecoveryQueueScreenState extends State<CompanyRecoveryQueueScreen> {
   String _salesmanFilter = 'All';
   String get _branchFilter => context.read<AppStore>().branchFilter;
-  String _quickFilter = 'All'; // All, Broken PTP, Escalated, No Owner, No Next Action
+  String _quickFilter = 'All'; // All, Broken PTP, Escalated
   String _query = '';
   _QueueSort _sort = _QueueSort.priority;
 
@@ -55,15 +55,18 @@ class _CompanyRecoveryQueueScreenState extends State<CompanyRecoveryQueueScreen>
 
     List<Customer> queue = store.visibleCustomers.where((c) => widget.showOutstanding ? c.totalOutstanding > 0 : c.totalDue > 0).toList();
     if (_salesmanFilter != 'All') queue = queue.where((c) => c.assignedSalesmanId == _salesmanFilter).toList();
-        if (_quickFilter == 'Broken PTP') {
-      final ids = store.brokenPtps.map((p) => p.customerId).toSet();
-      queue = queue.where((c) => ids.contains(c.id)).toList();
+    // Chip counts — what each chip would show under the current salesman /
+    // branch selection (before the chip itself is applied).
+    final brokenIds = store.brokenPtps.map((p) => p.customerId).toSet();
+    final chipCounts = {
+      'All': queue.length,
+      'Broken PTP': queue.where((c) => brokenIds.contains(c.id)).length,
+      'Escalated': queue.where((c) => c.escalationLevel != 'none').length,
+    };
+    if (_quickFilter == 'Broken PTP') {
+      queue = queue.where((c) => brokenIds.contains(c.id)).toList();
     } else if (_quickFilter == 'Escalated') {
       queue = queue.where((c) => c.escalationLevel != 'none').toList();
-    } else if (_quickFilter == 'No Owner') {
-      queue = queue.where((c) => c.ownerMappingRequired).toList();
-    } else if (_quickFilter == 'No Next Action') {
-      queue = queue.where((c) => !c.hasValidNextAction).toList();
     }
     if (_query.trim().isNotEmpty) {
       final q = _query.trim().toLowerCase();
@@ -98,7 +101,7 @@ class _CompanyRecoveryQueueScreenState extends State<CompanyRecoveryQueueScreen>
     return Scaffold(
       backgroundColor: _bg,
       appBar: AppBar(
-        title: Text(widget.showOutstanding ? 'Total Outstanding' : 'Company Recovery Queue', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: _dark)),
+        title: Text(widget.showOutstanding ? 'Total Outstanding' : 'All Customers', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: _dark)),
         backgroundColor: Colors.white,
         elevation: 0,
         foregroundColor: _dark,
@@ -118,11 +121,11 @@ class _CompanyRecoveryQueueScreenState extends State<CompanyRecoveryQueueScreen>
                       child: ListView(
                         scrollDirection: Axis.horizontal,
                         padding: const EdgeInsets.symmetric(horizontal: 12),
-                        children: ['All', 'Broken PTP', 'Escalated', 'No Owner', 'No Next Action']
+                        children: ['All', 'Broken PTP', 'Escalated']
                             .map((f) => Padding(
                                   padding: const EdgeInsets.only(right: 8),
                                   child: ChoiceChip(
-                                    label: Text(f, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                    label: Text('$f (${chipCounts[f] ?? 0})', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
                                     selected: _quickFilter == f,
                                     selectedColor: _blue.withValues(alpha: 0.15),
                                     labelStyle: TextStyle(color: _quickFilter == f ? _blue : _muted),

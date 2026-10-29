@@ -10,6 +10,10 @@ const complete = asyncHandler(async (req, res) => {
   res.json(await taskService.completeTask(req.params.id, req.user, req.body));
 });
 
+const rejectVisit = asyncHandler(async (req, res) => {
+  res.json(await taskService.rejectVisit(req.params.id, req.user, req.body));
+});
+
 const requestExtension = asyncHandler(async (req, res) => {
   res.json(await taskService.requestExtension(req.params.id, req.user, req.body));
 });
@@ -45,6 +49,7 @@ const rejectInternalAction = asyncHandler(async (req, res) => {
 module.exports = {
   list,
   complete,
+  rejectVisit,
   requestExtension,
   approveEdit,
   rejectEdit,

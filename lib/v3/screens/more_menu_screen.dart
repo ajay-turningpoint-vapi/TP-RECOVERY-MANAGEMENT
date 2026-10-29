@@ -4,7 +4,6 @@ import 'package:salesman_mobile/v2/stores/app_store.dart';
 import 'package:salesman_mobile/v2/screens/re_team_tab.dart';
 import 'package:salesman_mobile/v2/screens/re_approvals_tab.dart';
 import 'package:salesman_mobile/v3/screens/escalations_screen.dart';
-import 'package:salesman_mobile/v3/screens/needs_attention_screen.dart';
 import 'package:salesman_mobile/v3/screens/notifications_screen.dart';
 import 'package:salesman_mobile/v3/screens/five_pm_control_screen.dart';
 import 'package:salesman_mobile/v3/screens/company_search_screen.dart';
@@ -27,7 +26,6 @@ class MoreMenuScreen extends StatelessWidget {
     final items = <_MenuItem>[
       _MenuItem('Approvals', Icons.inbox_outlined, const Color(0xFF2563EB), (ctx) => const Scaffold(body: SafeArea(child: ReApprovalsTab())), badge: pendingApprovals),
       _MenuItem('Escalations', Icons.trending_up_outlined, const Color(0xFFDC2626), (ctx) => const EscalationsScreen(), badge: store.openEscalationCases.length),
-      _MenuItem('Needs Attention', Icons.warning_amber_outlined, const Color(0xFFEA580C), (ctx) => const NeedsAttentionScreen(), badge: store.needsAttentionBadgeCount),
       _MenuItem('Salesmen', Icons.people_outline, const Color(0xFF059669), (ctx) => const ReTeamTab()),
       _MenuItem('Search', Icons.search, const Color(0xFF0F172A), (ctx) => const CompanySearchScreen()),
       _MenuItem('Notifications', Icons.notifications_none, const Color(0xFF9333EA), (ctx) => const NotificationsScreen(), badge: store.unreadNotificationCount),

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Self-hosted appcast for the upgrader package's iOS update check.
+  This app isn't on the public App Store (TestFlight only), so upgrader's
+  default iTunes Search lookup can't find it — this file is the source of
+  truth instead. Bump sparkle:version / sparkle:shortVersionString here
+  (to match pubspec.yaml's `version:`) every time a new TestFlight build
+  ships, or the app will never notice an update is available.
+-->
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+  <channel>
+    <title>TP-RMS</title>
+    <item>
+      <title>Version 1.1.1</title>
+      <sparkle:version>3</sparkle:version>
+      <sparkle:shortVersionString>1.1.1</sparkle:shortVersionString>
+      <sparkle:releaseNotesLink>https://testflight.apple.com/join/Xv3uBYf7</sparkle:releaseNotesLink>
+      <pubDate>Wed, 21 Oct 2026 00:00:00 +0530</pubDate>
+      <enclosure
+        url="https://testflight.apple.com/join/Xv3uBYf7"
+        sparkle:os="ios"
+        sparkle:version="3"
+        sparkle:shortVersionString="1.1.1"
+        length="0"
+        type="application/octet-stream" />
+    </item>
+  </channel>
+</rss>
