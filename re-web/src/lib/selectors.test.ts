@@ -214,3 +214,15 @@ describe("create-task lock (one salesman task at a time)", () => {
     expect(v.openSalesmanTaskFor("c1")).toBeNull();
   });
 });
+
+describe("Not followed up / No next step (server rules)", () => {
+  it("lists customers the server flagged, and only those owing money", () => {
+    const late = cust("late", { hasValidNextAction: true, followUpMissedSince: "2026-10-10T10:00:00+05:30" });
+    const fine = cust("fine", { hasValidNextAction: true });
+    const never = cust("never", { hasValidNextAction: false });
+    const paid = cust("paid", { totalDue: 0, followUpMissedSince: "2026-10-10T10:00:00+05:30" });
+    const v = buildView(data({ customers: [late, fine, never, paid] }), ALL_BRANCHES, RE, NOW);
+    expect(v.noFollowUpAccounts.map((c) => c.id)).toEqual(["late"]);
+    expect(v.noValidNextAction.map((c) => c.id)).toEqual(["never"]);
+  });
+});

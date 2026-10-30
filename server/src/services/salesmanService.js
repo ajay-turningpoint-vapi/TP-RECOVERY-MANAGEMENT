@@ -74,8 +74,10 @@ async function listRoster() {
     const collectionAchievedPercent = collectionTarget <= 0 ? 100 : Math.round((collectionAchieved / collectionTarget) * 100);
 
     const taskCompletionRate = realOwnedTasks.length === 0 ? 0 : Math.round(((realOwnedTasks.length - overdueTasks) / realOwnedTasks.length) * 100);
-    const validNextActionCount = owned.filter((c) =>
-      scoringService.hasPlannedNextStep(c, ptpsByCustomer.get(c.id) || [], tasksByCustomer.get(c.id) || [])
+    // Same rule as the RE's "No next step": a customer counts once any
+    // outcome has been recorded for them (or nothing is owed).
+    const validNextActionCount = owned.filter(
+      (c) => c.totalDue <= 0 || (auditByCustomer.get(c.id) || []).some((a) => a.source === 'Record Outcome')
     ).length;
     const validNextActionRate = owned.length === 0 ? 100 : Math.round((validNextActionCount / owned.length) * 100);
 

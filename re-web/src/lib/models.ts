@@ -88,6 +88,8 @@ export type Customer = {
   alternateContactNumber: string;
   auditHistory: AuditEvent[];
   serverDaysSinceLastFollowUp: number | null;
+  /** Set by the server when the customer is "Not followed up": a salesman task still not done 5 days after it was created. */
+  followUpMissedSince: Date | null;
   invoices: Invoice[];
   lastPaymentAmount: number | null;
   lastPaymentDate: Date | null;
@@ -131,6 +133,7 @@ export function parseCustomer(j: Json): Customer {
     alternateContactNumber: str(j.alternateContactNumber),
     auditHistory: ((j.auditHistory as Json[] | undefined) ?? []).map(parseAuditEvent),
     serverDaysSinceLastFollowUp: optNum(j.daysSinceLastFollowUp),
+    followUpMissedSince: j.followUpMissedSince ? new Date(j.followUpMissedSince as string) : null,
     invoices: ((j.invoices as Json[] | undefined) ?? []).map(parseInvoice),
     lastPaymentAmount: optNum(j.lastPaymentAmount),
     lastPaymentDate: date(j.lastPaymentDate),

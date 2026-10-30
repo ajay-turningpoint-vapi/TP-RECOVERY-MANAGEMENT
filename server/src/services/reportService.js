@@ -89,7 +89,6 @@ async function getDashboard(user) {
   const atRiskAccounts = dueCustomers.filter(
     (c) => c.escalationLevel !== 'none' || brokenCustomerIds.has(c.id) || c.oldestOverdueDays >= 60 || c.creditHealthBand === 'High' || c.creditHealthBand === 'Critical'
   );
-  const noFollowUpThresholdDays = 4;
   const tasksByCustomer = scoringService.groupBy(allTasks, (t) => t.customerId);
   const auditByCustomer = scoringService.groupBy(allAudit, (a) => a.customerId);
   // The client can't recompute this itself: GET /api/customers (what backs
@@ -98,10 +97,17 @@ async function getDashboard(user) {
   // ignore real audit activity and overstate staleness. So the real
   // day-count this filter already computed is attached to each row instead
   // of being thrown away.
+  // "Not followed up": an outcome was recorded, the salesman got a task and
+  // it is still not done 5 days after it was created (scoringService.followUpMissedSince).
   const noFollowUpAccounts = dueCustomers
-    .map((c) => ({ c, days: scoringService.daysSinceLastFollowUp(c, tasksByCustomer.get(c.id) || [], auditByCustomer.get(c.id) || []) }))
-    .filter(({ days }) => days >= noFollowUpThresholdDays)
-    .map(({ c, days }) => ({ ...c, daysSinceLastFollowUp: days }));
+    .map((c) => {
+      const audits = auditByCustomer.get(c.id) || [];
+      const tasks = tasksByCustomer.get(c.id) || [];
+      const hasOutcome = audits.some((a) => a.source === 'Record Outcome');
+      return { c, since: scoringService.followUpMissedSince(c, tasks, hasOutcome), days: scoringService.daysSinceLastFollowUp(c, tasks, audits) };
+    })
+    .filter(({ since }) => since !== null)
+    .map(({ c, since, days }) => ({ ...c, daysSinceLastFollowUp: days, followUpMissedSince: since }));
 
   const l4Cases = openEscalations.filter((e) => e.level === 'L4' && (user.role !== 'SALESPERSON' || customerIds.has(e.customerId)));
   const scopedOpenEscalations = user.role === 'SALESPERSON' ? openEscalations.filter((e) => customerIds.has(e.customerId)) : openEscalations;

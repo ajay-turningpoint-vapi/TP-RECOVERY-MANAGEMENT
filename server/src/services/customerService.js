@@ -79,8 +79,11 @@ async function enrichCustomers(customerList) {
     const creditHealthScore = creditHealthComponents ? creditHealthComponents.total : null;
     return {
       ...c,
-      // Display flag: a routine automatic call is not a planned next step.
-      hasValidNextAction: scoringService.hasPlannedNextStep(c, cPtps, cTasks) || waitingOnOutcome(c.id),
+      // RE lists (web + app): "No next step" = owes money and no outcome has
+      // ever been recorded; "Not followed up" = followUpMissedSince set.
+      // Task automation keeps scoringService.hasValidNextAction.
+      hasValidNextAction: c.totalDue <= 0 || lastOutcomeBy.has(c.id),
+      followUpMissedSince: scoringService.followUpMissedSince(c, cTasks, lastOutcomeBy.has(c.id)),
       creditHealthScore,
       creditHealthBand: scoringService.creditHealthBand(creditHealthScore),
       creditHealthComponents,

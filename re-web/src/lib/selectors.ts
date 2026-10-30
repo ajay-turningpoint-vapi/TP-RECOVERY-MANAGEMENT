@@ -26,7 +26,6 @@ import {
 import { plainTask } from "./plain-task";
 
 export const ALL_BRANCHES = "All Branches";
-export const NO_FOLLOW_UP_THRESHOLD_DAYS = 4;
 export const PTP_KEPT_TARGET = 75;
 
 export type RmsData = {
@@ -244,9 +243,11 @@ export function buildView(data: RmsData, branch: string, currentUserId: string, 
     return Math.max(0, Math.floor((now.getTime() - last.getTime()) / 86_400_000));
   };
 
-  const noFollowUpAccounts: Customer[] = branchActive
-    ? customers.filter((c) => c.totalDue > 0 && daysSinceLastFollowUp(c) >= NO_FOLLOW_UP_THRESHOLD_DAYS)
-    : (d.noFollowUpAccounts ?? []).map(parseCustomer);
+  // "Not followed up" (server rule, scoringService.followUpMissedSince): an
+  // outcome was recorded, the salesman got a task and it is still not done
+  // 5 days after it was created. "No next step" (noValidNextAction) = no
+  // outcome recorded ever — the server's hasValidNextAction flag.
+  const noFollowUpAccounts: Customer[] = customers.filter((c) => c.totalDue > 0 && c.followUpMissedSince != null);
 
   const topOverdueCustomers: Customer[] = branchActive
     ? [...dueCustomers].sort((a, b) => b.totalDue - a.totalDue).slice(0, 5)

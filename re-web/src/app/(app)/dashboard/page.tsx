@@ -58,9 +58,9 @@ export default function DashboardPage() {
 
   const problems: { label: string; count: number; icon: React.ElementType; href: string; hue: Hue }[] = [
     { label: "Customers who broke a payment promise", count: rms.brokenPtps.length, icon: CalendarX2, href: "/ptps?status=broken", hue: "rose" },
-    { label: "Customers nobody followed up for 4+ days", count: rms.noFollowUpAccounts.length, icon: PhoneOff, href: "/queue?view=no-follow-up", hue: "amber" },
+    { label: "Customers whose task is not done for 5+ days", count: rms.noFollowUpAccounts.length, icon: PhoneOff, href: "/queue?view=no-follow-up", hue: "amber" },
     { label: "Customers with no salesman", count: rms.ownerMappingRequired.length, icon: UserX, href: "/queue?view=ownerless", hue: "violet" },
-    { label: "Customers with no next step planned", count: rms.noValidNextAction.length, icon: CircleSlash, href: "/queue?view=no-next-action", hue: "amber" },
+    { label: "Customers never contacted (no outcome recorded yet)", count: rms.noValidNextAction.length, icon: CircleSlash, href: "/queue?view=no-next-action", hue: "amber" },
     { label: "Important tasks that are late", count: rms.criticalTasks.length, icon: ClipboardX, href: "/tasks?filter=overdue", hue: "rose" },
     { label: "Visits with no result written", count: rms.physicalVisitsPendingReview.length, icon: MapPinOff, href: "/tasks", hue: "sky" },
   ];

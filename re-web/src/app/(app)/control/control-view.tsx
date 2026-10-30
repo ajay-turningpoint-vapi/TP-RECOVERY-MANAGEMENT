@@ -61,8 +61,8 @@ export function ControlView() {
       where: "My Tasks — Urgent",
     },
     {
-      question: "Does every customer with overdue money have a next step planned?",
-      problem: (n) => `${n} customer${n === 1 ? " has" : "s have"} no next step planned.`,
+      question: "Has every customer with overdue money been contacted at least once?",
+      problem: (n) => `${n} customer${n === 1 ? " has" : "s have"} never had an outcome recorded.`,
       count: rms.noValidNextAction.length,
       href: "/queue?view=no-next-action",
       where: "Follow-up List — No next step",

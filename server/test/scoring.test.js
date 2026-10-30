@@ -70,15 +70,20 @@ test('compareByRecoveryPriority ranks escalation severity above overdue days abo
   assert.equal(equalEscalation[0].id, 'OLDER');
 });
 
-test('a routine automatic call is not a planned next step; a real task or an open PTP is', () => {
-  const owing = { totalDue: 5000 };
-  const routine = { status: 'pending', source: 'Recovery', isRoutine: true };
-  assert.equal(scoringService.hasPlannedNextStep(owing, [], [routine]), false, 'the daily automatic call says nothing about a plan');
-  assert.equal(scoringService.hasValidNextAction(owing, [], [routine]), true, 'the automation rule is unchanged');
-  assert.equal(scoringService.hasPlannedNextStep(owing, [], [{ status: 'pending', source: 'RE', isRoutine: false }]), true);
-  assert.equal(scoringService.hasPlannedNextStep(owing, [], [{ status: 'pending', source: 'Recovery', isRoutine: false }]), true, 'an event-driven call (e.g. PTP broken) is a real next step');
-  assert.equal(scoringService.hasPlannedNextStep(owing, [{ status: 'scheduled' }], [routine]), true);
-  assert.equal(scoringService.hasPlannedNextStep({ totalDue: 0 }, [], []), true);
+test('Not followed up: a salesman task still open 5 days after it was created, once an outcome exists', () => {
+  const now = Date.parse('2026-11-10T12:00:00+05:30');
+  const day = 86400000;
+  const c = { totalDue: 5000, assignedSalesmanId: 's1' };
+  const task = (ageDays, extra = {}) => ({ status: 'pending', ownerId: 's1', createdAt: new Date(now - ageDays * day).toISOString(), ...extra });
+
+  assert.equal(scoringService.followUpMissedSince(c, [], true, now), null, 'outcome still waiting — no task yet');
+  assert.equal(scoringService.followUpMissedSince(c, [task(4)], true, now), null, '4 days old — not yet');
+  assert.equal(+scoringService.followUpMissedSince(c, [task(5)], true, now), now - 5 * day, '5 days old — listed');
+  assert.equal(+scoringService.followUpMissedSince(c, [task(6), task(9)], true, now), now - 9 * day, 'oldest open task');
+  assert.equal(scoringService.followUpMissedSince(c, [task(9, { status: 'completed' })], true, now), null, 'done');
+  assert.equal(scoringService.followUpMissedSince(c, [task(9, { ownerId: 'amit-re' })], true, now), null, 'a task held by the RE never counts');
+  assert.equal(scoringService.followUpMissedSince(c, [task(9)], false, now), null, 'never recorded — that is "No next step" instead');
+  assert.equal(scoringService.followUpMissedSince({ ...c, totalDue: 0 }, [task(9)], true, now), null, 'nothing owed');
 });
 
 test('a task the system closed by itself is not follow-up; one a person completed is', () => {

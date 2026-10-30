@@ -74,21 +74,27 @@ function isSystemClosedOutcome(outcome) {
 }
 
 /**
- * What the RE / apps show as "has a next step planned". Same as
- * hasValidNextAction below, except the routine automatic call (source
- * 'Recovery', isRoutine) does not count — the sweep creates it for every
- * customer with money due, so it says nothing about anyone having a plan
- * (30 Oct: a salesman with 76 untouched customers showed only 5 under "No
- * next step"). hasValidNextAction itself stays as is: the task automation
- * relies on it.
+ * "Not followed up" (RE lists, web + app): the customer has a recorded
+ * outcome, the salesman was given a task for them (the automatic task once a
+ * wait ended — PTP date, call-back time, No Answer, refused cycle, broken PTP —
+ * or one the RE created) and it is still not done FOLLOW_UP_MISSED_DAYS days
+ * after it was created. Counted from creation, not the deadline: the daily
+ * sweep keeps moving an open recovery task's deadline forward. Tasks held by
+ * the RE never count. Returns the oldest such task's creation time, or null.
  */
-function hasPlannedNextStep(customer, customerPtps, customerTasks) {
-  if (customer.totalDue <= 0) return true;
-  const hasPlannedTask = customerTasks.some(
-    (t) => t.status !== 'completed' && t.status !== 'closed' && !(t.source === 'Recovery' && t.isRoutine)
-  );
-  const hasActivePtp = customerPtps.some((p) => ['scheduled', 'pendingVerification', 'financialSyncPending'].includes(p.status));
-  return hasPlannedTask || hasActivePtp;
+const FOLLOW_UP_MISSED_DAYS = 5;
+function followUpMissedSince(customer, customerTasks, hasOutcome, now = Date.now()) {
+  if (!hasOutcome || !(customer.totalDue > 0)) return null;
+  const cutoff = now - FOLLOW_UP_MISSED_DAYS * 86400000;
+  let oldest = null;
+  for (const t of customerTasks) {
+    if (['completed', 'closed', 'cancelled'].includes(t.status)) continue;
+    if (t.ownerId !== customer.assignedSalesmanId) continue;
+    const created = new Date(t.createdAt).getTime();
+    if (!(created <= cutoff)) continue;
+    if (oldest === null || created < oldest) oldest = created;
+  }
+  return oldest === null ? null : new Date(oldest);
 }
 
 function hasValidNextAction(customer, customerPtps, customerTasks) {
@@ -394,7 +400,7 @@ function compareByRecoveryPriority(a, b) {
   return b.totalDue - a.totalDue;
 }
 
-module.exports = { hasPlannedNextStep, isSystemClosedOutcome,
+module.exports = { followUpMissedSince, FOLLOW_UP_MISSED_DAYS, isSystemClosedOutcome,
   waitingOnOutcome,
   lastRecordedOutcome,
   openClaimAndDisputeIds,
