@@ -1,11 +1,11 @@
 const notificationRepository = require('../repositories/notificationRepository');
+const { withoutRemoved } = require('./activeCustomers');
 const { ForbiddenError, NotFoundError } = require('../errors/AppError');
 
 async function listForUser(userId) {
-  const [items, unreadCount] = await Promise.all([
-    notificationRepository.findForUser(userId),
-    notificationRepository.countUnread(userId),
-  ]);
+  // Nothing about a customer removed from BUSY (see activeCustomers.js).
+  const items = await withoutRemoved(await notificationRepository.findForUser(userId));
+  const unreadCount = items.filter((n) => !n.isRead).length;
   return { items, unreadCount };
 }
 

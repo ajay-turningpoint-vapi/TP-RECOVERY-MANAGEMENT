@@ -293,6 +293,10 @@ export function commandsFor(
   rms: RmsView,
   salesmanOptions: { value: string; label: string }[],
 ): Cmd[] {
+  // One task at a time: no new call task while the salesman still holds one
+  // on this customer (same lock as Create task on the customer page).
+  const salesmanBusy = !!item.customerId && !!rms.openSalesmanTaskFor(item.customerId);
+  const followUps = (title: string): Cmd[] => (salesmanBusy ? [] : [followUp(title)]);
   const followUp = (title: string): Cmd => ({
     key: "followup",
     label: "Ask salesman to call",
@@ -409,7 +413,7 @@ export function commandsFor(
       return cmds;
     }
     case "visitReview":
-      return [followUp("Follow up on the visit")];
+      return followUps("Follow up on the visit");
     case "overdueTarget":
       return [
         {
@@ -420,7 +424,7 @@ export function commandsFor(
           path: `/salesmen/${encodeURIComponent(item.salesmanId)}/dismiss-underperformance`,
           success: "Marked as checked for this month.",
         },
-        followUp("Ask the salesman to work this account"),
+        ...followUps("Ask the salesman to work this account"),
       ];
     case "dispute":
       return [{ key: "open", label: "Open the dispute", icon: <ArrowUpRight />, variant: "default", href: `/disputes/${item.refId}` }];
@@ -436,7 +440,7 @@ export function commandsFor(
       ];
     case "ptpMissed":
       return [
-        followUp("Follow up on the broken PTP"),
+        ...followUps("Follow up on the broken PTP"),
         { key: "esc", label: "Open customer to escalate", icon: <ArrowUpRight />, href: `/customers/${encodeURIComponent(item.customerId ?? "")}` },
       ];
   }

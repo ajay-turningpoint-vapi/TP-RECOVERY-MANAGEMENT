@@ -544,6 +544,12 @@ export function buildView(data: RmsData, branch: string, currentUserId: string, 
     const cur = openTasksByCustomer.get(t.customerId);
     if (!cur || t.deadline < cur.deadline) openTasksByCustomer.set(t.customerId, t);
   }
+  // An open task a salesman (not an RE) holds on this customer — while one
+  // exists the RE cannot add another (one task at a time for the salesman).
+  const openSalesmanTaskFor = (customerId: string): Task | null =>
+    data.tasks
+      .filter((t) => t.customerId === customerId && isTaskOpen(t) && salesmanById.has(t.ownerId))
+      .sort((a, b) => +a.deadline - +b.deadline)[0] ?? null;
   const nextStepFor = (c: Customer): NextStep => {
     const task = openTasksByCustomer.get(c.id) ?? null;
     if (task) {
@@ -569,6 +575,7 @@ export function buildView(data: RmsData, branch: string, currentUserId: string, 
     allPtps: data.ptps,
     allTasks: data.tasks,
     nextStepFor,
+    openSalesmanTaskFor,
     allPaymentClaims: data.paymentClaims,
     allSalesmen: data.salesmen,
     allDisputes: data.disputes,

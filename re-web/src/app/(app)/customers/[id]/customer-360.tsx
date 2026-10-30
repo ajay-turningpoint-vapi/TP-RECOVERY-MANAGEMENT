@@ -120,6 +120,8 @@ export function Customer360({ id }: { id: string }) {
   // The live open task is the source of truth for "what now" — the
   // customer's stored next-action text can be left over from an older step.
   const step = rms.nextStepFor(c);
+  const salesmanTask = rms.openSalesmanTaskFor(c.id);
+  const createLocked = !!c.outcomeWaitText || !!salesmanTask;
   const currentTask = step.task;
   // When the recorded outcome is due: promised date, "will confirm" time,
   // end of the No Answer wait, or the date given for a payment already made.
@@ -165,7 +167,7 @@ export function Customer360({ id }: { id: string }) {
             </div>
           </div>
           <div className="flex shrink-0 flex-wrap gap-2">
-            <Button size="lg" className="bg-white text-[lab(34.2882%_14.8026_-59.6162)] hover:bg-white/90 disabled:opacity-60" onClick={() => instruct.open(true)} disabled={!!c.outcomeWaitText}>
+            <Button size="lg" className="bg-white text-[lab(34.2882%_14.8026_-59.6162)] hover:bg-white/90 disabled:opacity-60" onClick={() => instruct.open(true)} disabled={createLocked}>
               <ClipboardPlus />
               Create task
             </Button>
@@ -255,12 +257,14 @@ export function Customer360({ id }: { id: string }) {
             </div>
           </div>
         )}
-        {c.outcomeWaitText && (
+        {createLocked && (
           <div className="mx-5 mb-4 flex items-start gap-3 rounded-lg bg-amber-50 px-4 py-3 text-[15px] text-amber-950 dark:bg-amber-100">
             <ShieldAlert className="mt-0.5 size-5 shrink-0 text-amber-700" />
             <div>
               <span className="font-semibold">Create task is locked for now. </span>
-              {c.outcomeWaitText}
+              {salesmanTask
+                ? `${rms.salesmanName(salesmanTask.ownerId)} already has a task for this customer (due ${formatDate(salesmanTask.deadline, "d/M/yyyy HH:mm")}). You can create a new one once it is done.`
+                : c.outcomeWaitText}
             </div>
           </div>
         )}
@@ -558,22 +562,10 @@ export function Customer360({ id }: { id: string }) {
       {/* Commands */}
       <ActionDialog
         {...instruct.props}
-        title="Create task for salesman"
-        description="A management instruction or task the salesperson must act on. It appears in their app immediately."
+        title="Create call task for salesman"
+        description="The salesman must call this customer. It appears in their app immediately."
         submitLabel="Create task"
         fields={[
-          {
-            name: "taskType",
-            label: "Task type",
-            type: "select",
-            required: true,
-            defaultValue: "managementInstruction",
-            options: [
-              { value: "managementInstruction", label: "Management instruction" },
-              { value: "customerCall", label: "Call customer" },
-              { value: "physicalVisit", label: "Physical visit" },
-            ],
-          },
           { name: "salesmanId", label: "Assign to", type: "select", required: true, defaultValue: c.assignedSalesmanId, options: salesmanOptions },
           { name: "desc", label: "Instruction", type: "textarea", required: true, placeholder: "What exactly should the salesman do?" },
           { name: "deadline", label: "Deadline", type: "datetime", required: true, defaultValue: deadlineInput(1, 18) },
@@ -588,7 +580,7 @@ export function Customer360({ id }: { id: string }) {
         onSubmit={(v) =>
           action.mutateAsync({
             path: `/customers/${encodeURIComponent(c.id)}/management-instruction`,
-            body: { salesmanId: v.salesmanId, desc: v.desc, deadline: localToIso(v.deadline), priority: v.priority, taskType: v.taskType },
+            body: { salesmanId: v.salesmanId, desc: v.desc, deadline: localToIso(v.deadline), priority: v.priority, taskType: "customerCall" },
             success: "Done. The task is now in the salesman's app.",
           })
         }

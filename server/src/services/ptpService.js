@@ -1,4 +1,5 @@
 const ptpRepository = require('../repositories/ptpRepository');
+const { withoutRemoved } = require('./activeCustomers');
 const customerRepository = require('../repositories/customerRepository');
 const auditRepository = require('../repositories/auditRepository');
 const escalationService = require('./escalationService');
@@ -29,7 +30,7 @@ async function listForUser(user) {
     const all = await ptpRepository.findAll();
     return all.filter((p) => ids.has(p.customerId));
   }
-  return ptpRepository.findAll();
+  return withoutRemoved(await ptpRepository.findAll());
 }
 
 async function getOrThrow(id) {

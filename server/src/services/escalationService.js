@@ -1,5 +1,6 @@
 const { withTransaction } = require('../config/db');
 const escalationRepository = require('../repositories/escalationRepository');
+const { withoutRemoved } = require('./activeCustomers');
 const customerRepository = require('../repositories/customerRepository');
 const taskRepository = require('../repositories/taskRepository');
 const auditRepository = require('../repositories/auditRepository');
@@ -17,7 +18,7 @@ async function listForUser(user) {
     const all = await escalationRepository.findAll();
     return all.filter((e) => ids.has(e.customerId));
   }
-  return escalationRepository.findOpen();
+  return withoutRemoved(await escalationRepository.findOpen());
 }
 
 async function listForCustomer(customerId) {

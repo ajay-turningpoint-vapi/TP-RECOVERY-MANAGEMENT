@@ -141,7 +141,13 @@ async function promoteDuePtps() {
   // Promote the instant the promise datetime is reached (the `ptp-promote`
   // pass runs every 15 min), not just at the daily calendar cutoff.
   const candidates = await ptpRepository.findScheduledDueByTime();
+  const removed = await customerRepository.findRemovedIds();
+  let promoted = 0;
   for (const ptp of candidates) {
+    // Customer removed from BUSY: nothing left to check — leave the promise
+    // alone so it never turns into a "broken PTP" for the RE (seen 30 Oct).
+    if (removed.has(ptp.customerId)) continue;
+    promoted += 1;
     await ptpRepository.update(ptp.id, { status: 'pendingVerification' });
     try {
       await auditRepository.record(ptp.customerId, {
@@ -159,7 +165,7 @@ async function promoteDuePtps() {
       dueDate: istDateStr(new Date(ptp.promiseDate)),
     });
   }
-  return candidates.length;
+  return promoted;
 }
 
 /**
@@ -183,7 +189,7 @@ async function finalizeDuePtps(getReceiptTotals = receiptTotalsRepository.getRec
   const cutoff = `${todayIst} 00:00:00`;
   const candidates = await ptpRepository.findPendingVerificationDue(cutoff);
 
-  const result = { kept: 0, partiallyKept: 0, broken: 0, skippedNoData: 0, errors: 0 };
+  const result = { kept: 0, partiallyKept: 0, broken: 0, skippedNoData: 0, skippedRemoved: 0, errors: 0 };
   const brokenCustomerIds = [];
   // Two PTPs with the same due date in the same branch would otherwise
   // fire the identical BUSY query twice — memoise per (database, window).
@@ -208,6 +214,13 @@ async function finalizeDuePtps(getReceiptTotals = receiptTotalsRepository.getRec
       if (!customerForBranch) {
         result.skippedNoData += 1;
         logger.warn('[ptp-verification] PTP verification skipped — customer not found', { ptpId: ptp.id, customerId: ptp.customerId });
+        continue;
+      }
+      // Removed from BUSY: never decide (and never break) its promise — a
+      // broken PTP would put a customer nobody can act on in the RE's queue.
+      if (customerForBranch.busyStillActive === false) {
+        result.skippedRemoved += 1;
+        logger.info('[ptp-verification] skipped — customer no longer in BUSY', { ptpId: ptp.id, customerId: ptp.customerId });
         continue;
       }
       const branch = branchForCustomer(customerForBranch);

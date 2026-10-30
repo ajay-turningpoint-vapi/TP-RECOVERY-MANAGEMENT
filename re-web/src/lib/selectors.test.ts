@@ -199,3 +199,18 @@ describe("next step (same as the app's task screen)", () => {
     expect(step.what).toBe("CALL CUSTOMER");
   });
 });
+
+describe("create-task lock (one salesman task at a time)", () => {
+  const c = cust("c1");
+  it("locks while the salesman holds an open task on the customer", () => {
+    const v = buildView(data({ customers: [c], tasks: [task("t1", { ownerId: "s1" })] }), ALL_BRANCHES, RE, NOW);
+    expect(v.openSalesmanTaskFor("c1")?.id).toBe("t1");
+  });
+  it("ignores finished tasks and tasks held by the RE", () => {
+    const v = buildView(
+      data({ customers: [c], tasks: [task("done", { status: "completed" }), task("re", { ownerId: RE, type: "financialTeamFollowUp" })] }),
+      ALL_BRANCHES, RE, NOW,
+    );
+    expect(v.openSalesmanTaskFor("c1")).toBeNull();
+  });
+});

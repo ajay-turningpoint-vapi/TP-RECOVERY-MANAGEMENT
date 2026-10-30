@@ -70,19 +70,28 @@ export function useRmsData() {
     ];
     const parsedCustomers = (customers ?? []).map(parseCustomer);
     const names = new Map(parsedCustomers.map((c) => [c.id, c.name]));
+    // GET /api/customers leaves out customers BUSY no longer has
+    // (busy_still_active = 0). Anything still attached to one of them — e.g.
+    // a PTP the 12:10 job marked broken after the customer was removed —
+    // has nobody to act on it — removed from BUSY means removed from RMS, so
+    // all of it is hidden everywhere (the server filters the same way).
+    // Only applied once the customer list has loaded, so nothing vanishes mid-load.
+    const known = parsedCustomers.length > 0 ? new Set(parsedCustomers.map((c) => c.id)) : null;
+    const active = <T extends { customerId: string }>(x: T) => !known || !x.customerId || known.has(x.customerId);
     return {
       ...EMPTY_DATA,
       customers: parsedCustomers,
       // Tasks the server closed by itself (not a person) are hidden everywhere.
       tasks: (tasks ?? [])
         .map((t) => parseTask(t, names.get(t.customerId as string)))
-        .filter((t) => !(t.status === "completed" && isSystemClosed(t.outcome))),
-      ptps: (ptps ?? []).map(parsePtp),
+        .filter((t) => !(t.status === "completed" && isSystemClosed(t.outcome)))
+        .filter(active),
+      ptps: (ptps ?? []).map(parsePtp).filter(active),
       // Same for disputes and payment claims the server auto-closed
       // (customer no longer in BUSY) — nobody has anything to do on them.
-      disputes: (disputes ?? []).map(parseDispute).filter((d) => d.status !== "Auto-Closed"),
-      paymentClaims: (claims ?? []).map(parsePaymentClaim).filter((c) => c.status !== "Auto-Closed"),
-      escalations: (escalations ?? []).map(parseEscalation),
+      disputes: (disputes ?? []).map(parseDispute).filter((d) => d.status !== "Auto-Closed").filter(active),
+      paymentClaims: (claims ?? []).map(parsePaymentClaim).filter((c) => c.status !== "Auto-Closed").filter(active),
+      escalations: (escalations ?? []).map(parseEscalation).filter(active),
       salesmen: (salesmen ?? []).map(parseSalesman),
       // GET /api/notifications returns { items, unreadCount } (notificationService.listForUser).
       notifications: (((notifications as unknown as { items?: Json[] } | undefined)?.items) ?? []).map(parseNotification),

@@ -9,6 +9,7 @@ const userRepository = require('../repositories/userRepository');
 const salesmanService = require('./salesmanService');
 const scoringService = require('./scoringService');
 const metricsRepository = require('../repositories/metricsRepository');
+const { withoutRemoved, NOT_REMOVED_SQL } = require('./activeCustomers');
 
 const MATURED_STATUSES = ['kept', 'partiallyKept', 'broken'];
 // Every dispute status where an RE/Management action is genuinely needed
@@ -42,10 +43,10 @@ function isToday(date) {
 async function getDashboard(user) {
   const [rawCustomers, allPtps, allTasks, allDisputes, openEscalations, roster, allAudit] = await Promise.all([
     user.role === 'SALESPERSON' ? customerRepository.findBySalesman(user.id) : customerRepository.findAll(),
-    ptpRepository.findAll(),
-    user.role === 'SALESPERSON' ? taskRepository.findByOwner(user.id) : taskRepository.findAll(),
-    user.role === 'SALESPERSON' ? [] : disputeRepository.findAll(),
-    escalationRepository.findOpen(),
+    ptpRepository.findAll().then(withoutRemoved),
+    (user.role === 'SALESPERSON' ? taskRepository.findByOwner(user.id) : taskRepository.findAll()).then(withoutRemoved),
+    user.role === 'SALESPERSON' ? [] : disputeRepository.findAll().then(withoutRemoved),
+    escalationRepository.findOpen().then(withoutRemoved),
     user.role === 'SALESPERSON' ? [] : salesmanService.listRoster(),
     auditRepository.listAll(),
   ]);
@@ -135,7 +136,7 @@ async function getDashboard(user) {
         ownedTasks: allTasks,
         auditByCustomer,
         taskByCustomer: tasksByCustomer,
-        ...scoringService.openClaimAndDisputeIds(await paymentClaimRepository.findAll(), await disputeRepository.findAll()),
+        ...scoringService.openClaimAndDisputeIds(await withoutRemoved(await paymentClaimRepository.findAll()), await withoutRemoved(await disputeRepository.findAll())),
       })
       : null;
 
@@ -237,10 +238,10 @@ async function getTrends(days = 7) {
   const [dueRows, createdRows, brokenRows, snapshots] = await Promise.all([
     query(
       `SELECT promise_date, amount_promised, amount_received, status FROM ptps
-       WHERE promise_date >= NOW() - INTERVAL ${days + 1} DAY AND promise_date < NOW() + INTERVAL 1 DAY`
+       WHERE promise_date >= NOW() - INTERVAL ${days + 1} DAY AND promise_date < NOW() + INTERVAL 1 DAY AND ${NOT_REMOVED_SQL}`
     ),
-    query(`SELECT created_at, amount_promised FROM ptps WHERE created_at >= NOW() - INTERVAL ${days + 1} DAY`),
-    query(`SELECT occurred_at FROM audit_events WHERE type = 'PTP_BROKEN' AND occurred_at >= NOW() - INTERVAL ${days + 1} DAY`),
+    query(`SELECT created_at, amount_promised FROM ptps WHERE created_at >= NOW() - INTERVAL ${days + 1} DAY AND ${NOT_REMOVED_SQL}`),
+    query(`SELECT occurred_at FROM audit_events WHERE type = 'PTP_BROKEN' AND occurred_at >= NOW() - INTERVAL ${days + 1} DAY AND ${NOT_REMOVED_SQL}`),
     metricsRepository.listRecent(days + 1),
   ]);
   const snapByDay = new Map(snapshots.map((s) => [dayKey(s.date), s]));
@@ -287,11 +288,11 @@ function queueStat(ages) {
  */
 async function getRePerformance() {
   const [disputes, claims, allPtps, allTasks, escalations, users] = await Promise.all([
-    disputeRepository.findAll(),
-    paymentClaimRepository.findAll(),
-    ptpRepository.findAll(),
-    taskRepository.findAll(),
-    escalationRepository.findAll(),
+    disputeRepository.findAll().then(withoutRemoved),
+    paymentClaimRepository.findAll().then(withoutRemoved),
+    ptpRepository.findAll().then(withoutRemoved),
+    taskRepository.findAll().then(withoutRemoved),
+    escalationRepository.findAll().then(withoutRemoved),
     userRepository.findAll(),
   ]);
 

@@ -1,5 +1,6 @@
 const { withTransaction } = require('../config/db');
 const taskRepository = require('../repositories/taskRepository');
+const { withoutRemoved } = require('./activeCustomers');
 const customerRepository = require('../repositories/customerRepository');
 const ptpRepository = require('../repositories/ptpRepository');
 const auditRepository = require('../repositories/auditRepository');
@@ -9,7 +10,7 @@ const { NotFoundError, ForbiddenError, ValidationError } = require('../errors/Ap
 
 async function listForUser(user) {
   if (user.role === 'SALESPERSON') {
-    return taskRepository.findByOwner(user.id);
+    return withoutRemoved(await taskRepository.findByOwner(user.id));
   }
   // RE/Manager/Admin Tasks screens — excludes tasks whose customer has
   // gone inactive since (paid off / closed, dropped out of BUSY's feed).

@@ -1,5 +1,6 @@
 const { withTransaction } = require('../config/db');
 const disputeRepository = require('../repositories/disputeRepository');
+const { withoutRemoved } = require('./activeCustomers');
 const taskRepository = require('../repositories/taskRepository');
 const auditRepository = require('../repositories/auditRepository');
 const customerRepository = require('../repositories/customerRepository');
@@ -33,7 +34,7 @@ async function withMessages(disputes) {
 }
 
 async function listForUser(user) {
-  const all = await disputeRepository.findAll();
+  const all = await withoutRemoved(await disputeRepository.findAll());
   if (user.role === 'SALESPERSON') {
     // Visible to a salesperson: disputes on their own portfolio, plus any
     // dispute they were assigned as resolution owner (the RE can assign

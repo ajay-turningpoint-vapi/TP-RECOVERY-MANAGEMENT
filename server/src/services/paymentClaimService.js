@@ -1,4 +1,5 @@
 const paymentClaimRepository = require('../repositories/paymentClaimRepository');
+const { withoutRemoved } = require('./activeCustomers');
 const customerRepository = require('../repositories/customerRepository');
 const auditRepository = require('../repositories/auditRepository');
 const { notifyDecision, salesmanForCustomer } = require('./decisionNotify');
@@ -13,7 +14,7 @@ async function listForUser(user) {
     const all = await paymentClaimRepository.findAll();
     return all.filter((c) => ids.has(c.customerId));
   }
-  return paymentClaimRepository.findAll();
+  return withoutRemoved(await paymentClaimRepository.findAll());
 }
 
 /**

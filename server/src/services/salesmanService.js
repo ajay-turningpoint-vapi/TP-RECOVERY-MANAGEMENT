@@ -5,6 +5,7 @@ const taskRepository = require('../repositories/taskRepository');
 const auditRepository = require('../repositories/auditRepository');
 const underperformanceDismissalRepository = require('../repositories/underperformanceDismissalRepository');
 const scoringService = require('./scoringService');
+const { withoutRemoved } = require('./activeCustomers');
 
 const MATURED_STATUSES = ['kept', 'partiallyKept', 'broken'];
 
@@ -32,12 +33,12 @@ async function listRoster() {
   const [salespersons, allCustomers, allPtps, allTasks, allAudit, dismissedThisMonthIds, allClaims, allDisputes] = await Promise.all([
     salesmanRepository.findAllSalespersons(),
     customerRepository.findAll(),
-    ptpRepository.findAll(),
-    taskRepository.findAll(),
-    auditRepository.listAll(),
+    ptpRepository.findAll().then(withoutRemoved),
+    taskRepository.findAll().then(withoutRemoved),
+    auditRepository.listAll().then(withoutRemoved),
     underperformanceDismissalRepository.dismissedThisMonthIds(),
-    require('../repositories/paymentClaimRepository').findAll(),
-    require('../repositories/disputeRepository').findAll(),
+    require('../repositories/paymentClaimRepository').findAll().then(withoutRemoved),
+    require('../repositories/disputeRepository').findAll().then(withoutRemoved),
   ]);
   const { openClaimIds, openDisputeIds } = scoringService.openClaimAndDisputeIds(allClaims, allDisputes);
   const dismissedSet = new Set(dismissedThisMonthIds);

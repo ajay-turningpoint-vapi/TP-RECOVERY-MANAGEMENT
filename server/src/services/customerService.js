@@ -28,7 +28,8 @@ const NO_ANSWER_THRESHOLD = 3;
 const NON_CONTACT_VISIT_REASON = 'Non-response threshold reached';
 
 async function assertVisible(customer, user) {
-  if (!customer) throw new NotFoundError('Customer');
+  // Removed from BUSY = removed from RMS: no detail, history or actions.
+  if (!customer || customer.busyStillActive === false) throw new NotFoundError('Customer');
   if (user.role === 'SALESPERSON' && customer.assignedSalesmanId !== user.id) {
     // Not their own portfolio customer — but they may still be a dispute
     // resolution owner for this customer (the RE can assign that to any

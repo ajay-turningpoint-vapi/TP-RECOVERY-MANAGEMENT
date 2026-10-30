@@ -348,6 +348,40 @@ async function closeOutRemovedCustomers(customerIds, connection) {
       connection
     );
   }
+
+  // Open escalations too — an L2/L3/L4 case on an account nobody can act on
+  // would sit in the RE's Escalations page forever (2 such cases, 30 Oct).
+  const escRes = await run(
+    'SELECT id, customer_id, level FROM escalation_cases WHERE customer_id IN (:customerIds) AND is_open = 1',
+    { customerIds }
+  );
+  const openEscalations = connection ? escRes[0] : escRes;
+  for (const esc of openEscalations) {
+    await run('UPDATE escalation_cases SET is_open = 0 WHERE id = :id', { id: esc.id });
+    await run("UPDATE customers SET escalation_level = 'none' WHERE id = :id", { id: esc.customer_id });
+    await auditRepository.record(
+      esc.customer_id,
+      {
+        type: 'ESCALATION_AUTO_CLOSED',
+        description: `${esc.level} escalation auto-closed — customer no longer appears in BUSY.`,
+        actor: 'System',
+        previousState: esc.level,
+        newState: 'Closed',
+        source: 'BUSY Sync',
+      },
+      connection
+    );
+  }
 }
 
-module.exports = { closeOutRemovedCustomers, mapCustomer, mapInvoice, findAll, findBySalesman, findById, findByIds, findInvoices, update, upsertFromBusy };
+/**
+ * Ids of customers BUSY no longer has (busy_still_active = 0). Nothing
+ * attached to them may reach the RE / salesman any more — see the PTP,
+ * escalation and notification listings and ptpVerificationService.
+ */
+async function findRemovedIds() {
+  const rows = await query('SELECT id FROM customers WHERE busy_still_active = 0');
+  return new Set(rows.map((r) => r.id));
+}
+
+module.exports = { closeOutRemovedCustomers, findRemovedIds, mapCustomer, mapInvoice, findAll, findBySalesman, findById, findByIds, findInvoices, update, upsertFromBusy };
