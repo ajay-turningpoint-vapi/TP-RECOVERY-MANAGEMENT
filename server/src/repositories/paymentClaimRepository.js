@@ -11,6 +11,7 @@ function mapClaim(row) {
     reference: row.reference,
     status: row.status,
     attachmentPath: row.attachment_path,
+    createdAt: row.created_at,
   };
 }
 
@@ -48,6 +49,21 @@ async function updateStatus(id, status, connection) {
   await run('UPDATE payment_claims SET status = :status WHERE id = :id', { id, status });
 }
 
+/**
+ * Sets the RE's decision only while the claim is still waiting for one.
+ * Returns false when it was already decided, so a second tap (or two REs at
+ * once) can't verify the same claim twice.
+ */
+async function decideIfOpen(id, status, connection) {
+  const run = connection ? (sql, params) => connection.query(sql, params) : query;
+  const result = await run(
+    "UPDATE payment_claims SET status = :status WHERE id = :id AND status IN ('Awaiting Verification', 'Sync Pending')",
+    { id, status }
+  );
+  const info = Array.isArray(result) ? result[0] : result;
+  return (info?.affectedRows ?? 0) > 0;
+}
+
 const COLUMN_MAP = {
   amount: 'amount',
   claimDate: 'claim_date',
@@ -72,4 +88,4 @@ async function findByCustomer(customerId, connection) {
   return rows.map(mapClaim);
 }
 
-module.exports = { mapClaim, findAll, findById, findByCustomer, insert, updateStatus, update };
+module.exports = { mapClaim, findAll, findById, findByCustomer, insert, updateStatus, decideIfOpen, update };

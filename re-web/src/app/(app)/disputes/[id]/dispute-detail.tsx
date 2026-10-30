@@ -11,7 +11,7 @@ export function DisputeDetail({ id }: { id: string }) {
   const rms = useRms();
   const d = rms.disputes.find((x) => x.id === id);
   return (
-    <div className="mx-auto max-w-4xl space-y-4">
+    <div className="mx-auto max-w-[1500px] space-y-4">
       <Button variant="ghost" size="sm" className="-ml-2 text-muted-foreground" render={<Link href="/disputes" />}>
         <ArrowLeft /> Disputes
       </Button>

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { ChartColumn as ChartColumnIcon } from "lucide-react";
 import { useMemo, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
@@ -85,7 +86,7 @@ export function ReportView({ slug }: { slug: ReportSlug }) {
       <Button variant="ghost" size="sm" className="-ml-2 text-muted-foreground" render={<Link href="/reports" />}>
         <ArrowLeft /> Reports
       </Button>
-      <PageHeader
+      <PageHeader icon={<ChartColumnIcon />} hue="indigo"
         title={meta.title}
         description={meta.description}
         actions={
@@ -104,7 +105,7 @@ export function ReportView({ slug }: { slug: ReportSlug }) {
           </div>
         }
       />
-      <Body slug={slug} ctx={ctx} filters={filters} toCustomer={toCustomer} toSalesman={toSalesman} loading={rms.isLoading} />
+      <Body slug={slug} ctx={ctx} filters={filters} toCustomer={toCustomer} toSalesman={toSalesman} loading={rms.isLoading || trends.isLoading} />
       <p className="text-xs text-muted-foreground">Figures use the same formulas and filters as the mobile report.</p>
     </div>
   );
@@ -556,13 +557,14 @@ function Tiles({ items }: { items: [string, ReactNode, ReactNode?][] }) {
 }
 
 function ChartCard({ title, children, className, note = "Daily snapshots recorded by the 5 PM job." }: { title: string; children: ReactNode; className?: string; note?: string }) {
+  const loading = useTrends().isLoading;
   return (
     <Card className={className}>
       <CardHeader>
         <CardTitle>{title}</CardTitle>
         <CardDescription>{note}</CardDescription>
       </CardHeader>
-      <CardContent>{children}</CardContent>
+      <CardContent>{loading ? <div className="h-64 animate-pulse rounded-lg bg-muted" aria-label="Loading" /> : children}</CardContent>
     </Card>
   );
 }

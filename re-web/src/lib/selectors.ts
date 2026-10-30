@@ -23,6 +23,7 @@ import {
   type Task,
   type TaskType,
 } from "./models";
+import { plainTask } from "./plain-task";
 
 export const ALL_BRANCHES = "All Branches";
 export const NO_FOLLOW_UP_THRESHOLD_DAYS = 4;
@@ -61,6 +62,8 @@ const sum = <T,>(list: T[], f: (x: T) => number) => list.reduce((s, x) => s + f(
 export const reviewDeadline = (raisedOn: Date) =>
   new Date(raisedOn.getFullYear(), raisedOn.getMonth(), raisedOn.getDate(), 21);
 
+export type NextStep = { task: Task | null; what: string; why: string; amount: string | null; note: string | null };
+
 const SYSTEM_CLOSED_PREFIXES = ["Auto-closed", "Closed —", "Paused —", "Superseded"];
 export const isSystemClosed = (outcome: string | null) =>
   SYSTEM_CLOSED_PREFIXES.some((p) => (outcome ?? "").trimStart().startsWith(p));
@@ -73,14 +76,14 @@ export type QueueRow = { customer: Customer; rank: number; reason: string; openT
 
 /** Same rank as CompanyRecoveryQueueScreen._priorityRank (lower = first). */
 export const QUEUE_REASON: Record<number, string> = {
-  0: "L4 escalation",
-  1: "Broken PTP",
-  2: "Owner mapping required",
-  3: "No valid next action",
-  4: "L2 / L3 escalation",
-  5: "PTP follow-up",
-  6: "Overdue 30+ days",
-  7: "Due",
+  0: "Most serious (L4)",
+  1: "Broke a promise",
+  2: "No salesman",
+  3: "No next step",
+  4: "Escalated (L2/L3)",
+  5: "Promise follow-up",
+  6: "Late 30+ days",
+  7: "Total Overdue",
 };
 
 // ── Unified RE task queue ─────────────────────────────────────────────
@@ -117,6 +120,14 @@ export type ReTaskItem = {
 };
 
 export type RmsView = ReturnType<typeof buildView>;
+
+/**
+ * Items that have their own page on the web (disputes → Disputes; promise
+ * changes and payment checks → Approvals). The mobile RE Tasks screen mixes
+ * these in; the web keeps them out of My Tasks so an item never shows up
+ * on two pages.
+ */
+export const APPROVAL_KINDS = new Set<TaskKind>(["dispute", "ptpCorrection", "paymentClaim"]);
 
 /** Same buckets as reportService.getDashboard (by oldest overdue days, summing totalDue). */
 export const AGEING_BUCKETS = ["Not Due", "0 - 30 Days", "31 - 60 Days", "61 - 90 Days", "90+ Days"] as const;
@@ -266,10 +277,10 @@ export function buildView(data: RmsData, branch: string, currentUserId: string, 
 
   // Same definition as AppStore.pendingApprovalsCount (mobile badge)…
   const pendingApprovalsCount = disputesNeedingAction.length + ptpCorrectionRequests.length + pendingPaymentClaims.length;
-  // What the Approvals screen actually lists (ReApprovalsTab): its Payments
-  // tab reads the unfiltered claim list, unlike the count above.
-  const approvalInboxCount =
-    disputesNeedingAction.length + ptpCorrectionRequests.length + data.paymentClaims.filter(isClaimPending).length;
+  // What the web Approvals page lists: promise changes + payment checks.
+  // Disputes live only on the Disputes page. Payments read the unfiltered
+  // claim list, as the mobile Approvals tab does.
+  const approvalInboxCount = ptpCorrectionRequests.length + data.paymentClaims.filter(isClaimPending).length;
 
   const recoveryTarget = d.recoveryTarget ?? 0;
   const todaysCollectedAmount = d.todaysCollectedAmount ?? 0;
@@ -320,7 +331,7 @@ export function buildView(data: RmsData, branch: string, currentUserId: string, 
         refId: t.id,
         taskType: t.type,
         priority: "MEDIUM",
-        title: "Physical Visit — No Outcome Recorded",
+        title: "Visit done, but no result written",
         customerId: t.customerId,
         customerName: c?.name ?? t.customerName,
         salesmanId: c?.assignedSalesmanId || t.ownerId,
@@ -347,7 +358,7 @@ export function buildView(data: RmsData, branch: string, currentUserId: string, 
           kind: "overdueTarget",
           refId: worst.id,
           priority: "MEDIUM",
-          title: "Underperforming Salesman — Top Account",
+          title: "Salesman is behind target",
           customerId: worst.id,
           customerName: worst.name,
           salesmanId: s.id,
@@ -372,7 +383,7 @@ export function buildView(data: RmsData, branch: string, currentUserId: string, 
         kind: "dispute",
         refId: x.id,
         priority: x.priority === "High" ? "HIGH" : "MEDIUM",
-        title: awaitingVerification ? "Dispute Awaiting Verification" : "Dispute Awaiting Review",
+        title: awaitingVerification ? "Dispute fixed — please check" : "Bill dispute — please decide",
         customerId: x.customerId,
         customerName: customerName(x.customerId),
         salesmanId: customerById.get(x.customerId)?.assignedSalesmanId ?? "",
@@ -395,7 +406,7 @@ export function buildView(data: RmsData, branch: string, currentUserId: string, 
         kind: "ptpCorrection",
         refId: p.id,
         priority: "MEDIUM",
-        title: "PTP Correction Request",
+        title: "Change to a payment promise",
         customerId: p.customerId,
         customerName: c?.name ?? p.customerId,
         salesmanId: c?.assignedSalesmanId ?? "",
@@ -417,7 +428,7 @@ export function buildView(data: RmsData, branch: string, currentUserId: string, 
         kind: "paymentClaim",
         refId: p.id,
         priority: "HIGH",
-        title: "Payment Already Made — Verify",
+        title: "Customer says they already paid",
         customerId: p.customerId,
         customerName: c?.name ?? p.customerId,
         salesmanId: c?.assignedSalesmanId ?? "",
@@ -441,7 +452,7 @@ export function buildView(data: RmsData, branch: string, currentUserId: string, 
         kind: "ptpMissed",
         refId: p.id,
         priority: "HIGH",
-        title: "PTP Missed",
+        title: "Payment promise broken",
         customerId: p.customerId,
         customerName: c?.name ?? p.customerId,
         salesmanId: c?.assignedSalesmanId ?? "",
@@ -458,6 +469,10 @@ export function buildView(data: RmsData, branch: string, currentUserId: string, 
 
     return items;
   };
+
+  /** My Tasks on the web: the RE task list without the yes/no approval items. */
+  const buildWorkItems = () => buildReTaskItems().filter((i) => !APPROVAL_KINDS.has(i.kind));
+  const workOpenCount = buildWorkItems().filter((i) => !i.isDone).length;
 
   /**
    * Company Recovery Queue — CompanyRecoveryQueueScreen: customers with
@@ -518,6 +533,26 @@ export function buildView(data: RmsData, branch: string, currentUserId: string, 
     };
   };
 
+  // ── Next step (one rule for every page) ─────────────────────────
+  // The customer's own open task is the source of truth. The stored
+  // primaryNextAction / reasonForAction can be left over from an older
+  // step (the server sets "CALL CUSTOMER" on a new recovery task without
+  // rewriting reasonForAction), so it is only a fallback when no task is open.
+  const openTasksByCustomer = new Map<string, Task>();
+  for (const t of data.tasks) {
+    if (!isTaskOpen(t)) continue;
+    const cur = openTasksByCustomer.get(t.customerId);
+    if (!cur || t.deadline < cur.deadline) openTasksByCustomer.set(t.customerId, t);
+  }
+  const nextStepFor = (c: Customer): NextStep => {
+    const task = openTasksByCustomer.get(c.id) ?? null;
+    if (task) {
+      const p = plainTask(task.reason, c.name);
+      return { task, what: p.what, why: p.why, amount: p.amount, note: p.note };
+    }
+    return { task: null, what: c.primaryNextAction, why: c.reasonForAction, amount: null, note: null };
+  };
+
   return {
     branch,
     branchActive,
@@ -533,6 +568,7 @@ export function buildView(data: RmsData, branch: string, currentUserId: string, 
     allCustomers: data.customers,
     allPtps: data.ptps,
     allTasks: data.tasks,
+    nextStepFor,
     allPaymentClaims: data.paymentClaims,
     allSalesmen: data.salesmen,
     allDisputes: data.disputes,
@@ -580,6 +616,8 @@ export function buildView(data: RmsData, branch: string, currentUserId: string, 
     totalOpenTaskItemsCount,
     unreadNotificationCount: data.notifications.filter((n) => !n.read).length,
     buildReTaskItems,
+    buildWorkItems,
+    workOpenCount,
     recoveryQueue,
     scheduledPtps,
     scheduledPtpAmount: sum(scheduledPtps, (p) => p.amountPromised),

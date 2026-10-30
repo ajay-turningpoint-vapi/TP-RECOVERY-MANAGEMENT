@@ -541,6 +541,8 @@ async function driveRecoveryTask(customerId, opts = {}, conn) {
         ? openRecovery.reason.replace(/Collect ₹[\d,]+/, `Collect ${rupees(due)}`)
         : `${openRecovery.reason} Collect ${rupees(due)}, record a new outcome.`;
       await taskRepository.update(openRecovery.id, { reason: bumped, deadline }, c);
+      // Keep the customer's stored reason in step with the task (amount moved).
+      await customerRepository.update(customerId, { reasonForAction: bumped }, c);
       return;
     }
 
@@ -594,9 +596,12 @@ async function driveRecoveryTask(customerId, opts = {}, conn) {
       return;
     }
 
+    // reasonForAction mirrors the task the salesperson now holds — left
+    // alone it kept the previous step's text (SURESH SUTHAR.(R), 30 Oct:
+    // "PTP of ₹50,000 …" after that PTP had already broken).
     await customerRepository.update(
       customerId,
-      { currentRecoveryState: 'Action Required', primaryNextAction: 'CALL CUSTOMER', hasValidNextAction: true },
+      { currentRecoveryState: 'Action Required', primaryNextAction: 'CALL CUSTOMER', hasValidNextAction: true, reasonForAction: reason },
       c
     );
     await auditRepository.record(

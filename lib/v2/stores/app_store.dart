@@ -888,6 +888,7 @@ class AppStore extends ChangeNotifier {
   List<Map<String, dynamic>> disputes = [];
 
   List<Map<String, dynamic>> paymentClaims = [];
+  final Set<String> _verifyingClaimIds = {};
 
   List<EscalationCase> escalationCases = [];
 
@@ -2072,6 +2073,19 @@ class AppStore extends ChangeNotifier {
   /// or Failed, never Sync Pending.
   Future<void> verifyPaymentClaim(String id, bool success) async {
     final claim = paymentClaims.firstWhere((p) => p['id'] == id);
+    // A claim is decided once (ZAKARIA KHAN, 29 Oct: verified twice). A
+    // second tap while the first is still in flight, or a tap on a claim
+    // that's already decided, just refreshes the list. The server refuses
+    // a second decision too (409).
+    final open = claim['status'] == 'Awaiting Verification' || claim['status'] == 'Sync Pending';
+    if (!open || _verifyingClaimIds.contains(id)) {
+      if (!open) {
+        await _refreshPaymentClaimsFromApi();
+        notifyListeners();
+      }
+      return;
+    }
+    _verifyingClaimIds.add(id);
     try {
       await apiClient.verifyPaymentClaim(id, success);
     } on ApiException catch (e) {
@@ -2080,7 +2094,12 @@ class AppStore extends ChangeNotifier {
           targetEndpoint: '/api/payment-claims/$id/verify',
           payload: {'success': success},
           relatedCustomerId: claim['customerCode'] as String?);
+    } finally {
+      _verifyingClaimIds.remove(id);
     }
+    // Mark it decided locally right away, so no screen offers Verify again
+    // before the refresh lands (or while it waits offline in the queue).
+    claim['status'] = success ? 'Verified' : 'Failed';
     await _refreshPaymentClaimsFromApi();
     // Verifying (either way) now also auto-creates a call-customer
     // follow-up task for the salesperson (server-side) — refresh tasks

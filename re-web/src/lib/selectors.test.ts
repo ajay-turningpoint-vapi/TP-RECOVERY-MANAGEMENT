@@ -151,3 +151,51 @@ describe("5 PM control", () => {
     expect(s.l3NoPlan).toHaveLength(1);
   });
 });
+
+describe("My Tasks vs Approvals (no item on two pages)", () => {
+  it("keeps disputes, promise changes and payment claims out of My Tasks", () => {
+    const d = data({
+      customers: [cust("c1")],
+      tasks: [task("t1", { type: "managementInstruction" })],
+      ptps: [ptp("p1", { correctionStatus: "Pending" })],
+      disputes: [parseDispute({ id: "d1", customerId: "c1", amount: 10, totalDueAtRaise: 20, reason: "x", status: "Pending Approval", raisedDate: NOW.toISOString(), lastUpdated: NOW.toISOString() })],
+      paymentClaims: [parsePaymentClaim({ id: "pc1", customerId: "c1", amount: 5, claimDate: NOW.toISOString(), status: "Awaiting Verification" })],
+    });
+    const v = buildView(d, ALL_BRANCHES, RE, NOW);
+    expect(v.buildReTaskItems().map((i) => i.kind).sort()).toEqual(["dispute", "paymentClaim", "ptpCorrection", "realTask"]);
+    expect(v.buildWorkItems().map((i) => i.kind)).toEqual(["realTask"]);
+    expect(v.workOpenCount).toBe(1);
+    expect(v.approvalInboxCount).toBe(2); // disputes are on the Disputes page only
+    expect(v.disputesNeedingAction).toHaveLength(1);
+  });
+});
+
+describe("next step (same as the app's task screen)", () => {
+  // SURESH SUTHAR.(R), 30 Oct: the PTP broke, the server opened a new call
+  // task but left reasonForAction at the old "PTP of ₹50,000 …" text.
+  const stale = cust("c1", { name: "SURESH SUTHAR.(R)", primaryNextAction: "CALL CUSTOMER", reasonForAction: "PTP of ₹50000.0 via Phone Call. Contact: SURESH SUTHAR.(R)" });
+
+  it("uses the open task, never the stale stored reason", () => {
+    const t = task("t1", { reason: "Call SURESH SUTHAR.(R) — promise broken, nothing received. Collect ₹1,36,832, record a new outcome.", priority: "High" });
+    const step = buildView(data({ customers: [stale], tasks: [t] }), ALL_BRANCHES, RE, NOW).nextStepFor(stale);
+    expect(step.task?.id).toBe("t1");
+    expect(step.what).toBe("Call SURESH SUTHAR.(R)");
+    expect(step.why).toBe("Customer promised to pay, but the payment did not come.");
+    expect(step.amount).toBe("₹1,36,832");
+    expect(step.why).not.toContain("50000");
+  });
+
+  it("picks the earliest-due open task and ignores finished ones", () => {
+    const done = task("old", { reason: "Overdue still open.", status: "completed", deadline: "2026-10-19T18:00:00+05:30" });
+    const later = task("later", { reason: "Keep calling.", deadline: "2026-10-25T18:00:00+05:30" });
+    const sooner = task("sooner", { reason: "Call X — promise broken, nothing received. Collect ₹10, record a new outcome.", deadline: "2026-10-21T18:00:00+05:30" });
+    const step = buildView(data({ customers: [stale], tasks: [done, later, sooner] }), ALL_BRANCHES, RE, NOW).nextStepFor(stale);
+    expect(step.task?.id).toBe("sooner");
+  });
+
+  it("falls back to the stored next action only when no task is open", () => {
+    const step = buildView(data({ customers: [stale] }), ALL_BRANCHES, RE, NOW).nextStepFor(stale);
+    expect(step.task).toBeNull();
+    expect(step.what).toBe("CALL CUSTOMER");
+  });
+});

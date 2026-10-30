@@ -1,6 +1,8 @@
 "use client";
 
 import { useMemo } from "react";
+import { ColorAvatar } from "@/components/app/visual";
+import { Handshake as HandshakeIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
 import { DataTable } from "@/components/app/data-table";
@@ -17,10 +19,10 @@ type Rms = ReturnType<typeof useRms>;
 
 // The PTP lists the mobile dashboard cards open (PtpListScreen), same populations.
 const FILTERS: { value: string; label: string; list: (r: Rms) => Ptp[] }[] = [
-  { value: "today", label: "Expected Collection Today", list: (r) => r.dueTodayPtps },
-  { value: "scheduled", label: "Total PTPs", list: (r) => r.scheduledPtps },
-  { value: "broken", label: "Broken", list: (r) => r.brokenPtps },
-  { value: "overdue", label: "Today's Overdue", list: (r) => r.overduePtps },
+  { value: "today", label: "Promised for today", list: (r) => r.dueTodayPtps },
+  { value: "scheduled", label: "All open promises", list: (r) => r.scheduledPtps },
+  { value: "broken", label: "Broken promises", list: (r) => r.brokenPtps },
+  { value: "overdue", label: "Late promises", list: (r) => r.overduePtps },
   { value: "all", label: "All", list: (r) => r.ptps },
 ];
 
@@ -37,10 +39,15 @@ export function PtpsView() {
         id: "customer",
         header: "Customer",
         accessorFn: (p) => rms.customerName(p.customerId),
-        cell: ({ row }) => <span className="font-medium">{rms.customerName(row.original.customerId)}</span>,
+        cell: ({ row }) => (
+          <span className="flex items-center gap-3 font-semibold">
+            <ColorAvatar name={rms.customerName(row.original.customerId)} />
+            {rms.customerName(row.original.customerId)}
+          </span>
+        ),
       },
       { id: "salesman", header: "Salesman", accessorFn: (p) => rms.salesmanName(rms.customerById.get(p.customerId)?.assignedSalesmanId ?? "") },
-      { id: "amount", header: "Promised", accessorFn: (p) => p.amountPromised, cell: ({ getValue }) => <span className="font-semibold">{formatINR(getValue() as number)}</span>, meta: { align: "right" } },
+      { id: "amount", header: "Promised", accessorFn: (p) => p.amountPromised, cell: ({ getValue }) => <span className="font-bold">{formatINR(getValue() as number)}</span>, meta: { align: "right" } },
       { id: "advance", header: "Advance", accessorFn: (p) => p.advanceAmount ?? 0, cell: ({ getValue }) => ((getValue() as number) ? formatINR(getValue() as number) : "—"), meta: { align: "right" } },
       { id: "date", header: "Promise date", accessorFn: (p) => +p.promiseDate, cell: ({ row }) => formatDate(row.original.promiseDate), meta: { csv: (p) => p.promiseDate.toISOString().slice(0, 10) } },
       { id: "mode", header: "Mode", accessorFn: (p) => p.paymentMode },
@@ -58,15 +65,15 @@ export function PtpsView() {
 
   return (
     <div className="mx-auto max-w-[1600px]">
-      <PageHeader
-        title="Promises to Pay"
-        description="Scheduled → Due → Awaiting reconciliation → Kept / Partially kept / Broken. Only BUSY reconciliation decides Broken."
+      <PageHeader icon={<HandshakeIcon />} hue="violet"
+        title="Payment Promises"
+        description="Dates when customers promised to pay. The system marks a promise kept or broken by itself."
       />
       <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
-        <KpiCard label="Expected Collection Today" value={formatINR(rms.dueTodayPtpAmount)} hint={`${rms.dueTodayPtpCount} PTPs Active Today`} tone="info" />
-        <KpiCard label="Total PTPs" value={formatINR(rms.scheduledPtpAmount)} hint={`${rms.scheduledPtps.length} PTPs`} />
-        <KpiCard label="Total Broken PTPs" value={formatINR(rms.brokenPtpAmount)} hint={`${rms.brokenPtps.length} Broken`} tone="danger" />
-        <KpiCard label="Today's Overdue" value={formatINR(rms.overduePtpAmount)} hint={`${rms.overduePtps.length} Overdue`} tone="warning" />
+        <KpiCard label="Promised for today" value={formatINR(rms.dueTodayPtpAmount)} hint={`${rms.dueTodayPtpCount} PTPs Active Today`} tone="info" />
+        <KpiCard label="All open promises" value={formatINR(rms.scheduledPtpAmount)} hint={`${rms.scheduledPtps.length} PTPs`} />
+        <KpiCard label="Broken promises" value={formatINR(rms.brokenPtpAmount)} hint={`${rms.brokenPtps.length} Broken`} tone="danger" />
+        <KpiCard label="Late promises" value={formatINR(rms.overduePtpAmount)} hint={`${rms.overduePtps.length} Overdue`} tone="warning" />
       </div>
       <Tabs value={status} onValueChange={(v) => setStatus(String(v))} className="mb-4">
         <TabsList className="h-auto flex-wrap">

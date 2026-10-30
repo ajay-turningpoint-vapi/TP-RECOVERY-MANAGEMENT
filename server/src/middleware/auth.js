@@ -31,9 +31,7 @@ const authenticate = asyncHandler(async (req, res, next) => {
     throw new UnauthorizedError('Invalid or expired token');
   }
 
-  // Web-dashboard tokens carry `channel: 'web'` (migration 040); mobile tokens carry none.
-  const channel = payload.channel === 'web' ? 'web' : 'mobile';
-  const currentVersion = await userRepository.getSessionVersion(payload.id, channel);
+  const currentVersion = await userRepository.getSessionVersion(payload.id);
   if (currentVersion == null || payload.sessionVersion !== currentVersion) {
     throw new UnauthorizedError('Signed in on another device — please log in again');
   }

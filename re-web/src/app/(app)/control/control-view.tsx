@@ -3,45 +3,101 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { format } from "date-fns";
-import { CalendarX2, ClipboardX, Printer, RefreshCw, Siren, TriangleAlert, UserX } from "lucide-react";
+import { AlarmClock, Check, ChevronRight, Printer, RefreshCw, X } from "lucide-react";
 import { PageHeader } from "@/components/app/page-header";
-import { Pill, PriorityBadge } from "@/components/app/status";
+import { GradientBar } from "@/components/app/visual";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { formatDateTime, formatINR } from "@/lib/format";
-import { TASK_TYPE_LABEL } from "@/lib/models";
+import { formatINR } from "@/lib/format";
 import { useRms } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 
 /**
- * 5 PM Control (spec §51) — what is still unresolved at the end of the
- * working day. Same rules as AppStore.runFivePmControl; the server's
- * missed-deadline job records the permanent history events.
+ * End-of-Day Check (5 PM Control, spec §51) — a short checklist, not a
+ * second copy of My Tasks or Approvals. Each line answers one question
+ * with a count (same rules as AppStore.runFivePmControl) and sends the
+ * RE to the one page where it is fixed.
  */
 export function ControlView() {
   const rms = useRms();
   const [stamp, setStamp] = useState(() => Date.now());
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const snap = useMemo(() => rms.fivePmControl(), [rms, stamp]);
+  // Each check counts exactly what its "Go fix it" page shows, so the
+  // number here always matches the number she sees after clicking.
+  const work = useMemo(() => {
+    const now = new Date();
+    const open = rms.buildWorkItems().filter((i) => !i.isDone);
+    return { late: open.filter((i) => i.date < now).length, urgent: open.filter((i) => i.priority === "HIGH").length };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rms, stamp]);
 
-  const tiles = [
-    { label: "Overdue tasks", value: snap.overdueTasks.length, icon: ClipboardX },
-    { label: "Critical tasks not completed", value: snap.mandatoryNotDone.length, icon: TriangleAlert },
-    { label: "Broken PTP without next action", value: snap.brokenNoNext.length, icon: CalendarX2 },
-    { label: "Ownerless exposure", value: formatINR(snap.ownerlessExposure), icon: UserX, bad: snap.ownerlessExposure > 0 },
-    { label: "L3 cases without plan", value: snap.l3NoPlan.length, icon: Siren },
+  const checks: { question: string; problem: (n: number) => string; count: number; extra?: string; href: string; where: string }[] = [
+    {
+      question: "Have you answered every request from salesmen?",
+      problem: (n) => `${n} request${n === 1 ? " is" : "s are"} still waiting for your yes or no.`,
+      count: rms.approvalInboxCount,
+      href: "/approvals",
+      where: "Approvals",
+    },
+    {
+      question: "Have you decided every bill dispute?",
+      problem: (n) => `${n} dispute${n === 1 ? " is" : "s are"} waiting for your decision.`,
+      count: rms.disputesNeedingAction.length,
+      href: "/disputes?stage=decide",
+      where: "Disputes — Needs your decision",
+    },
+    {
+      question: "Were all tasks done on time?",
+      problem: (n) => `${n} task${n === 1 ? " is" : "s are"} late.`,
+      count: work.late,
+      href: "/tasks?filter=overdue",
+      where: "My Tasks — Late",
+    },
+    {
+      question: "Are all urgent tasks finished?",
+      problem: (n) => `${n} urgent task${n === 1 ? " is" : "s are"} not finished.`,
+      count: work.urgent,
+      href: "/tasks?priority=HIGH",
+      where: "My Tasks — Urgent",
+    },
+    {
+      question: "Does every customer with overdue money have a next step planned?",
+      problem: (n) => `${n} customer${n === 1 ? " has" : "s have"} no next step planned.`,
+      count: rms.noValidNextAction.length,
+      href: "/queue?view=no-next-action",
+      where: "Follow-up List — No next step",
+    },
+    {
+      question: "Does every customer with overdue money have a salesman?",
+      problem: (n) => `${n} customer${n === 1 ? " has" : "s have"} no salesman.`,
+      count: rms.ownerMappingRequired.filter((c) => c.totalDue > 0).length,
+      extra: snap.ownerlessExposure > 0 ? `${formatINR(snap.ownerlessExposure)} overdue with nobody chasing it.` : undefined,
+      href: "/queue?view=ownerless",
+      where: "Follow-up List — No salesman",
+    },
+    {
+      question: "Does every serious (L3) case have a written plan?",
+      problem: (n) => `${n} serious case${n === 1 ? " has" : "s have"} no plan.`,
+      count: snap.l3NoPlan.length,
+      href: "/escalations",
+      where: "Escalations",
+    },
   ];
 
+  const done = checks.filter((c) => c.count === 0).length;
+
   return (
-    <div className="mx-auto max-w-[1400px] space-y-6 print:max-w-none">
+    <div className="mx-auto max-w-[1000px] space-y-6 print:max-w-none">
       <PageHeader
-        eyebrow={`Snapshot · ${format(snap.timestamp, "dd MMM yyyy, h:mm a")}`}
-        title="5 PM Control"
-        description="End-of-day check of unresolved mandatory work. Resolve or re-plan each item before you sign off."
+        icon={<AlarmClock />}
+        hue="amber"
+        eyebrow={`Checked at ${format(snap.timestamp, "h:mm a, d MMM yyyy")}`}
+        title="End-of-Day Check"
+        description="Before you finish for the day, go through these questions. Fix anything marked in red."
         actions={
           <>
             <Button variant="outline" onClick={() => setStamp(Date.now())}>
-              <RefreshCw /> Re-run
+              <RefreshCw /> Check again
             </Button>
             <Button variant="outline" onClick={() => window.print()}>
               <Printer /> Print
@@ -49,72 +105,75 @@ export function ControlView() {
           </>
         }
       />
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-        {tiles.map((t) => {
-          const bad = "bad" in t ? t.bad : (t.value as number) > 0;
+
+      {rms.loadFailed ? (
+        <div role="alert" className="rounded-xl border-2 border-red-200 bg-red-50 p-6 text-[15px] dark:bg-red-500/10">
+          The check could not run because the data did not load. Press <span className="font-semibold">Try again</span> at the top of the page.
+        </div>
+      ) : rms.isLoading ? (
+        <div className="space-y-3" aria-label="Loading">
+          {[0, 1, 2, 3].map((k) => (
+            <div key={k} className="h-24 animate-pulse rounded-xl border-2 bg-muted/60" />
+          ))}
+        </div>
+      ) : (
+      <>
+      {/* Score */}
+      <div className={cn("rounded-xl border-2 p-5", done === checks.length ? "border-green-300 bg-green-50 dark:bg-green-500/10" : "bg-card")}>
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <p className="text-xl font-bold">
+            {done === checks.length ? "All done for today. Well done!" : `${done} of ${checks.length} checks are done`}
+          </p>
+          {done < checks.length && <p className="text-[15px] text-muted-foreground">{checks.length - done} still need you</p>}
+        </div>
+        <GradientBar value={(done / checks.length) * 100} hue="emerald" className="mt-3 h-3" />
+      </div>
+
+      {/* Checklist */}
+      <ol className="space-y-3">
+        {checks.map((c, i) => {
+          const ok = c.count === 0;
           return (
-            <div key={t.label} className={cn("rounded-xl border bg-card p-4 shadow-xs", bad && "border-destructive/30 bg-destructive/5")}>
-              <t.icon className={cn("size-4", bad ? "text-destructive" : "text-success")} />
-              <div className={cn("mt-2 text-2xl font-semibold tabular", bad && "text-destructive")}>{t.value}</div>
-              <div className="text-xs text-muted-foreground">{t.label}</div>
-            </div>
+            <li
+              key={c.question}
+              className={cn(
+                "flex flex-col gap-4 rounded-xl border-2 bg-card p-5 sm:flex-row sm:items-center",
+                ok ? "border-green-200 dark:border-green-500/30" : "border-red-200 dark:border-red-500/30",
+              )}
+            >
+              <span
+                className={cn(
+                  "flex size-11 shrink-0 items-center justify-center rounded-full text-white",
+                  ok ? "bg-green-600" : "bg-red-600",
+                )}
+                aria-label={ok ? "Done" : "Needs action"}
+              >
+                {ok ? <Check className="size-6" /> : <X className="size-6" />}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-[15px] text-muted-foreground">Check {i + 1}</p>
+                <p className="text-lg font-semibold">{c.question}</p>
+                {ok ? (
+                  <p className="text-[15px] font-medium text-green-700 dark:text-green-300">Yes — nothing to do here.</p>
+                ) : (
+                  <>
+                    <p className="text-[15px] font-medium text-red-700 dark:text-red-300">{c.problem(c.count)}</p>
+                    {c.extra && <p className="text-[15px] text-muted-foreground">{c.extra}</p>}
+                  </>
+                )}
+              </div>
+              {!ok && (
+                <Button size="lg" render={<Link href={c.href} />} className="shrink-0">
+                  Go fix it <ChevronRight />
+                </Button>
+              )}
+              {!ok && <span className="sr-only">Opens {c.where}</span>}
+            </li>
           );
         })}
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Section title="Overdue tasks" description="Open past their deadline." empty="No overdue tasks.">
-          {snap.overdueTasks
-            .sort((a, b) => +a.deadline - +b.deadline)
-            .slice(0, 50)
-            .map((t) => (
-              <Row key={t.id} href={`/customers/${encodeURIComponent(t.customerId)}`} title={`${TASK_TYPE_LABEL[t.type]} · ${t.customerName}`} sub={`${rms.salesmanName(t.ownerId)} · due ${formatDateTime(t.deadline)}`} right={<PriorityBadge priority={t.priority} />} />
-            ))}
-        </Section>
-        <Section title="Broken PTP without next action" description="Broken promise and nothing valid planned." empty="Every broken PTP has a next action.">
-          {snap.brokenNoNext.map((p) => (
-            <Row key={p.id} href={`/customers/${encodeURIComponent(p.customerId)}`} title={rms.customerName(p.customerId)} sub={`Promised ${formatINR(p.amountPromised)}`} right={<Pill tone="danger">Broken</Pill>} />
-          ))}
-        </Section>
-        <Section title="Ownerless exposure" description="Overdue with no mapped salesman — must stay visible until owned." empty="All exposure is owned.">
-          {snap.ownerlessCustomers.map((c) => (
-            <Row key={c.id} href={`/customers/${encodeURIComponent(c.id)}`} title={c.name} sub={c.branch} right={<span className="font-semibold tabular">{formatINR(c.totalDue)}</span>} />
-          ))}
-        </Section>
-        <Section title="L3 cases without a plan" description="RE control cases need a written plan and deadline." empty="Every L3 case has a plan.">
-          {snap.l3NoPlan.map((e) => (
-            <Row key={e.id} href={`/customers/${encodeURIComponent(e.customerId)}`} title={rms.customerName(e.customerId)} sub={e.reason} right={<span className="tabular">{formatINR(e.moneyAtRisk)}</span>} />
-          ))}
-        </Section>
-      </div>
+      </ol>
+      </>
+      )}
     </div>
-  );
-}
-
-function Section({ title, description, empty, children }: { title: string; description: string; empty: string; children: React.ReactNode[] }) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>
-          {title} <span className="ml-1 text-muted-foreground tabular">{children.length}</span>
-        </CardTitle>
-        <CardDescription>{description}</CardDescription>
-      </CardHeader>
-      <CardContent className="max-h-96 space-y-1 overflow-y-auto">
-        {children.length ? children : <p className="py-6 text-center text-sm text-success">{empty}</p>}
-      </CardContent>
-    </Card>
-  );
-}
-
-function Row({ href, title, sub, right }: { href: string; title: string; sub: string; right: React.ReactNode }) {
-  return (
-    <Link href={href} className="flex items-center justify-between gap-3 rounded-lg px-2 py-2 hover:bg-muted">
-      <div className="min-w-0">
-        <div className="truncate text-sm font-medium">{title}</div>
-        <div className="truncate text-xs text-muted-foreground">{sub}</div>
-      </div>
-      <div className="shrink-0">{right}</div>
-    </Link>
   );
 }

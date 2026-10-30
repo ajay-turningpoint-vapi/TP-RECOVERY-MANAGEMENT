@@ -18,7 +18,13 @@ async function forward(request: NextRequest, ctx: RouteContext<"/api/rms/[...pat
   const joined = path.map(encodeURIComponent).join("/");
   if (BLOCKED.has(joined)) return Response.json({ message: "Not found" }, { status: 404 });
 
-  const url = rmsApiUrl(`/api/${joined}${request.nextUrl.search}`);
+  // ?inline=1 on an attachment = show it in the page (PDF viewer) instead
+  // of the server's default "download" for PDFs. Not forwarded upstream.
+  const params = new URLSearchParams(request.nextUrl.search);
+  const inline = path[0] === "attachments" && params.get("inline") === "1";
+  params.delete("inline");
+  const qs = params.toString();
+  const url = rmsApiUrl(`/api/${joined}${qs ? `?${qs}` : ""}`);
   const headers = new Headers();
   const token = request.cookies.get(ACCESS_COOKIE)?.value;
   if (token) headers.set("Authorization", `Bearer ${token}`);
@@ -47,6 +53,8 @@ async function forward(request: NextRequest, ctx: RouteContext<"/api/rms/[...pat
     const v = upstream.headers.get(h);
     if (v) out.set(h, v);
   }
+  if (inline && upstream.ok) out.set("content-disposition", "inline");
+  if (path[0] === "attachments" && upstream.ok) out.set("cache-control", "private, max-age=3600");
   if ((upstream.headers.get("content-type") ?? "").includes("text/event-stream")) {
     out.set("Cache-Control", "no-cache, no-transform");
     out.set("X-Accel-Buffering", "no");

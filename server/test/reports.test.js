@@ -75,16 +75,24 @@ test('a salesperson cannot see disputes/salesmen roster data folded into another
 
 test('the trends endpoint returns only real, genuinely-recorded snapshot rows — no fabricated history', async () => {
   const token = await login(app.baseUrl, 'amit.re');
-  const before1 = await fetch(`${app.baseUrl}/api/reports/trends`, { headers: authHeaders(token) }).then((r) => r.json());
-  assert.equal(before1.length, 0, 'no snapshot has run yet in a freshly-seeded test database');
+  const today = new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10); // IST date
+  const get = () => fetch(`${app.baseUrl}/api/reports/trends`, { headers: authHeaders(token) }).then((r) => r.json());
+
+  // A fixed 7-day window of real PTP figures; the daily score fields stay
+  // null until a snapshot has actually been recorded for that day.
+  const before1 = await get();
+  assert.equal(before1.length, 7);
+  assert.ok(before1[6].date.startsWith(today), 'the last row is today (IST)');
+  assert.ok(before1.every((d) => d.avgRecoveryScore === null && d.noFollowUpCount === null), 'no snapshot has run yet — nothing is made up');
 
   await runSnapshot();
-
-  const after1 = await fetch(`${app.baseUrl}/api/reports/trends`, { headers: authHeaders(token) }).then((r) => r.json());
-  assert.equal(after1.length, 1, 'exactly one real row for today after the snapshot runs once');
-  assert.ok(after1[0].avgRecoveryScore >= 0 && after1[0].avgRecoveryScore <= 100);
+  const after1 = await get();
+  assert.equal(after1.length, 7);
+  assert.ok(after1[6].avgRecoveryScore >= 0 && after1[6].avgRecoveryScore <= 100, "today's real snapshot is reported");
+  assert.ok(after1.slice(0, 6).every((d) => d.avgRecoveryScore === null), 'earlier days stay empty — no fabricated history');
 
   await runSnapshot();
-  const after2 = await fetch(`${app.baseUrl}/api/reports/trends`, { headers: authHeaders(token) }).then((r) => r.json());
-  assert.equal(after2.length, 1, 'running the snapshot again the same day updates today\'s row rather than duplicating it');
+  const after2 = await get();
+  assert.equal(after2.length, 7, "running the snapshot again the same day updates today's row rather than adding one");
+  assert.equal(after2.filter((d) => d.avgRecoveryScore !== null).length, 1);
 });

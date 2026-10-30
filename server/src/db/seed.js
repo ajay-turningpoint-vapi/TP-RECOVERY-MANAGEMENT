@@ -35,7 +35,7 @@ async function seed() {
 
   await withTransaction(async (conn) => {
     // Wipe in FK-safe order.
-    for (const table of ['notifications', 'audit_events', 'payment_claims', 'escalation_cases', 'outcome_correction_requests', 'disputes', 'ptps', 'tasks', 'invoices', 'customers', 'users', 'daily_metrics_snapshot']) {
+    for (const table of ['notifications', 'audit_events', 'payment_claims', 'escalation_cases', 'outcome_correction_requests', 'disputes', 'ptps', 'tasks', 'invoices', 'customer_invoice_snapshot', 'customers', 'users', 'daily_metrics_snapshot']) {
       await conn.query(`DELETE FROM \`${table}\``);
     }
 
@@ -80,6 +80,13 @@ async function seed() {
         ('INV-C2-1', 'C2', 'INV-2024-501', 200000, 'Overdue'),
         ('INV-C2-2', 'C2', 'INV-2024-502', 100000, 'Due Soon'),
         ('INV-C3-1', 'C3', 'INV-2024-601', 80000, 'Partially Paid')`
+    );
+    // Customer detail reads BUSY's invoice snapshot (customerRepository.findInvoices).
+    await conn.query(
+      `INSERT INTO customer_invoice_snapshot (ref_code, customer_id, invoice_no, invoice_date, due_date, ref_amount, pending_amount, message) VALUES
+        ('REF-C2-1', 'C2', 'INV-2024-501', '2026-06-01', '2026-07-01', 200000, 200000, 'EXCEEDED CREDIT DAYS'),
+        ('REF-C2-2', 'C2', 'INV-2024-502', '2026-08-01', '2026-09-01', 100000, 100000, NULL),
+        ('REF-C3-1', 'C3', 'INV-2024-601', '2026-07-15', '2026-08-15', 80000, 45000, 'EXCEEDED CREDIT DAYS')`
     );
 
     const tasks = [

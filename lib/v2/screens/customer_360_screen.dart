@@ -237,11 +237,13 @@ class _Customer360ScreenState extends State<Customer360Screen> {
     // finished — it no longer locks Record Outcome (its card is hidden too),
     // even if the server hasn't released the customer yet (ASHWIN M PATEL,
     // 28 Oct: broken at 12:10 with ₹0 overdue → locked with no reason).
-    final outcomeRecorded =
-        (currentCustomer.currentRecoveryState == 'Waiting / Monitoring' &&
-                !nothingPending &&
-                !_ptpOutcomeAlreadyChecked(currentCustomer, store)) ||
-            store.recoveryDoneTodayCustomerIds.contains(currentCustomer.id);
+    // Same for a Payment Already Made / Internal Action the RE has already
+    // decided, even when it was recorded today.
+    final outcomeDecided = _outcomeAlreadyDecided(currentCustomer, store);
+    final outcomeRecorded = !outcomeDecided &&
+        ((currentCustomer.currentRecoveryState == 'Waiting / Monitoring' &&
+                !nothingPending) ||
+            store.recoveryDoneTodayCustomerIds.contains(currentCustomer.id));
     // An open "Recovery" task ("Collect ₹X — record a new outcome", raised
     // automatically after a PTP verifies) explicitly asks for the next
     // outcome, so Record Outcome must stay live even if an outcome was
@@ -394,7 +396,7 @@ class _Customer360ScreenState extends State<Customer360Screen> {
                   // is over — hide it until the salesman records a new one.
                   // A PTP that has already been checked against BUSY (kept /
                   // partly kept / broken) is finished — its card is hidden.
-                  if (!_ptpOutcomeAlreadyChecked(currentCustomer, store) &&
+                  if (!_outcomeAlreadyDecided(currentCustomer, store) &&
                       (store.userRole == 'RECOVERY_EXECUTIVE' ||
                           (store.userRole == 'SALESPERSON' &&
                               !_outcomeSupersededByNewTask(currentCustomer, store))) &&
@@ -1363,13 +1365,31 @@ class _Customer360ScreenState extends State<Customer360Screen> {
     );
   }
 
-  /// The last recorded outcome is a Promise to Pay and that promise is no
-  /// longer open — the BUSY check has already decided it (ASHRAF BHAI
-  /// NATHANI, 28 Oct: an old, already-checked PTP was still shown).
-  bool _ptpOutcomeAlreadyChecked(Customer c, AppStore store) {
+  /// The last recorded outcome has already been decided, so it is finished:
+  /// - Promise to Pay: the BUSY check has decided it (ASHRAF BHAI NATHANI,
+  ///   28 Oct: an old, already-checked PTP was still shown).
+  /// - Payment Already Made / Internal Action: the RE has decided it and the
+  ///   server has released the customer (JYOTSNA DHANSUKH VORA, 30 Oct:
+  ///   claim verified, ₹0 overdue, yet still locked with the card showing).
+  bool _outcomeAlreadyDecided(Customer c, AppStore store) {
     final last = _lastRecordedOutcome(c);
-    if (last == null || !last.type.toLowerCase().contains('promise to pay')) return false;
-    return _openScheduledPtp(store, c.id) == null;
+    if (last == null) return false;
+    final type = last.type.toLowerCase();
+    if (type.contains('promise to pay')) return _openScheduledPtp(store, c.id) == null;
+    if (c.primaryNextAction != 'Nothing Pending') return false;
+    if (type.contains('payment claim')) {
+      return !store.paymentClaims.any((p) =>
+          p['customerCode'] == c.id &&
+          (p['status'] == 'Awaiting Verification' || p['status'] == 'Sync Pending'));
+    }
+    if (type.contains('internal action')) {
+      return !store.tasks.any((t) =>
+          t.customerId == c.id &&
+          t.type == TaskType.financialTeamFollowUp &&
+          t.status != TaskStatus.completed &&
+          t.status != TaskStatus.closed);
+    }
+    return false;
   }
 
   /// True when an open salesman call/visit task was created after the
@@ -3164,6 +3184,24 @@ class _Customer360ScreenState extends State<Customer360Screen> {
       case 'Payment Already Made':
         return PaymentAlreadyMadeForm(
             maxOutstanding: amountCeiling,
+            // Same rule as the server (customerService.recordOutcome): one
+            // payment is claimed once — checked here too so it's caught
+            // before submitting, even offline.
+            duplicateCheck: (amt) {
+              final store = context.read<AppStore>();
+              final weekAgo = DateTime.now().subtract(const Duration(days: 7));
+              for (final p in store.paymentClaims) {
+                if (p['customerCode'] != widget.customer.id) continue;
+                final status = p['status'];
+                if (status != 'Awaiting Verification' && status != 'Sync Pending' && status != 'Verified') continue;
+                if (((p['amount'] as num).toDouble() - amt).abs() >= 1) continue;
+                final on = p['claimDateRaw'] as DateTime?;
+                if (on == null || on.isBefore(weekAgo)) continue;
+                final state = status == 'Verified' ? 'and the RE has already verified it' : 'and it is waiting for the RE';
+                return 'This payment was already claimed on ${DateFormat('dd MMM').format(on)} $state.';
+              }
+              return null;
+            },
             onSubmit: (amt, reference, file) => _finish(context, 'Verification Pending',
                 'Payment claimed',
                 'Amount: ₹$amt${reference.isNotEmpty ? ' Ref: $reference' : ''}',

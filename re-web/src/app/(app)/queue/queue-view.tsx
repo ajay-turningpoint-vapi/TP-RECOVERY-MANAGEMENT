@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { ListOrdered as ListOrderedIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
 import { customerColumns } from "@/components/app/customer-columns";
@@ -18,11 +19,11 @@ import { useUrlState } from "@/lib/use-url-state";
 // dashboard exception drill-downs, built from the same AppStore getters.
 const VIEWS = [
   { value: "all", label: "All" },
-  { value: "broken", label: "Broken PTP" },
+  { value: "broken", label: "Broke a promise" },
   { value: "escalated", label: "Escalated" },
-  { value: "no-follow-up", label: "No follow-up" },
-  { value: "no-next-action", label: "No valid next action" },
-  { value: "ownerless", label: "Owner mapping required" },
+  { value: "no-follow-up", label: "Not followed up" },
+  { value: "no-next-action", label: "No next step" },
+  { value: "ownerless", label: "No salesman" },
   { value: "at-risk", label: "Money at risk" },
 ] as const;
 
@@ -86,7 +87,7 @@ export function QueueView() {
     () => [
       {
         id: "rank",
-        header: "Priority",
+        header: "Why at the top",
         accessorFn: (r) => r.rank,
         cell: ({ row }) => <Pill tone={RANK_TONE[row.original.rank]}>{row.original.reason}</Pill>,
         meta: { csv: (r) => r.reason },
@@ -112,9 +113,9 @@ export function QueueView() {
 
   return (
     <div className="mx-auto max-w-[1600px]">
-      <PageHeader
-        title={outstanding ? "Total Outstanding" : "All Customers"}
-        description="One row per customer in the same priority order as the mobile app: L4, broken PTP, owner mapping, no valid next action, L2/L3, PTP follow-up, 30+ days overdue."
+      <PageHeader icon={<ListOrderedIcon />} hue="indigo"
+        title={outstanding ? "Total Outstanding" : "Follow-up List"}
+        description="Customers to chase, most urgent at the top (same order as the mobile app). Click Open to see a customer."
         actions={
           <div className="flex gap-6 text-right">
             <div>
@@ -122,7 +123,7 @@ export function QueueView() {
               <div className="text-lg font-semibold tabular">{rows.length.toLocaleString("en-IN")}</div>
             </div>
             <div>
-              <div className="text-xs text-muted-foreground">{outstanding ? "Outstanding" : "Overdue"}</div>
+              <div className="text-xs text-muted-foreground">{outstanding ? "Total Outstanding" : "Total Overdue"}</div>
               <div className="text-lg font-semibold tabular">{formatINRCompact(exposure)}</div>
             </div>
           </div>
@@ -143,11 +144,11 @@ export function QueueView() {
         data={rows}
         loading={rms.isLoading}
         searchText={(r) => `${r.customer.name} ${r.customer.id} ${rms.salesmanName(r.customer.assignedSalesmanId)}`}
-        searchPlaceholder="Search customer or salesman…"
+        searchPlaceholder="Search by name"
         onRowClick={(r) => router.push(`/customers/${encodeURIComponent(r.customer.id)}`)}
         exportName={`recovery-queue-${view}`}
         emptyText="No customers in this view."
-        initialHidden={outstanding ? { branch: false } : { branch: false, totalOutstanding: false }}
+        initialHidden={{ branch: false, credit: false, escalation: false, tasks: false, state: false, ...(outstanding ? {} : { totalOutstanding: false }) }}
         toolbar={
           <>
             <SimpleSelect

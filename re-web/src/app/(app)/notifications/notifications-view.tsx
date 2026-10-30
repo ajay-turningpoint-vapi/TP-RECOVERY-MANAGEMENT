@@ -1,8 +1,9 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { Bell as BellIcon } from "lucide-react";
 import { useState } from "react";
-import { CheckCheck } from "lucide-react";
+import { CheckCheck, Loader2 } from "lucide-react";
 import { PageHeader } from "@/components/app/page-header";
 import { Pill } from "@/components/app/status";
 import { Button } from "@/components/ui/button";
@@ -32,12 +33,12 @@ export function NotificationsView() {
 
   return (
     <div className="mx-auto max-w-4xl">
-      <PageHeader
+      <PageHeader icon={<BellIcon />} hue="sky"
         title="Notifications"
-        description="Reading a notification does not complete the work behind it."
+        description="Messages for you. Reading a message does not finish the work — open it to act."
         actions={
-          <Button variant="outline" disabled={!rms.unreadNotificationCount || action.isPending} onClick={() => action.mutate({ path: "/notifications/read-all" })}>
-            <CheckCheck /> Mark all read
+          <Button variant="outline" disabled={!rms.unreadNotificationCount || action.isPending} onClick={() => action.mutate({ path: "/notifications/read-all", success: "All messages marked as read." })}>
+            {action.isPending ? <Loader2 className="animate-spin" /> : <CheckCheck />} Mark all read
           </Button>
         }
       />
@@ -51,15 +52,23 @@ export function NotificationsView() {
         </TabsList>
       </Tabs>
       <div className="overflow-hidden rounded-xl border bg-card">
-        {list.length === 0 ? (
-          <p className="p-10 text-center text-sm text-muted-foreground">Nothing here.</p>
+        {rms.isLoading ? (
+          <div className="space-y-3 p-5" aria-label="Loading">
+            {[0, 1, 2, 3].map((k) => (
+              <div key={k} className="h-14 animate-pulse rounded-lg bg-muted" />
+            ))}
+          </div>
+        ) : rms.loadFailed ? (
+          <p className="p-10 text-center text-base text-red-700 dark:text-red-300">Could not load messages. Press Try again at the top of the page.</p>
+        ) : list.length === 0 ? (
+          <p className="p-10 text-center text-base text-muted-foreground">No messages here.</p>
         ) : (
           list.map((n) => (
             <button
               key={n.id}
               type="button"
               onClick={() => {
-                if (!n.read) action.mutate({ path: `/notifications/${n.id}/read` });
+                if (!n.read) action.mutate({ path: `/notifications/${n.id}/read`, quiet: true });
                 if (n.customerId) router.push(`/customers/${encodeURIComponent(n.customerId)}`);
               }}
               className={cn("flex w-full gap-4 border-b px-5 py-4 text-left last:border-0 hover:bg-muted/50", !n.read && "bg-accent/30")}

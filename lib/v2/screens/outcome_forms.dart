@@ -694,7 +694,10 @@ class _WillConfirmFormState extends State<WillConfirmForm> {
 class PaymentAlreadyMadeForm extends StatefulWidget {
   final Future<void> Function(double, String, XFile?) onSubmit;
   final double maxOutstanding;
-  const PaymentAlreadyMadeForm({super.key, required this.onSubmit, this.maxOutstanding = 0});
+  /// Returns a message when this amount was already claimed recently (the
+  /// same payment must not be claimed twice), else null.
+  final String? Function(double amount)? duplicateCheck;
+  const PaymentAlreadyMadeForm({super.key, required this.onSubmit, this.maxOutstanding = 0, this.duplicateCheck});
   @override
   State<PaymentAlreadyMadeForm> createState() => _PaymentAlreadyMadeFormState();
 }
@@ -725,6 +728,9 @@ class _PaymentAlreadyMadeFormState extends State<PaymentAlreadyMadeForm> {
           hasError = true;
         } else if (_amountCeilingError(amt, widget.maxOutstanding) != null) {
           setState(() => _amountError = _amountCeilingError(amt, widget.maxOutstanding));
+          hasError = true;
+        } else if (widget.duplicateCheck?.call(amt) != null) {
+          setState(() => _amountError = widget.duplicateCheck!(amt));
           hasError = true;
         }
         if (_imageFile == null) {

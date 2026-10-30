@@ -26,11 +26,27 @@ export function rmsApiUrl(path: string) {
   return `${base.replace(/\/$/, "")}${path}`;
 }
 
+/**
+ * The `sessionVersion` embedded in our own access token — the same value
+ * the Flutter app reads (ApiClient.sessionVersion) to tell a
+ * 'session-revoked' push about *another* device from the echo of its own
+ * login. Payload decode only; the token came straight from the API.
+ */
+export function tokenSessionVersion(accessToken: string): number | null {
+  try {
+    const payload = JSON.parse(Buffer.from(accessToken.split(".")[1], "base64url").toString("utf8"));
+    return typeof payload.sessionVersion === "number" ? payload.sessionVersion : null;
+  } catch {
+    return null;
+  }
+}
+
 export function setSessionCookies(res: NextResponse, pair: TokenPair) {
   const base = { httpOnly: true, secure, sameSite: "lax" as const, path: "/" };
   res.cookies.set(ACCESS_COOKIE, pair.accessToken, { ...base, maxAge: REFRESH_MAX_AGE });
   res.cookies.set(REFRESH_COOKIE, pair.refreshToken, { ...base, maxAge: REFRESH_MAX_AGE });
-  res.cookies.set(USER_COOKIE, JSON.stringify(pair.user), {
+  const profile = { ...pair.user, sessionVersion: tokenSessionVersion(pair.accessToken) };
+  res.cookies.set(USER_COOKIE, JSON.stringify(profile), {
     httpOnly: false,
     secure,
     sameSite: "lax",

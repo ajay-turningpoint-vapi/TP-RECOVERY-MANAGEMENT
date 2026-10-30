@@ -5,22 +5,29 @@ import Link from "next/link";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import {
   ArrowLeft,
+  ArrowRight,
+  Clock,
+  CalendarClock,
   ClipboardPlus,
+  CreditCard,
+  FileWarning,
+  IndianRupee,
+  Receipt,
+  Wallet,
+  Zap,
   Loader2,
-  MoreHorizontal,
   Phone,
   ShieldAlert,
   ShieldCheck,
-  ShieldOff,
   Siren,
-  UserRoundCog,
 } from "lucide-react";
 import { ActionDialog, useDialog } from "@/components/app/action-dialog";
+import { ColorAvatar, HUE, IconTile, type Hue } from "@/components/app/visual";
 import { AttachmentLink } from "@/components/app/attachment-link";
+import { Timeline } from "@/components/app/timeline";
 import { useSessionUser } from "@/components/app/providers";
 import {
   ClaimStatusBadge,
-  CreditHealthBadge,
   DisputeStatusBadge,
   EscalationBadge,
   Pill,
@@ -28,23 +35,15 @@ import {
   PtpStatusBadge,
   RecoveryStateBadge,
 } from "@/components/app/status";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { deadlineInput, localToIso, useRmsAction } from "@/lib/actions";
-import { rmsGet } from "@/lib/api";
+import { ApiError, friendlyError, rmsGet } from "@/lib/api";
 import { formatDate, formatDateTime, formatINR, formatRelativeDay, timeAgo } from "@/lib/format";
-import { TASK_TYPE_LABEL, friendlyTaskReason, isTaskOpen, parseAuditEvent, parseCustomer } from "@/lib/models";
+import { TASK_TYPE_LABEL, creditHealthBand, friendlyTaskReason, isTaskOpen, parseAuditEvent, parseCustomer } from "@/lib/models";
 import { useRms } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 
@@ -79,21 +78,33 @@ export function Customer360({ id }: { id: string }) {
   const disputes = rms.disputes.filter((d) => d.customerId === id);
   const claims = rms.paymentClaims.filter((p) => p.customerId === id);
   const escalations = rms.escalations.filter((e) => e.customerId === id);
-  const events = (audit.data?.pages ?? []).flatMap((p) => p.items.map(parseAuditEvent));
+  // History also leaves out the server's own "auto-closed" entries.
+  const events = (audit.data?.pages ?? [])
+    .flatMap((p) => p.items.map(parseAuditEvent))
+    .filter((e) => !/_AUTO_CLOSED$/.test(e.type));
 
   const instruct = useDialog();
-  const reassign = useDialog();
   const escalate = useDialog();
-  const control = useDialog<"take" | "release">();
 
   if (!c) {
     return detail.isError ? (
-      <div className="mx-auto max-w-xl py-20 text-center">
-        <h1 className="text-lg font-semibold">Customer not found</h1>
-        <p className="mt-1 text-sm text-muted-foreground">They may have been removed from BUSY or are outside your scope.</p>
-        <Button className="mt-6" variant="outline" render={<Link href="/customers" />}>
-          Back to customers
-        </Button>
+      <div role="alert" className="mx-auto max-w-xl rounded-xl border-2 border-red-200 bg-red-50 p-8 text-center dark:bg-red-500/10">
+        <h1 className="text-xl font-bold">{detail.error instanceof ApiError && detail.error.status === 404 ? "Customer not found" : "Could not open this customer"}</h1>
+        <p className="mt-2 text-[15px]">
+          {detail.error instanceof ApiError && detail.error.status === 404
+            ? "They may have been removed from BUSY, or they are in another branch."
+            : friendlyError(detail.error)}
+        </p>
+        <div className="mt-6 flex justify-center gap-2">
+          {!(detail.error instanceof ApiError && detail.error.status === 404) && (
+            <Button onClick={() => detail.refetch()} disabled={detail.isFetching}>
+              {detail.isFetching ? <Loader2 className="animate-spin" /> : null} Try again
+            </Button>
+          )}
+          <Button variant="outline" render={<Link href="/customers" />}>
+            Back to customers
+          </Button>
+        </div>
       </div>
     ) : (
       <div className="mx-auto max-w-[1400px] space-y-4">
@@ -105,8 +116,31 @@ export function Customer360({ id }: { id: string }) {
   }
 
   const salesmanOptions = rms.salesmen.map((s) => ({ value: s.id, label: `${s.fullName} · ${s.branch}` }));
-  const inReControl = c.currentRecoveryState === "RE Control";
   const salesman = rms.salesmanById.get(c.assignedSalesmanId);
+  // The live open task is the source of truth for "what now" — the
+  // customer's stored next-action text can be left over from an older step.
+  const step = rms.nextStepFor(c);
+  const currentTask = step.task;
+  // When the recorded outcome is due: promised date, "will confirm" time,
+  // end of the No Answer wait, or the date given for a payment already made.
+  const openPtp = rms.allPtps
+    .filter((p) => p.customerId === c.id && OPEN_PTP.has(p.status))
+    .sort((a, b) => +a.promiseDate - +b.promiseDate)[0];
+  const pendingClaim = rms.allPaymentClaims.find((p) => p.customerId === c.id && ["Awaiting Verification", "Sync Pending"].includes(p.status));
+  const nextWhen: { label: string; at: Date } | null =
+    c.outcomeWaitRule === "Will Confirm" && c.outcomeWaitUntil
+      ? { label: "Customer will confirm on", at: c.outcomeWaitUntil }
+      : c.outcomeWaitRule === "No Answer" && c.outcomeWaitUntil
+        ? { label: "Call again after", at: c.outcomeWaitUntil }
+        : c.outcomeWaitRule === "Payment Already Made" && pendingClaim
+          ? { label: "Payment date given", at: pendingClaim.claimDate }
+          : openPtp
+            ? { label: "Promised to pay on", at: openPtp.promiseDate }
+            : null;
+  // Open payment promises only (same open statuses the server counts as covered).
+  const promisedAmount = rms.allPtps
+    .filter((p) => p.customerId === c.id && OPEN_PTP.has(p.status))
+    .reduce((sum, p) => sum + p.amountPromised, 0);
 
   return (
     <div className="mx-auto max-w-[1400px] space-y-5">
@@ -115,111 +149,149 @@ export function Customer360({ id }: { id: string }) {
         Back
       </Button>
 
-      {/* Header */}
-      <div className="flex flex-col gap-4 rounded-xl border bg-card p-5 shadow-xs lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-0 space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-2xl font-semibold tracking-tight">{c.name}</h1>
-            <RecoveryStateBadge state={c.currentRecoveryState} />
-            <EscalationBadge level={c.escalationLevel} />
-            {c.ownerMappingRequired && <Pill tone="danger">Owner mapping required</Pill>}
-            {!c.hasValidNextAction && c.totalDue > 0 && <Pill tone="warning">No valid next action</Pill>}
-          </div>
-          <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm text-muted-foreground">
-            <span>{c.id}</span>
-            <span>{c.branch}</span>
-            {c.contactNumber && (
-              <a href={`tel:${c.contactNumber}`} className="inline-flex items-center gap-1 hover:text-foreground">
-                <Phone className="size-3.5" />
-                {c.contactNumber}
-              </a>
-            )}
-            {c.alternateContactNumber && <span>Alt: {c.alternateContactNumber}</span>}
-            <span>
-              Salesman:{" "}
-              {salesman ? (
-                <Link href={`/salesmen/${encodeURIComponent(salesman.id)}`} className="font-medium text-foreground hover:underline">
-                  {salesman.fullName}
-                </Link>
-              ) : (
-                <span className="text-destructive">Unmapped</span>
-              )}
-              {salesman?.phone && (
-                <a href={`tel:${salesman.phone}`} className="ml-1.5 inline-flex items-center gap-1 hover:text-foreground">
-                  <Phone className="size-3" />
-                  {salesman.phone}
-                </a>
-              )}
-            </span>
-          </div>
-          {c.primaryNextAction && (
-            <div className="text-sm">
-              <span className="text-muted-foreground">Primary next action:</span>{" "}
-              <span className="font-medium">{c.primaryNextAction}</span>
-              {c.reasonForAction && <span className="text-muted-foreground"> — {c.reasonForAction}</span>}
+      {/* Profile — brand-blue card, every value labelled */}
+      <section className="rounded-xl bg-[lab(34.2882%_14.8026_-59.6162)] text-white">
+        <div className="flex flex-col gap-4 p-5 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex min-w-0 items-center gap-4">
+            <ColorAvatar name={c.name} size="lg" className="ring-4 ring-white/40" />
+            <div className="min-w-0 space-y-1.5">
+              <h1 className="text-2xl font-bold tracking-tight break-words">{c.name}</h1>
+              <div className="flex flex-wrap items-center gap-2 [&_[data-slot=badge]]:bg-white">
+                <RecoveryStateBadge state={c.currentRecoveryState} />
+                <EscalationBadge level={c.escalationLevel} />
+                {c.ownerMappingRequired && <Pill tone="danger">No salesman</Pill>}
+                {!c.hasValidNextAction && c.totalDue > 0 && <Pill tone="warning">No next step planned</Pill>}
+              </div>
             </div>
-          )}
-          <div className="text-xs text-muted-foreground">
-            Financials synced from BUSY {c.financialFreshness ? timeAgo(c.financialFreshness) : "—"}
+          </div>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            <Button size="lg" className="bg-white text-[lab(34.2882%_14.8026_-59.6162)] hover:bg-white/90 disabled:opacity-60" onClick={() => instruct.open(true)} disabled={!!c.outcomeWaitText}>
+              <ClipboardPlus />
+              Create task
+            </Button>
+            <Button
+              size="lg"
+              variant="outline"
+              className="border-white bg-white text-red-700 hover:bg-red-50 hover:text-red-800 dark:bg-white dark:text-red-700"
+              onClick={() => escalate.open(true)}
+              disabled={c.escalationLevel === "L4"}
+            >
+              <Siren />
+              Escalate to {NEXT_LEVEL[c.escalationLevel]}
+            </Button>
           </div>
         </div>
-        <div className="flex shrink-0 flex-wrap gap-2">
-          <Button onClick={() => instruct.open(true)} disabled={!!c.outcomeWaitText}>
-            <ClipboardPlus />
-            Create task
-          </Button>
-          <Button variant="outline" onClick={() => escalate.open(true)} disabled={c.escalationLevel === "L4"}>
-            <Siren />
-            Escalate to {NEXT_LEVEL[c.escalationLevel]}
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger render={<Button variant="outline" size="icon" aria-label="More actions" />}>
-              <MoreHorizontal />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuItem onClick={() => reassign.open(true)}>
-                <UserRoundCog />
-                Reassign salesman
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              {inReControl ? (
-                <DropdownMenuItem onClick={() => control.open("release")}>
-                  <ShieldOff />
-                  Release RE control
-                </DropdownMenuItem>
+
+        {/* Facts */}
+        <dl className="grid grid-cols-2 gap-x-6 gap-y-3 border-t-2 border-white/20 px-5 py-4 md:grid-cols-3 xl:grid-cols-5">
+          <Fact label="Customer code">{c.id}</Fact>
+          <Fact label="Branch">{c.branch}</Fact>
+          <Fact label="Customer phone">
+            {c.contactNumber ? (
+              <a href={`tel:${c.contactNumber}`} className="inline-flex items-center gap-1.5 underline decoration-white/50 underline-offset-4 hover:decoration-white">
+                <Phone className="size-4" /> {c.contactNumber}
+              </a>
+            ) : (
+              "—"
+            )}
+            {c.alternateContactNumber && <div className="text-sm font-normal text-white/85">Also {c.alternateContactNumber}</div>}
+          </Fact>
+          <Fact label="Salesman">
+            {salesman ? (
+              <Link href={`/salesmen/${encodeURIComponent(salesman.id)}`} className="underline decoration-white/50 underline-offset-4 hover:decoration-white">
+                {salesman.fullName}
+              </Link>
+            ) : (
+              <span className="rounded bg-red-600 px-2 py-0.5">No salesman</span>
+            )}
+          </Fact>
+          <Fact label="Salesman phone">
+            {salesman?.phone ? (
+              <a href={`tel:${salesman.phone}`} className="inline-flex items-center gap-1.5 underline decoration-white/50 underline-offset-4 hover:decoration-white">
+                <Phone className="size-4" /> {salesman.phone}
+              </a>
+            ) : (
+              "—"
+            )}
+          </Fact>
+        </dl>
+
+        {/* Next step — the one thing to read first */}
+        {(currentTask || step.what) && (
+          <div className="mx-5 mb-4 flex items-start gap-3 rounded-lg bg-white px-4 py-3 text-foreground dark:bg-card">
+            <ArrowRight className="mt-1 size-5 shrink-0 text-blue-700 dark:text-blue-300" />
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-semibold text-blue-800 dark:text-blue-300">Next step</div>
+              {currentTask ? (
+                <>
+                  <div className="text-lg font-bold">{step.what}</div>
+                  {step.why && <div className="text-[15px] font-medium text-orange-700 dark:text-orange-400">{step.why}</div>}
+                  {step.note && <div className="text-[15px] text-muted-foreground">Note: {step.note}</div>}
+                  <div className="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-[15px]">
+                    {step.amount && (
+                      <span>
+                        <span className="text-muted-foreground">Amount to collect </span>
+                        <span className="font-bold text-orange-700 dark:text-orange-400">{step.amount}</span>
+                      </span>
+                    )}
+                    <span>
+                      <span className="text-muted-foreground">Assigned to </span>
+                      <span className="font-semibold">{currentTask.ownerId === user.id ? "You" : rms.salesmanName(currentTask.ownerId)}</span>
+                    </span>
+                    <span>
+                      <span className="text-muted-foreground">Priority </span>
+                      <span className={cn("font-semibold", /critical|high/i.test(currentTask.priority) && "text-orange-700 dark:text-orange-400")}>{currentTask.priority}</span>
+                    </span>
+                  </div>
+                  <WhenLine label={currentTask.deadline < new Date() ? "Was due on" : "Due by"} at={currentTask.deadline} late={currentTask.deadline < new Date()} />
+                </>
               ) : (
-                <DropdownMenuItem onClick={() => control.open("take")}>
-                  <ShieldCheck />
-                  Take RE control
-                </DropdownMenuItem>
+                <>
+                  <div className="text-lg font-bold">{c.primaryNextAction}</div>
+                  {c.reasonForAction && <div className="text-[15px] text-muted-foreground">{readableAmounts(c.reasonForAction)}</div>}
+                  {nextWhen && <WhenLine label={nextWhen.label} at={nextWhen.at} />}
+                </>
               )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </div>
+            </div>
+          </div>
+        )}
+        {c.outcomeWaitText && (
+          <div className="mx-5 mb-4 flex items-start gap-3 rounded-lg bg-amber-50 px-4 py-3 text-[15px] text-amber-950 dark:bg-amber-100">
+            <ShieldAlert className="mt-0.5 size-5 shrink-0 text-amber-700" />
+            <div>
+              <span className="font-semibold">Create task is locked for now. </span>
+              {c.outcomeWaitText}
+            </div>
+          </div>
+        )}
+        <p className="flex items-center gap-1.5 border-t-2 border-white/20 px-5 py-2.5 text-sm text-white/90">
+          <Clock className="size-4" /> Money figures updated from BUSY {c.financialFreshness ? timeAgo(c.financialFreshness) : "—"}
+        </p>
+      </section>
 
-      {c.outcomeWaitText && (
-        <Alert>
-          <ShieldAlert />
-          <AlertDescription>{c.outcomeWaitText} New tasks can be created once this resolves.</AlertDescription>
-        </Alert>
-      )}
-
-      {/* Financial strip */}
-      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border bg-border sm:grid-cols-4">
-        {[
-          ["Outstanding", formatINR(c.totalOutstanding)],
-          ["Overdue", formatINR(c.totalDue)],
-          ["Covered (PTP / dispute / claim)", formatINR(c.coveredAmount)],
-          ["Actionable now", formatINR(c.actionableAmount)],
-          ["Disputed", formatINR(c.disputedAmount)],
-          ["Oldest overdue", `${c.oldestOverdueDays} days`],
-          ["Credit limit / available", `${formatINR(c.creditLimit)} / ${formatINR(c.availableLimit)}`],
-          ["Last payment", c.lastPaymentDate ? `${formatINR(c.lastPaymentAmount)} · ${formatDate(c.lastPaymentDate, "dd MMM")}` : "—"],
-        ].map(([k, v]) => (
-          <div key={k} className="bg-card px-4 py-3">
-            <div className="truncate text-xs text-muted-foreground">{k}</div>
-            <div className="mt-0.5 truncate text-sm font-semibold tabular">{v}</div>
+      {/* Financials */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        {(
+          [
+            ["Total Outstanding", formatINR(c.totalOutstanding), "indigo", Wallet],
+            ["Total Overdue", formatINR(c.totalDue), "rose", IndianRupee],
+            ["Already promised", formatINR(promisedAmount), "emerald", ShieldCheck],
+            ["Still to chase now", formatINR(c.actionableAmount), "amber", Zap],
+            ["Amount in dispute", formatINR(c.disputedAmount), "violet", FileWarning],
+            ["Credit days", `${c.creditDays} days`, "sky", CalendarClock],
+            ["Credit limit", formatINR(c.creditLimit), "sky", CreditCard],
+            ["Last payment", c.lastPaymentDate ? `${formatINR(c.lastPaymentAmount)} · ${formatDate(c.lastPaymentDate, "dd MMM")}` : "—", "slate", Receipt],
+          ] as [string, string, Hue, React.ElementType][]
+        ).map(([k, v, hue, Icon]) => (
+          <div key={k} className="relative flex items-center gap-3 rounded-xl border-2 bg-card p-4">
+            <div aria-hidden className={cn("pointer-events-none absolute inset-0 bg-linear-to-br to-transparent to-70%", HUE[hue].wash)} />
+            <IconTile hue={hue} size="sm" className="relative">
+              <Icon />
+            </IconTile>
+            <div className="relative min-w-0">
+              <div className="text-base font-medium text-muted-foreground">{k}</div>
+              <div className="text-lg font-bold tabular">{v}</div>
+            </div>
           </div>
         ))}
       </div>
@@ -233,7 +305,7 @@ export function Customer360({ id }: { id: string }) {
           <TabsTrigger value="disputes">Disputes ({disputes.length})</TabsTrigger>
           <TabsTrigger value="claims">Payment claims ({claims.length})</TabsTrigger>
           <TabsTrigger value="escalations">Escalations ({escalations.length})</TabsTrigger>
-          <TabsTrigger value="timeline">Timeline</TabsTrigger>
+          <TabsTrigger value="timeline">History</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="mt-4 grid gap-4 lg:grid-cols-3">
@@ -241,29 +313,32 @@ export function Customer360({ id }: { id: string }) {
             <CardHeader>
               <CardTitle>Ageing</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-2.5">
+            <CardContent className="space-y-3">
               {(
                 [
-                  ["0–30 days", c.ageing.age0_30],
-                  ["31–60 days", c.ageing.age31_60],
-                  ["61–90 days", c.ageing.age61_90],
-                  ["90+ days", c.ageing.age90Plus],
+                  ["0–30 days", c.ageing.age0_30, AGE_TONE[0]],
+                  ["31–60 days", c.ageing.age31_60, AGE_TONE[1]],
+                  ["61–90 days", c.ageing.age61_90, AGE_TONE[2]],
+                  ["90+ days", c.ageing.age90Plus, AGE_TONE[3]],
                 ] as const
-              ).map(([k, v]) => {
+              ).map(([k, v, tone]) => {
                 const total = c.ageing.age0_30 + c.ageing.age31_60 + c.ageing.age61_90 + c.ageing.age90Plus;
                 return (
-                  <div key={k} className="space-y-1">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">{k}</span>
-                      <span className="font-medium tabular">{formatINR(v)}</span>
+                  <div key={k} className={cn("space-y-1.5 rounded-lg px-3 py-2", v > 0 ? tone.bg : "bg-muted/40")}>
+                    <div className="flex items-center justify-between text-[15px]">
+                      <span className="flex items-center gap-2 font-medium">
+                        <span className={cn("size-2.5 rounded-full", tone.bar)} />
+                        {k}
+                      </span>
+                      <span className={cn("font-bold tabular", v > 0 ? tone.text : "text-muted-foreground")}>{formatINR(v)}</span>
                     </div>
-                    <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-                      <div className="h-full rounded-full bg-chart-1" style={{ width: `${total ? (v / total) * 100 : 0}%` }} />
+                    <div className="h-2 overflow-hidden rounded-full bg-background/80">
+                      <div className={cn("h-full rounded-full", tone.bar)} style={{ width: `${total ? (v / total) * 100 : 0}%` }} />
                     </div>
                   </div>
                 );
               })}
-              {c.futureDue > 0 && <div className="pt-1 text-xs text-muted-foreground">Not yet due: {formatINR(c.futureDue)}</div>}
+              {c.futureDue > 0 && <div className="pt-1 text-sm text-muted-foreground">Not yet due: {formatINR(c.futureDue)}</div>}
             </CardContent>
           </Card>
           <Card>
@@ -271,32 +346,50 @@ export function Customer360({ id }: { id: string }) {
               <CardTitle>Risk</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Customer credit health</span>
-                <CreditHealthBadge score={c.creditHealthScore} />
-              </div>
-              {c.creditHealthComponents &&
-                Object.entries(c.creditHealthComponents).map(([k, v]) => (
-                  <div key={k} className="flex justify-between text-xs">
-                    <span className="text-muted-foreground capitalize">{k.replace(/([A-Z])/g, " $1").toLowerCase()}</span>
-                    <span className="tabular">{v}</span>
+              {(() => {
+                const t = scoreTone(c.creditHealthScore);
+                return (
+                  <div className={cn("flex items-center justify-between rounded-lg border-2 px-4 py-3", t.bg, t.border)}>
+                    <div>
+                      <div className="text-sm font-medium text-muted-foreground">Customer credit health</div>
+                      <div className={cn("text-lg font-bold", t.text)}>{creditHealthBand(c.creditHealthScore)}</div>
+                    </div>
+                    <div className={cn("text-3xl font-bold tabular", t.text)}>{c.creditHealthScore ?? "—"}</div>
                   </div>
-                ))}
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">No-answer attempts</span>
-                <span className="tabular">{c.noAnswerAttempts}</span>
+                );
+              })()}
+              {c.creditHealthComponents &&
+                Object.entries(c.creditHealthComponents)
+                  .filter(([k]) => k.toLowerCase() !== "total")
+                  .map(([k, v]) => {
+                    const t = scoreTone(v);
+                    return (
+                      <div key={k} className="space-y-1">
+                        <div className="flex justify-between text-sm">
+                          <span className="capitalize">{k.replace(/([A-Z])/g, " $1").toLowerCase()}</span>
+                          <span className={cn("font-bold tabular", t.text)}>{v}</span>
+                        </div>
+                        <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                          <div className={cn("h-full rounded-full", t.bar)} style={{ width: `${Math.max(0, Math.min(100, v))}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+              <div className={cn("flex justify-between rounded-lg px-3 py-2", c.noAnswerAttempts > 0 ? "bg-amber-50 dark:bg-amber-500/10" : "bg-muted/40")}>
+                <span>No-answer attempts</span>
+                <span className={cn("font-bold tabular", c.noAnswerAttempts > 0 && "text-amber-800 dark:text-amber-300")}>{c.noAnswerAttempts}</span>
               </div>
-              <div className="flex justify-between">
+              <div className="flex justify-between px-3">
                 <span className="text-muted-foreground">Credit days</span>
                 <span className="tabular">{c.creditDays}</span>
               </div>
               {c.gstNo && (
-                <div className="flex justify-between">
+                <div className="flex justify-between px-3">
                   <span className="text-muted-foreground">GST</span>
                   <span>{c.gstNo}</span>
                 </div>
               )}
-              {c.address && <div className="text-xs text-muted-foreground">{c.address}</div>}
+              {c.address && <div className="px-3 text-xs text-muted-foreground">{c.address}</div>}
             </CardContent>
           </Card>
           <Card>
@@ -402,7 +495,7 @@ export function Customer360({ id }: { id: string }) {
               formatINR(p.amount),
               p.reference ?? "—",
               <ClaimStatusBadge key="s" status={p.status} />,
-              p.attachmentPath ? <AttachmentLink key="a" path={p.attachmentPath} /> : "—",
+              p.attachmentPath ? <AttachmentLink key="a" path={p.attachmentPath} size="sm" label="Payment proof" /> : "—",
             ])}
             align={[, "right"]}
           />
@@ -428,44 +521,34 @@ export function Customer360({ id }: { id: string }) {
           <Card>
             <CardContent className="pt-6">
               {audit.isLoading ? (
-                <div className="space-y-3">
-                  {Array.from({ length: 5 }).map((_, i) => (
-                    <Skeleton key={i} className="h-12 w-full" />
+                <div className="space-y-4" aria-label="Loading">
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <div key={i} className="grid grid-cols-[5.5rem_3rem_1fr] gap-3">
+                      <Skeleton className="mt-2 h-4 w-16 justify-self-end" />
+                      <Skeleton className="size-10 justify-self-center rounded-full" />
+                      <Skeleton className="h-24 w-full rounded-xl" />
+                    </div>
                   ))}
                 </div>
+              ) : audit.isError ? (
+                <div role="alert" className="flex flex-wrap items-center gap-3 rounded-xl border-2 border-red-200 bg-red-50 p-4 text-[15px] dark:bg-red-500/10">
+                  <span className="flex-1">Could not load the history. {friendlyError(audit.error)}</span>
+                  <Button variant="outline" onClick={() => audit.refetch()} disabled={audit.isFetching}>
+                    {audit.isFetching && <Loader2 className="animate-spin" />} Try again
+                  </Button>
+                </div>
               ) : events.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No history yet.</p>
+                <p className="py-8 text-center text-base text-muted-foreground">Nothing has happened on this customer yet.</p>
               ) : (
-                <ol className="relative space-y-5 border-l pl-6">
-                  {events.map((e, i) => (
-                    <li key={e.id ?? i} className="relative">
-                      <span
-                        className={cn(
-                          "absolute top-1.5 -left-[29px] size-2.5 rounded-full ring-4 ring-card",
-                          e.actor === "System" ? "bg-muted-foreground/40" : "bg-primary",
-                        )}
-                      />
-                      <div className="flex flex-wrap items-baseline gap-x-2 text-xs text-muted-foreground">
-                        <span className="font-medium text-foreground">{e.actor}</span>
-                        <span>{formatDateTime(e.timestamp)}</span>
-                        <span>· {e.source}</span>
-                        {e.previousState && e.newState && (
-                          <span>
-                            · {e.previousState} → {e.newState}
-                          </span>
-                        )}
-                      </div>
-                      <p className="mt-0.5 text-sm">{e.description}</p>
-                      {e.attachmentPath && <AttachmentLink path={e.attachmentPath} />}
-                    </li>
-                  ))}
-                </ol>
+                <Timeline events={events} />
               )}
               {audit.hasNextPage && (
-                <Button variant="outline" size="sm" className="mt-6" onClick={() => audit.fetchNextPage()} disabled={audit.isFetchingNextPage}>
-                  {audit.isFetchingNextPage && <Loader2 className="animate-spin" />}
-                  Load older history
-                </Button>
+                <div className="mt-2 flex justify-center">
+                  <Button variant="outline" size="lg" onClick={() => audit.fetchNextPage()} disabled={audit.isFetchingNextPage}>
+                    {audit.isFetchingNextPage && <Loader2 className="animate-spin" />}
+                    {audit.isFetchingNextPage ? "Loading older history…" : "Show older history"}
+                  </Button>
+                </div>
               )}
             </CardContent>
           </Card>
@@ -506,24 +589,7 @@ export function Customer360({ id }: { id: string }) {
           action.mutateAsync({
             path: `/customers/${encodeURIComponent(c.id)}/management-instruction`,
             body: { salesmanId: v.salesmanId, desc: v.desc, deadline: localToIso(v.deadline), priority: v.priority, taskType: v.taskType },
-            success: "Task created and sent to the salesman.",
-          })
-        }
-      />
-      <ActionDialog
-        {...reassign.props}
-        title="Reassign salesman"
-        description="Changes the current owner only. History stays with this customer and is never rewritten."
-        submitLabel="Reassign"
-        fields={[
-          { name: "toSalesmanId", label: "New salesman", type: "select", required: true, options: salesmanOptions.filter((o) => o.value !== c.assignedSalesmanId) },
-          { name: "reason", label: "Reason", type: "textarea", required: true },
-        ]}
-        onSubmit={(v) =>
-          action.mutateAsync({
-            path: `/customers/${encodeURIComponent(c.id)}/reassign`,
-            body: v,
-            success: "Customer reassigned.",
+            success: "Done. The task is now in the salesman's app.",
           })
         }
       />
@@ -558,27 +624,35 @@ export function Customer360({ id }: { id: string }) {
           })
         }
       />
-      <ActionDialog
-        {...control.props}
-        title={control.target === "release" ? "Release RE control" : "Take RE control"}
-        description={
-          control.target === "release"
-            ? "Recovery ownership returns to the assigned salesperson, who must set the next action."
-            : "You take direct ownership of the recovery approach. The salesperson's open tasks on this account are superseded."
-        }
-        submitLabel={control.target === "release" ? "Release control" : "Take control"}
-        destructive={control.target === "take"}
-        fields={[]}
-        onSubmit={() =>
-          action.mutateAsync({
-            path: `/customers/${encodeURIComponent(c.id)}/${control.target === "release" ? "release-control" : "take-control"}`,
-            success: control.target === "release" ? "Control released to the salesperson." : "You now have RE control of this account.",
-          })
-        }
-      />
     </div>
   );
 }
+
+function WhenLine({ label, at, late }: { label: string; at: Date; late?: boolean }) {
+  return (
+    <div className={cn("mt-2 inline-flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md px-3 py-1.5 text-[15px]", late ? "bg-red-50 text-red-800 dark:bg-red-500/10 dark:text-red-300" : "bg-blue-50 dark:bg-blue-500/10")}>
+      <span className={late ? "" : "text-muted-foreground"}>{label}</span>
+      <span className="inline-flex items-center gap-1.5 font-bold">
+        <CalendarClock className="size-4" /> {formatDate(at, "d/M/yyyy")}
+      </span>
+      <span className="inline-flex items-center gap-1.5 font-bold">
+        <Clock className="size-4" /> {formatDate(at, "HH:mm")}
+      </span>
+    </div>
+  );
+}
+
+function Fact({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-sm text-white/85">{label}</dt>
+      <dd className="text-base font-semibold break-words">{children}</dd>
+    </div>
+  );
+}
+
+/** Server text like "PTP of ₹3000000.0" → "PTP of ₹30,00,000". */
+const readableAmounts = (text: string) => text.replace(/₹\s?(\d+(?:\.\d+)?)/g, (_, n: string) => formatINR(Number(n)));
 
 function SimpleTable({
   head,
@@ -627,4 +701,23 @@ function SimpleTable({
       </div>
     </div>
   );
+}
+
+const OPEN_PTP = new Set(["scheduled", "pendingVerification", "financialSyncPending"]);
+
+/** Older money = hotter colour. */
+const AGE_TONE = [
+  { bg: "bg-green-50 dark:bg-green-500/10", bar: "bg-green-600", text: "text-green-800 dark:text-green-300" },
+  { bg: "bg-amber-50 dark:bg-amber-500/10", bar: "bg-amber-500", text: "text-amber-800 dark:text-amber-300" },
+  { bg: "bg-orange-50 dark:bg-orange-500/10", bar: "bg-orange-600", text: "text-orange-800 dark:text-orange-300" },
+  { bg: "bg-red-50 dark:bg-red-500/10", bar: "bg-red-600", text: "text-red-700 dark:text-red-300" },
+] as const;
+
+/** Same bands as creditHealthBand: 85+ low risk, 70+ moderate, 50+ high, below critical. */
+function scoreTone(score: number | null) {
+  if (score == null) return { bg: "bg-muted/40", border: "border-border", bar: "bg-slate-400", text: "text-muted-foreground" };
+  if (score >= 85) return { bg: "bg-green-50 dark:bg-green-500/10", border: "border-green-200 dark:border-green-500/30", bar: "bg-green-600", text: "text-green-800 dark:text-green-300" };
+  if (score >= 70) return { bg: "bg-amber-50 dark:bg-amber-500/10", border: "border-amber-200 dark:border-amber-500/30", bar: "bg-amber-500", text: "text-amber-800 dark:text-amber-300" };
+  if (score >= 50) return { bg: "bg-orange-50 dark:bg-orange-500/10", border: "border-orange-200 dark:border-orange-500/30", bar: "bg-orange-600", text: "text-orange-800 dark:text-orange-300" };
+  return { bg: "bg-red-50 dark:bg-red-500/10", border: "border-red-200 dark:border-red-500/30", bar: "bg-red-600", text: "text-red-700 dark:text-red-300" };
 }

@@ -5,17 +5,18 @@ import { creditHealthBand, PTP_STATUS_LABEL, type PtpStatus } from "@/lib/models
 type Tone = "neutral" | "info" | "success" | "warning" | "danger" | "violet";
 
 const TONE_CLASS: Record<Tone, string> = {
-  neutral: "bg-muted text-muted-foreground",
-  info: "bg-info/10 text-info",
-  success: "bg-success/12 text-success",
-  warning: "bg-warning/14 text-warning",
-  danger: "bg-destructive/10 text-destructive",
-  violet: "bg-violet/10 text-violet",
+  neutral: "bg-slate-500/10 text-slate-600 ring-slate-500/15 dark:text-slate-300 [--dot:var(--color-slate-400)]",
+  info: "bg-sky-500/10 text-sky-700 ring-sky-500/20 dark:text-sky-300 [--dot:var(--color-sky-500)]",
+  success: "bg-emerald-500/10 text-emerald-700 ring-emerald-500/20 dark:text-emerald-300 [--dot:var(--color-emerald-500)]",
+  warning: "bg-amber-500/12 text-amber-700 ring-amber-500/25 dark:text-amber-300 [--dot:var(--color-amber-500)]",
+  danger: "bg-rose-500/10 text-rose-700 ring-rose-500/20 dark:text-rose-300 [--dot:var(--color-rose-500)]",
+  violet: "bg-violet-500/10 text-violet-700 ring-violet-500/20 dark:text-violet-300 [--dot:var(--color-violet-500)]",
 };
 
 export function Pill({ tone = "neutral", children, className }: { tone?: Tone; children: React.ReactNode; className?: string }) {
   return (
-    <Badge variant="secondary" className={cn("rounded-md border-0 font-medium", TONE_CLASS[tone], className)}>
+    <Badge variant="secondary" className={cn("gap-1.5 rounded-full border-0 pr-2.5 pl-2 font-semibold ring-1 ring-inset", TONE_CLASS[tone], className)}>
+      <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-(--dot)" />
       {children}
     </Badge>
   );
@@ -37,7 +38,8 @@ export const PtpStatusBadge = ({ status }: { status: PtpStatus }) => (
 export function PriorityBadge({ priority }: { priority: string }) {
   const p = priority.toUpperCase();
   const tone: Tone = p === "HIGH" || p === "CRITICAL" ? "danger" : p === "MEDIUM" || p === "NORMAL" ? "warning" : "info";
-  const label = priority.charAt(0).toUpperCase() + priority.slice(1).toLowerCase();
+  // Plain words: High/Critical → Urgent, Medium/Normal → Normal, Low → Low.
+  const label = p === "HIGH" || p === "CRITICAL" ? "Urgent" : p === "MEDIUM" || p === "NORMAL" ? "Normal" : "Low";
   return <Pill tone={tone}>{label}</Pill>;
 }
 

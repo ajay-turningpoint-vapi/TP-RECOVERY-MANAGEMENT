@@ -1,14 +1,16 @@
 "use client";
 
 import { useMemo } from "react";
+import { ColorAvatar } from "@/components/app/visual";
+import { FileWarning as FileWarningIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
 import { DataTable } from "@/components/app/data-table";
 import { PageHeader } from "@/components/app/page-header";
 import { DisputeStatusBadge, Pill } from "@/components/app/status";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { formatDate, formatINR, formatINRCompact } from "@/lib/format";
-import type { Dispute } from "@/lib/models";
+import { formatDate, formatINR } from "@/lib/format";
+import { DISPUTE_NEEDS_RE_ACTION, type Dispute } from "@/lib/models";
 import { useRms } from "@/lib/queries";
 import { useUrlState } from "@/lib/use-url-state";
 import { cn } from "@/lib/utils";
@@ -33,6 +35,7 @@ function bucketOf(status: string) {
 }
 
 const STAGES: { value: string; label: string; match: (d: Dispute) => boolean }[] = [
+  { value: "decide", label: "Needs your decision", match: (d) => DISPUTE_NEEDS_RE_ACTION.has(d.status) },
   { value: "all", label: "All", match: () => true },
   { value: "open", label: "Open", match: (d) => bucketOf(d.status) === "OPEN" },
   { value: "progress", label: "In progress", match: (d) => bucketOf(d.status) === "IN PROGRESS" },
@@ -54,14 +57,17 @@ export function DisputesView() {
         header: "Customer",
         accessorFn: (d) => rms.customerName(d.customerId),
         cell: ({ row }) => (
-          <div>
-            <div className="font-medium">{rms.customerName(row.original.customerId)}</div>
+          <div className="flex items-center gap-3">
+            <ColorAvatar name={rms.customerName(row.original.customerId)} />
+            <div>
+            <div className="font-semibold">{rms.customerName(row.original.customerId)}</div>
             <div className="text-xs text-muted-foreground">{row.original.invoiceNumber ? `Invoice ${row.original.invoiceNumber}` : "No invoice"}</div>
+            </div>
           </div>
         ),
       },
       { id: "amount", header: "Disputed", accessorFn: (d) => d.amount, cell: ({ getValue }) => <span className="font-semibold">{formatINR(getValue() as number)}</span>, meta: { align: "right" } },
-      { id: "reason", header: "Reason", accessorFn: (d) => d.reason, cell: ({ getValue }) => <span className="line-clamp-2 max-w-sm">{getValue() as string}</span> },
+      { id: "reason", header: "Reason", accessorFn: (d) => d.reason, cell: ({ getValue }) => <span className="line-clamp-2">{getValue() as string}</span>, meta: { className: "whitespace-normal min-w-[14rem]" } },
       { id: "status", header: "Status", accessorFn: (d) => d.status, cell: ({ getValue }) => <DisputeStatusBadge status={getValue() as string} /> },
       { id: "priority", header: "Priority", accessorFn: (d) => d.priority ?? "", cell: ({ getValue }) => (getValue() ? <Pill tone={getValue() === "High" ? "danger" : "neutral"}>{getValue() as string}</Pill> : "—") },
       { id: "owner", header: "Owner", accessorFn: (d) => (d.resolutionOwner ? rms.salesmanName(d.resolutionOwner) : "—") },
@@ -77,25 +83,12 @@ export function DisputesView() {
     [rms, current.value],
   );
 
-  const overview = rms.disputeOverviewByStatus;
 
   return (
     <div className="mx-auto max-w-[1600px]">
-      <PageHeader
+      <PageHeader icon={<FileWarningIcon />} hue="violet"
         title="Disputes"
-        description="Only the disputed amount is shielded; the rest stays in recovery. Approvals need a resolution owner and deadline."
-        actions={
-          <div className="flex gap-6 text-right">
-            {Object.entries(overview).map(([k, v]) => (
-              <div key={k}>
-                <div className="text-xs text-muted-foreground">{k}</div>
-                <div className="text-sm font-semibold tabular">
-                  {v.count} · {formatINRCompact(v.amount)}
-                </div>
-              </div>
-            ))}
-          </div>
-        }
+        description="Customers who say the bill is wrong. Every dispute is handled here — open one to approve, reject, ask for details or close it."
       />
       <Tabs value={stage} onValueChange={(v) => setStage(String(v))} className="mb-4">
         <TabsList>
@@ -114,6 +107,7 @@ export function DisputesView() {
         searchText={(d) => `${rms.customerName(d.customerId)} ${d.invoiceNumber ?? ""} ${d.reason}`}
         onRowClick={(d) => router.push(`/disputes/${d.id}`)}
         exportName={`disputes-${stage}`}
+        initialHidden={{ priority: false, owner: false, deadline: false }}
         emptyText="No disputes in this stage."
       />
     </div>

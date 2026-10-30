@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 
 const REASONS: Record<string, string> = {
   expired: "Your session expired. Please sign in again.",
-  revoked: "This account signed in on another browser, so you were signed out here.",
+  revoked: "This account was signed in on another device, so you were signed out here.",
   role: "This dashboard is for Recovery Executives only. Please use the TP-RMS mobile app.",
 };
 

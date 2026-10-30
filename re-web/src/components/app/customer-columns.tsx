@@ -4,6 +4,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import type { Customer } from "@/lib/models";
 import { formatINR, formatINRCompact } from "@/lib/format";
 import type { RmsView } from "@/lib/selectors";
+import { ColorAvatar } from "./visual";
 import { CreditHealthBadge, EscalationBadge, Pill, RecoveryStateBadge } from "./status";
 
 /** Shared customer columns for the queue, customer list and salesman portfolio. */
@@ -16,10 +17,13 @@ export function customerColumns<T>(rms: RmsView, get: (row: T) => Customer): Col
       cell: ({ row }) => {
         const c = get(row.original);
         return (
-          <div className="min-w-48">
-            <div className="font-medium">{c.name}</div>
-            <div className="text-xs text-muted-foreground">
-              {c.id} · {c.branch}
+          <div className="flex min-w-52 items-center gap-3">
+            <ColorAvatar name={c.name} />
+            <div className="min-w-0">
+              <div className="truncate font-semibold">{c.name}</div>
+              <div className="text-xs text-muted-foreground">
+                {c.id} · {c.branch}
+              </div>
             </div>
           </div>
         );
@@ -34,27 +38,30 @@ export function customerColumns<T>(rms: RmsView, get: (row: T) => Customer): Col
         return c.ownerMappingRequired || !c.assignedSalesmanId ? (
           <Pill tone="danger">Unmapped</Pill>
         ) : (
-          <span className="whitespace-nowrap">{rms.salesmanName(c.assignedSalesmanId)}</span>
+          <span className="flex items-center gap-2 whitespace-nowrap">
+            <ColorAvatar name={rms.salesmanName(c.assignedSalesmanId)} size="sm" />
+            {rms.salesmanName(c.assignedSalesmanId)}
+          </span>
         );
       },
     },
     {
       id: "totalDue",
-      header: "Overdue",
+      header: "Total Overdue",
       accessorFn: (r) => get(r).totalDue,
-      cell: ({ getValue }) => <span className="font-semibold">{formatINR(getValue() as number)}</span>,
+      cell: ({ getValue }) => <span className="font-bold text-rose-600 dark:text-rose-300">{formatINR(getValue() as number)}</span>,
       meta: { align: "right" },
     },
     {
       id: "totalOutstanding",
-      header: "Outstanding",
+      header: "Total Outstanding",
       accessorFn: (r) => get(r).totalOutstanding,
       cell: ({ getValue }) => formatINRCompact(getValue() as number),
       meta: { align: "right" },
     },
     {
       id: "days",
-      header: "Days",
+      header: "Days late",
       accessorFn: (r) => get(r).oldestOverdueDays,
       cell: ({ getValue }) => {
         const d = getValue() as number;
@@ -64,14 +71,22 @@ export function customerColumns<T>(rms: RmsView, get: (row: T) => Customer): Col
     },
     {
       id: "state",
-      header: "Recovery state",
+      header: "Status",
       accessorFn: (r) => get(r).currentRecoveryState,
       cell: ({ row }) => {
         const c = get(row.original);
         return (
           <div className="min-w-40 space-y-0.5">
             <RecoveryStateBadge state={c.currentRecoveryState} />
-            {c.primaryNextAction && <div className="text-xs text-muted-foreground">Next: {c.primaryNextAction}</div>}
+            {(() => {
+              const step = rms.nextStepFor(c);
+              return step.what ? (
+                <div className="max-w-64 text-xs text-muted-foreground">
+                  Next: <span className="font-medium text-foreground">{step.what}</span>
+                  {step.task && step.why && <div className="line-clamp-2">{step.why}</div>}
+                </div>
+              ) : null;
+            })()}
           </div>
         );
       },

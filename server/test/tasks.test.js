@@ -20,7 +20,7 @@ after(async () => {
   await teardownAll(app);
 });
 
-test('completing a task with a PTP covering only part of the balance keeps a recovery task for the uncovered remainder', async () => {
+test('completing a task while a PTP is open (even one covering only part of the balance) raises no new task until the promise is checked', async () => {
   const token = await login(app.baseUrl, 'rahul');
   // Seed: C1 owes 400000, has task T1 and an active (scheduled) PTP P1 for
   // 150000 — so 250000 is still the salesperson's to recover.
@@ -40,11 +40,13 @@ test('completing a task with a PTP covering only part of the balance keeps a rec
 
   const after1 = await tasksFor(token);
   const openForC1 = after1.filter((t) => t.customerId === 'C1' && t.status !== 'completed' && t.status !== 'closed');
-  // A partial PTP no longer parks the whole customer — driveRecoveryTask
-  // keeps the single `source='Recovery'` call task on the uncovered slice.
-  assert.equal(openForC1.length, 1);
-  assert.equal(openForC1[0].source, 'Recovery');
-  assert.equal(openForC1[0].type, 'customerCall');
+  // PTP rule: any open promise — full or partial — pauses recovery. The
+  // salesman's next task is raised only after the promise date's BUSY check
+  // (ptpVerificationService), never for the "uncovered remainder" now.
+  assert.equal(openForC1.length, 0);
+
+  const detail = await fetch(`${app.baseUrl}/api/customers/C1`, { headers: authHeaders(token) }).then((r) => r.json());
+  assert.equal(detail.outcomeWait && detail.outcomeWait.rule, 'PTP');
 });
 
 test('completing the last open task with money still due and no active PTP reopens recovery', async () => {

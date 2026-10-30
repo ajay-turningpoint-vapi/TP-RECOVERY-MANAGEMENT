@@ -138,7 +138,18 @@ test('requesting more information creates a real task and leaves the dispute ope
   assert.equal(updated.infoRequestNote, 'Please attach the delivery photos');
 
   const tasks = await fetch(`${app.baseUrl}/api/tasks`, { headers: authHeaders(reToken) }).then((r) => r.json());
-  assert.ok(tasks.some((t) => t.customerId === 'C4' && t.ownerId === 'mahesh' && t.source === 'Dispute Review' && t.reason.includes('DISPUTE INFO REQUIRED')));
+  // The salesman answers from this task (linked to the dispute); the app's
+  // task screen keys off the "DISPUTE CLARIFICATION NEEDED:" prefix.
+  assert.ok(
+    tasks.some(
+      (t) =>
+        t.customerId === 'C4' &&
+        t.ownerId === 'mahesh' &&
+        t.source === 'Dispute Review' &&
+        t.disputeId === dispute.id &&
+        t.reason.startsWith('DISPUTE CLARIFICATION NEEDED: Please attach the delivery photos')
+    )
+  );
 });
 
 test('a salesperson cannot reject a dispute or request info', async () => {

@@ -135,8 +135,10 @@ test('RE verifying a claim as successful creates a call-customer follow-up task 
 });
 
 test('RE marking a claim Failed creates a high-priority follow-up call task', async () => {
-  const salespersonToken = await login(app.baseUrl, 'mahesh');
-  const res1 = await fetch(`${app.baseUrl}/api/customers/C5/record-outcome`, {
+  // C3 has nothing else pending (C5 has an open PTP, which by rule pauses
+  // every task until the promise is checked against BUSY).
+  const salespersonToken = await login(app.baseUrl, 'rahul');
+  const res1 = await fetch(`${app.baseUrl}/api/customers/C3/record-outcome`, {
     method: 'POST',
     headers: authHeaders(salespersonToken),
     body: JSON.stringify({ nextAction: 'Verification Pending', reason: 'Payment Already Made', details: 'Amount: ₹3000' }),
@@ -145,7 +147,7 @@ test('RE marking a claim Failed creates a high-priority follow-up call task', as
 
   const reToken = await login(app.baseUrl, 'amit.re');
   const claims = await fetch(`${app.baseUrl}/api/payment-claims`, { headers: authHeaders(reToken) }).then((r) => r.json());
-  const claim = claims.find((c) => c.customerId === 'C5' && c.status === 'Awaiting Verification');
+  const claim = claims.find((c) => c.customerId === 'C3' && c.status === 'Awaiting Verification');
   assert.ok(claim);
 
   const res = await fetch(`${app.baseUrl}/api/payment-claims/${claim.id}/verify`, {
@@ -156,7 +158,7 @@ test('RE marking a claim Failed creates a high-priority follow-up call task', as
   assert.equal(res.status, 200);
 
   const tasks = await fetch(`${app.baseUrl}/api/tasks`, { headers: authHeaders(reToken) }).then((r) => r.json());
-  const followUp = tasks.find((t) => t.customerId === 'C5' && t.source === 'Recovery' && t.status !== 'completed');
+  const followUp = tasks.find((t) => t.customerId === 'C3' && t.source === 'Recovery' && t.status !== 'completed');
   assert.ok(followUp, 'a follow-up call task must be created after rejecting the claim');
   assert.equal(followUp.priority, 'High');
   assert.match(followUp.reason, /could NOT be verified/, 'task reason describes the rejection');

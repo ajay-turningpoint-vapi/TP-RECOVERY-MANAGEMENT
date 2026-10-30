@@ -2,6 +2,8 @@ const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { startTestApp, login, authHeaders } = require('./helpers/app');
 const { resetDb } = require('./helpers/db');
+const customerRepository = require('../src/repositories/customerRepository');
+const { resolveNoAnswerDue } = require('../src/services/noAnswerService');
 const { teardownAll } = require('./helpers/teardown');
 
 let app;
@@ -21,8 +23,12 @@ test('customer detail invoices are camelCase, not raw snake_case SQL columns', a
   const detail = await fetch(`${app.baseUrl}/api/customers/C2`, { headers: authHeaders(token) }).then((r) => r.json());
   assert.ok(detail.invoices.length > 0);
   const invoice = detail.invoices[0];
-  assert.ok(invoice.invoiceNumber, 'expected camelCase invoiceNumber, not snake_case invoice_number');
-  assert.equal(invoice.invoice_number, undefined);
+  // Invoices keep BUSY's own field names (No / Date / DueDate / PendingAmount),
+  // which the app and the RE web both read — never raw SQL columns.
+  assert.ok(invoice.No, 'expected the BUSY invoice number field "No"');
+  assert.ok('PendingAmount' in invoice && 'DueDate' in invoice);
+  assert.equal(invoice.invoice_no, undefined);
+  assert.equal(invoice.pending_amount, undefined);
 });
 
 test('a salesperson only sees their own portfolio, not the whole book', async () => {
@@ -165,20 +171,34 @@ test('management-instruction creates a real task and supersedes prior open tasks
 
   const reToken = await login(app.baseUrl, 'amit.re');
   const deadline = new Date(Date.now() + 2 * 86400000).toISOString();
-  const res = await fetch(`${app.baseUrl}/api/customers/C2/management-instruction`, {
+
+  // Record Outcome rule: while a PTP is open (C2 has P2 scheduled) no task
+  // can be created — the system raises the salesman's task itself once the
+  // promise is checked against BUSY.
+  const locked = await fetch(`${app.baseUrl}/api/customers/C2/management-instruction`, {
     method: 'POST',
     headers: authHeaders(reToken),
     body: JSON.stringify({ salesmanId: 'rahul', desc: 'Call director', deadline, priority: 'Critical' }),
+  });
+  assert.equal(locked.status, 400);
+  assert.match((await locked.json()).error.message, /Promise to Pay is open/);
+
+  // C4 has nothing pending and an open call task (T3) — the instruction
+  // replaces it.
+  const res = await fetch(`${app.baseUrl}/api/customers/C4/management-instruction`, {
+    method: 'POST',
+    headers: authHeaders(reToken),
+    body: JSON.stringify({ salesmanId: 'mahesh', desc: 'Call director', deadline, priority: 'Critical' }),
   });
   assert.equal(res.status, 200);
   const detail = await res.json();
   assert.ok(detail.auditHistory.some((e) => e.type === 'RE_CREATED_INSTRUCTION'));
 
   const tasks = await fetch(`${app.baseUrl}/api/tasks`, { headers: authHeaders(reToken) }).then((r) => r.json());
-  const instruction = tasks.find((t) => t.customerId === 'C2' && t.type === 'managementInstruction' && t.ownerId === 'rahul');
+  const instruction = tasks.find((t) => t.customerId === 'C4' && t.type === 'managementInstruction' && t.ownerId === 'mahesh');
   assert.ok(instruction);
   assert.equal(instruction.reason, 'Call director');
-  const stillOpen = tasks.filter((t) => t.customerId === 'C2' && t.status !== 'completed' && t.status !== 'closed');
+  const stillOpen = tasks.filter((t) => t.customerId === 'C4' && t.status !== 'completed' && t.status !== 'closed');
   assert.equal(stillOpen.length, 1, 'the instruction must be the only open item — every prior open task must be superseded');
 });
 
@@ -218,14 +238,16 @@ test('the 3rd No Answer in a row auto-creates a Physical Visit (due tomorrow 6 P
     (await fetch(`${app.baseUrl}/api/tasks`, { headers: authHeaders(token) }).then((r) => r.json()))
       .filter((t) => t.customerId === 'C3');
 
+  // No Answer rule: the callback task appears only once the 2-hour window
+  // passes (noAnswerService.resolveNoAnswerDue) — never at record time.
   await recordNoAnswer();
   let t = await tasksFor();
-  assert.equal(t.filter((x) => x.type === 'customerCall' && x.source === 'No Answer' && x.status !== 'completed').length, 1, '1st No Answer creates one recurring call task');
+  assert.equal(t.filter((x) => x.type === 'customerCall' && x.source === 'No Answer' && x.status !== 'completed').length, 0, '1st No Answer creates no task yet — the callback waits 2 hours');
   assert.equal(t.filter((x) => x.type === 'physicalVisit' && x.status !== 'completed').length, 0, 'no Physical Visit yet — not at the threshold');
 
   await recordNoAnswer();
   t = await tasksFor();
-  assert.equal(t.filter((x) => x.type === 'customerCall' && x.source === 'No Answer' && x.status !== 'completed').length, 1, '2nd No Answer keeps exactly one recurring call task, never two');
+  assert.equal(t.filter((x) => x.type === 'customerCall' && x.source === 'No Answer' && x.status !== 'completed').length, 0, '2nd No Answer still creates no immediate task');
   assert.equal(t.filter((x) => x.type === 'physicalVisit' && x.status !== 'completed').length, 0, 'still no Physical Visit — only 2 attempts so far');
 
   // 3rd attempt — immediately (not after a full day) rolls into a real Physical Visit.
@@ -267,7 +289,7 @@ test('the 3rd No Answer in a row auto-creates a Physical Visit (due tomorrow 6 P
   t = await tasksFor();
   const visits = t.filter((x) => x.type === 'physicalVisit' && x.reason === 'Non-response threshold reached');
   assert.equal(visits.length, 1, 'no second Physical Visit is raised — only the one from the first cycle');
-  assert.equal(t.filter((x) => x.type === 'customerCall' && x.source === 'No Answer' && x.status !== 'completed').length, 1, 'the salesperson keeps working the normal 2-hourly No Answer cycle');
+  assert.equal(t.filter((x) => x.type === 'customerCall' && x.source === 'No Answer' && x.status !== 'completed').length, 0, 'the 2-hourly cycle continues through the deferred callback, not an immediate task');
 
   // C3 is Rahul's own customer — no need for a fresh RE login just to read it.
   const customer = await fetch(`${app.baseUrl}/api/customers/C3`, { headers: authHeaders(token) }).then((r) => r.json());
@@ -277,25 +299,29 @@ test('the 3rd No Answer in a row auto-creates a Physical Visit (due tomorrow 6 P
 
 test('recording a non-No-Answer outcome closes the recurring No Answer call task', async () => {
   const token = await login(app.baseUrl, 'rahul');
-  const recordNoAnswer = () =>
-    fetch(`${app.baseUrl}/api/customers/C2/record-outcome`, {
-      method: 'POST',
-      headers: authHeaders(token),
-      body: JSON.stringify({ nextAction: 'Call Customer', reason: 'No Answer', details: 'rang out' }),
-    });
+  // C3 has nothing pending (no open PTP), so only the No Answer rule applies.
   const openNoAnswerCalls = async () =>
     (await fetch(`${app.baseUrl}/api/tasks`, { headers: authHeaders(token) }).then((r) => r.json()))
-      .filter((t) => t.customerId === 'C2' && t.type === 'customerCall' && t.source === 'No Answer' && t.status !== 'completed').length;
+      .filter((t) => t.customerId === 'C3' && t.type === 'customerCall' && t.source === 'No Answer' && t.status !== 'completed').length;
 
-  await recordNoAnswer();
-  await recordNoAnswer();
-  assert.equal(await openNoAnswerCalls(), 1, 'a No Answer leaves one recurring call task');
-
-  // A different outcome — the salesman actually reached the customer.
-  await fetch(`${app.baseUrl}/api/customers/C2/record-outcome`, {
+  const res = await fetch(`${app.baseUrl}/api/customers/C3/record-outcome`, {
     method: 'POST',
     headers: authHeaders(token),
-    body: JSON.stringify({ nextAction: 'Follow-up', reason: 'Will Confirm', details: 'call back tomorrow' }),
+    body: JSON.stringify({ nextAction: 'Call Customer', reason: 'No Answer', details: 'rang out' }),
+  });
+  assert.equal(res.status, 200);
+  assert.equal(await openNoAnswerCalls(), 0, 'no task during the 2-hour No Answer window');
+
+  // The 2-hour window passes — the deferred job raises the callback task.
+  const customer = await customerRepository.findById('C3');
+  await resolveNoAnswerDue({ customerId: 'C3', ownerId: 'rahul', attemptNumber: customer.noAnswerAttempts, dueAt: new Date() });
+  assert.equal(await openNoAnswerCalls(), 1, 'once the window passes there is exactly one callback task');
+
+  // A different outcome — the salesman actually reached the customer.
+  await fetch(`${app.baseUrl}/api/customers/C3/record-outcome`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: JSON.stringify({ nextAction: 'Follow-up', reason: 'Will Confirm', details: 'call back tomorrow', followUpAt: new Date(Date.now() + 86400000).toISOString() }),
   });
   assert.equal(await openNoAnswerCalls(), 0, 'recording any real outcome supersedes the No Answer call task');
 });

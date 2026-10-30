@@ -5,6 +5,10 @@ import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { AppProviders } from "@/components/app/providers";
 import { AppSidebar } from "@/components/app/app-sidebar";
 import { Topbar } from "@/components/app/topbar";
+import { PageTransition } from "@/components/app/motion";
+import { Shortcuts } from "@/components/app/shortcuts";
+import { DataStatus } from "@/components/app/data-status";
+import { SyncFreeze } from "@/components/app/sync-freeze";
 import { readSessionUser } from "@/lib/server/session";
 
 export default function AppLayout({ children }: LayoutProps<"/">) {
@@ -28,7 +32,12 @@ async function AuthedShell({ children }: { children: React.ReactNode }) {
         <AppSidebar />
         <SidebarInset className="min-w-0">
           <Topbar />
-          <div className="flex-1 px-4 py-6 md:px-6 lg:px-8">{children}</div>
+          <div className="flex-1 px-4 py-6 md:px-6 lg:px-8">
+            <DataStatus />
+            <PageTransition>{children}</PageTransition>
+          </div>
+          <Shortcuts />
+          <SyncFreeze />
         </SidebarInset>
       </SidebarProvider>
     </AppProviders>

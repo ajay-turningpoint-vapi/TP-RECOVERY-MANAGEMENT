@@ -1,26 +1,67 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
-import { ArrowUpRight, CheckCircle2, Siren } from "lucide-react";
+import { useMemo, useState } from "react";
+import { ChevronDown, ChevronRight, CircleCheck, Siren, TriangleAlert, UserRound } from "lucide-react";
 import { ActionDialog, useDialog } from "@/components/app/action-dialog";
 import { PageHeader } from "@/components/app/page-header";
 import { useSessionUser } from "@/components/app/providers";
-import { Pill } from "@/components/app/status";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { deadlineInput, localToIso, useRmsAction } from "@/lib/actions";
-import { formatDate, formatINR, formatINRCompact, timeAgo } from "@/lib/format";
+import { formatINR, timeAgo } from "@/lib/format";
 import type { Escalation } from "@/lib/models";
 import { useRms } from "@/lib/queries";
+import { useUrlState } from "@/lib/use-url-state";
 import { cn } from "@/lib/utils";
+import { format } from "date-fns";
 
-const COLUMNS = [
-  { level: "L2", title: "L2 · RE Supervision", hint: "Review Customer 360, then assign a task, instruct or escalate." },
-  { level: "L3", title: "L3 · RE Control", hint: "Needs an RE owner, plan, next action and deadline." },
-  { level: "L4", title: "L4 · Management Attention", hint: "Tracked case — not just a red badge." },
+/** Same L2 / L3 / L4 / Resolved tabs as the mobile Escalations screen. */
+const TABS = [
+  {
+    key: "L2",
+    label: "L2",
+    name: "You keep watch",
+    help: "The customer broke a payment promise twice. Check the customer and give the salesman a task.",
+    tab: "data-active:bg-amber-500",
+    band: "border-amber-300 bg-amber-50 text-amber-950 dark:bg-amber-500/10 dark:text-amber-100",
+    stripe: "border-l-amber-500",
+  },
+  {
+    key: "L3",
+    label: "L3",
+    name: "You take charge",
+    help: "Broken three times. You now own the case — write a plan and a date for each one.",
+    tab: "data-active:bg-orange-600",
+    band: "border-orange-300 bg-orange-50 text-orange-950 dark:bg-orange-500/10 dark:text-orange-100",
+    stripe: "border-l-orange-600",
+  },
+  {
+    key: "L4",
+    label: "L4",
+    name: "Management must help",
+    help: "The most serious cases. Management is following these.",
+    tab: "data-active:bg-red-700",
+    band: "border-red-300 bg-red-50 text-red-950 dark:bg-red-500/10 dark:text-red-100",
+    stripe: "border-l-red-700",
+  },
+  {
+    key: "solved",
+    label: "Solved",
+    name: "Closed cases",
+    help: "Cases that have been marked as solved.",
+    tab: "data-active:bg-green-700",
+    band: "border-green-300 bg-green-50 text-green-950 dark:bg-green-500/10 dark:text-green-100",
+    stripe: "border-l-green-600",
+  },
 ] as const;
+
+/** "3 confirmed Broken PTP (each reconciled …)" → "Broke a payment promise 3 times". Falls back to the original text. */
+function shortReason(reason: string) {
+  const m = reason.match(/(\d+)\s+confirmed\s+broken\s+ptp/i);
+  if (m) return `Broke a payment promise ${m[1]} times`;
+  return reason;
+}
 
 export function EscalationsView() {
   const rms = useRms();
@@ -28,128 +69,116 @@ export function EscalationsView() {
   const action = useRmsAction();
   const resolve = useDialog<Escalation>();
   const raise = useDialog<Escalation>();
+  const [tab, setTab] = useUrlState("level", "L2");
 
-  const open = rms.openEscalations;
-  const resolved = useMemo(
-    () => rms.escalations.filter((e) => !e.isOpen),
-    [rms.escalations],
+  const byTab = useMemo(
+    () => ({
+      L2: rms.openEscalations.filter((e) => e.level === "L2"),
+      L3: rms.openEscalations.filter((e) => e.level === "L3"),
+      L4: rms.openEscalations.filter((e) => e.level === "L4"),
+      solved: rms.escalations.filter((e) => !e.isOpen),
+    }),
+    [rms.openEscalations, rms.escalations],
   );
+  const current = TABS.find((t) => t.key === tab) ?? TABS[0];
+  const cases = byTab[current.key];
+  const openMoney = rms.openEscalations.reduce((s, e) => s + e.moneyAtRisk, 0);
 
   return (
-    <div className="mx-auto max-w-[1600px]">
+    <div className="mx-auto max-w-[1400px]">
       <PageHeader
+        icon={<Siren />}
+        hue="rose"
         title="Escalations"
-        description="1st broken PTP = L1 (salesperson leads). 2nd = L2 RE supervision. 3rd = L3 RE control. Serious L3 = L4 management attention."
+        description="Customers who broke their payment promise again and again."
         actions={
-          <div className="text-right">
-            <div className="text-xs text-muted-foreground">Money at risk in open cases</div>
-            <div className="text-lg font-semibold tabular">{formatINRCompact(open.reduce((s, e) => s + e.moneyAtRisk, 0))}</div>
+          <div className="rounded-xl border-2 bg-card px-4 py-2 text-right">
+            <div className="text-sm text-muted-foreground">Money in open cases</div>
+            <div className="text-xl font-bold text-red-700 tabular dark:text-red-300">{formatINR(openMoney)}</div>
           </div>
         }
       />
-      <div className="grid gap-4 lg:grid-cols-3">
-        {COLUMNS.map((col) => {
-          const cases = open.filter((e) => e.level === col.level);
+
+      {/* Big level tabs with counts */}
+      <div role="tablist" className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+        {TABS.map((t) => {
+          const active = t.key === current.key;
           return (
-            <section key={col.level} className="flex flex-col rounded-xl border bg-muted/30">
-              <header className="border-b px-4 py-3">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-sm font-semibold">{col.title}</h2>
-                  <Pill tone={col.level === "L2" ? "warning" : "danger"}>{cases.length}</Pill>
-                </div>
-                <p className="mt-0.5 text-xs text-muted-foreground">{col.hint}</p>
-              </header>
-              <div className="flex-1 space-y-3 p-3">
-                {rms.isLoading && <Skeleton className="h-32 w-full" />}
-                {!rms.isLoading && cases.length === 0 && <p className="py-8 text-center text-xs text-muted-foreground">No open {col.level} cases.</p>}
-                {cases.map((e) => {
-                  const late = e.deadline < new Date();
-                  return (
-                    <Card key={e.id} size="sm" className="gap-3">
-                      <CardContent className="space-y-2.5">
-                        <div className="flex items-start justify-between gap-2">
-                          <Link href={`/customers/${encodeURIComponent(e.customerId)}`} className="font-medium hover:underline">
-                            {rms.customerName(e.customerId)}
-                          </Link>
-                          <span className="shrink-0 text-sm font-semibold tabular">{formatINRCompact(e.moneyAtRisk)}</span>
-                        </div>
-                        <p className="text-sm text-muted-foreground">{e.reason}</p>
-                        {e.plan ? (
-                          <p className="rounded-md bg-background px-2 py-1.5 text-xs">
-                            <span className="font-medium">Plan:</span> {e.plan}
-                          </p>
-                        ) : (
-                          <Pill tone="danger">No plan recorded</Pill>
-                        )}
-                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                          <span>Owner: {e.ownerId ? (e.ownerId === user.id ? "You" : rms.salesmanName(e.ownerId)) : "—"}</span>
-                          <span className={cn(late && "font-medium text-destructive")}>
-                            {late ? "Overdue · " : "Due "}
-                            {formatDate(e.deadline)}
-                          </span>
-                          <span>Opened {timeAgo(e.createdAt)}</span>
-                        </div>
-                        <div className="flex gap-2 pt-1">
-                          <Button size="sm" variant="outline" onClick={() => resolve.open(e)}>
-                            <CheckCircle2 /> Resolve
-                          </Button>
-                          {e.level !== "L4" && (
-                            <Button size="sm" variant="outline" onClick={() => raise.open(e)}>
-                              <Siren /> To {e.level === "L2" ? "L3" : "L4"}
-                            </Button>
-                          )}
-                          <Button size="icon-sm" variant="ghost" className="ml-auto" render={<Link href={`/customers/${encodeURIComponent(e.customerId)}`} />} aria-label="Open customer">
-                            <ArrowUpRight />
-                          </Button>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
+            <button
+              key={t.key}
+              role="tab"
+              aria-selected={active}
+              data-active={active ? "" : undefined}
+              onClick={() => setTab(t.key)}
+              className={cn(
+                "rounded-xl border-2 bg-card p-4 text-left transition-colors hover:border-primary",
+                "data-active:border-transparent data-active:text-white",
+                t.tab,
+              )}
+            >
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-lg font-bold">{t.label}</span>
+                <span className="text-2xl font-bold tabular">{rms.isLoading ? "…" : byTab[t.key].length}</span>
               </div>
-            </section>
+              <div className={cn("text-sm", active ? "text-white/90" : "text-muted-foreground")}>{t.name}</div>
+            </button>
           );
         })}
       </div>
 
-      <h2 className="mt-8 mb-3 text-sm font-semibold">Resolved ({resolved.length})</h2>
-      <div className="overflow-hidden rounded-xl border bg-card">
-        {resolved.length === 0 ? (
-          <p className="p-6 text-center text-sm text-muted-foreground">No resolved cases yet.</p>
-        ) : (
-          resolved.map((e) => (
-            <div key={e.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b px-4 py-2.5 text-sm last:border-0">
-              <Pill tone="success">{e.level}</Pill>
-              <Link href={`/customers/${encodeURIComponent(e.customerId)}`} className="font-medium hover:underline">
-                {rms.customerName(e.customerId)}
-              </Link>
-              <span className="text-muted-foreground">{e.reason}</span>
-              <span className="ml-auto text-xs text-muted-foreground">
-                {formatINR(e.moneyAtRisk)} · resolved {e.resolvedAt ? timeAgo(e.resolvedAt) : ""}
-              </span>
-            </div>
-          ))
-        )}
+      {/* What this level means, in one sentence */}
+      <div className={cn("mb-5 rounded-xl border-2 px-5 py-3 text-[15px]", current.band)}>
+        <span className="font-bold">
+          {current.label} · {current.name}.
+        </span>{" "}
+        {current.help}
       </div>
+
+      {rms.isLoading ? (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {[0, 1, 2].map((k) => (
+            <Skeleton key={k} className="h-56 w-full rounded-xl" />
+          ))}
+        </div>
+      ) : cases.length === 0 ? (
+        <div className="flex items-center gap-3 rounded-xl border-2 bg-card p-8 text-lg">
+          <CircleCheck className="size-6 text-green-700" />
+          {current.key === "solved" ? "No solved cases yet." : `No open ${current.label} cases. Good.`}
+        </div>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {cases.map((e) => (
+            <CaseCard
+              key={e.id}
+              e={e}
+              stripe={current.stripe}
+              name={rms.customerName(e.customerId)}
+              owner={e.ownerId ? (e.ownerId === user.id ? "You" : rms.salesmanName(e.ownerId)) : "—"}
+              onResolve={() => resolve.open(e)}
+              onRaise={() => raise.open(e)}
+            />
+          ))}
+        </div>
+      )}
 
       <ActionDialog
         {...resolve.props}
-        title="Resolve escalation"
+        title="Mark this case as solved"
         description={resolve.target ? `${rms.customerName(resolve.target.customerId)} · ${resolve.target.level}` : undefined}
-        submitLabel="Resolve"
-        fields={[{ name: "note", label: "Resolution note", type: "textarea", required: true }]}
-        onSubmit={(v) => action.mutateAsync({ path: `/escalations/${resolve.target!.id}/resolve`, body: { note: v.note }, success: "Escalation resolved." })}
+        submitLabel="Mark solved"
+        fields={[{ name: "note", label: "What was done to solve it?", type: "textarea", required: true }]}
+        onSubmit={(v) => action.mutateAsync({ path: `/escalations/${resolve.target!.id}/resolve`, body: { note: v.note }, success: "Case marked as solved." })}
       />
       <ActionDialog
         {...raise.props}
-        title={`Escalate to ${raise.target?.level === "L2" ? "L3" : "L4"}`}
+        title={`Move to ${raise.target?.level === "L2" ? "L3" : "L4"}`}
         description={raise.target ? rms.customerName(raise.target.customerId) : undefined}
-        submitLabel="Escalate"
+        submitLabel="Move up"
         destructive
         fields={[
-          { name: "reason", label: "Reason", type: "textarea", required: true },
-          { name: "plan", label: "Recovery plan", type: "textarea", required: true, defaultValue: raise.target?.plan },
-          { name: "deadline", label: "Plan deadline", type: "datetime", required: true, defaultValue: deadlineInput(3, 18) },
+          { name: "reason", label: "Why move it up?", type: "textarea", required: true },
+          { name: "plan", label: "What is the plan?", type: "textarea", required: true, defaultValue: raise.target?.plan },
+          { name: "deadline", label: "Plan finish date", type: "datetime", required: true, defaultValue: deadlineInput(3, 18) },
         ]}
         onSubmit={(v) =>
           action.mutateAsync({
@@ -162,10 +191,111 @@ export function EscalationsView() {
               deadline: localToIso(v.deadline),
               moneyAtRisk: raise.target!.moneyAtRisk,
             },
-            success: "Escalated.",
+            success: "Case moved up.",
           })
         }
       />
     </div>
+  );
+}
+
+function CaseCard({
+  e,
+  stripe,
+  name,
+  owner,
+  onResolve,
+  onRaise,
+}: {
+  e: Escalation;
+  stripe: string;
+  name: string;
+  owner: string;
+  onResolve: () => void;
+  onRaise: () => void;
+}) {
+  const [showPlan, setShowPlan] = useState(false);
+  const late = e.isOpen && e.deadline < new Date();
+
+  return (
+    <article className={cn("flex flex-col rounded-xl border-2 border-l-[6px] bg-card", stripe)}>
+      <div className="space-y-3 p-4">
+        {/* Who + how much */}
+        <div>
+          <Link href={`/customers/${encodeURIComponent(e.customerId)}`} className="text-base leading-snug font-bold break-words hover:underline">
+            {name}
+          </Link>
+          <div className="mt-1 text-2xl font-bold text-red-700 tabular dark:text-red-300">{formatINR(e.moneyAtRisk)}</div>
+          <div className="text-sm text-muted-foreground">money at risk</div>
+        </div>
+
+        {/* What happened, short */}
+        <div className="flex items-start gap-2 rounded-lg bg-muted/60 px-3 py-2 text-[15px] font-medium">
+          <TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber-700" />
+          <span className="break-words">{shortReason(e.reason)}</span>
+        </div>
+
+        {/* Facts */}
+        <dl className="space-y-1.5 text-[15px]">
+          <div className="flex items-center justify-between gap-3">
+            <dt className="flex items-center gap-1.5 text-muted-foreground">
+              <UserRound className="size-4" /> Handled by
+            </dt>
+            <dd className="text-right font-semibold">{owner}</dd>
+          </div>
+          {e.isOpen && (
+            <div className="flex items-center justify-between gap-3">
+              <dt className="text-muted-foreground">Plan due</dt>
+              <dd className={cn("text-right font-semibold", late && "text-red-700 dark:text-red-300")}>
+                {late && "Late · "}
+                {format(e.deadline, "d MMM yyyy")}
+              </dd>
+            </div>
+          )}
+          <div className="flex items-center justify-between gap-3">
+            <dt className="text-muted-foreground">{e.isOpen ? "Opened" : "Solved"}</dt>
+            <dd className="text-right font-semibold">{timeAgo(e.isOpen ? e.createdAt : (e.resolvedAt ?? e.createdAt))}</dd>
+          </div>
+        </dl>
+
+        {/* Plan: a clear yes/no, details on request */}
+        {e.plan.trim() ? (
+          <div>
+            <button
+              type="button"
+              onClick={() => setShowPlan((s) => !s)}
+              className="flex items-center gap-1.5 text-[15px] font-semibold text-green-800 dark:text-green-300"
+            >
+              <CircleCheck className="size-4" /> Plan written
+              <span className="ml-1 inline-flex items-center text-sm font-medium text-primary">
+                {showPlan ? "Hide plan" : "See plan"} {showPlan ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+              </span>
+            </button>
+            {showPlan && <p className="mt-2 rounded-lg border-2 bg-muted/40 p-3 text-sm">{e.plan}</p>}
+          </div>
+        ) : (
+          <p className="flex items-center gap-1.5 text-[15px] font-semibold text-red-700 dark:text-red-300">
+            <TriangleAlert className="size-4" /> No plan yet
+          </p>
+        )}
+      </div>
+
+      {e.isOpen && (
+        <div className="mt-auto grid grid-cols-2 gap-2 border-t-2 p-3">
+          <Button variant="outline" onClick={onResolve}>
+            <CircleCheck /> Mark solved
+          </Button>
+          {e.level !== "L4" ? (
+            <Button variant="outline" onClick={onRaise}>
+              <Siren /> Move to {e.level === "L2" ? "L3" : "L4"}
+            </Button>
+          ) : (
+            <Button variant="outline" render={<Link href={`/customers/${encodeURIComponent(e.customerId)}`} />}>
+              Open customer
+            </Button>
+          )}
+        </div>
+      )}
+    </article>
   );
 }

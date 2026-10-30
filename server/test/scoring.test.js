@@ -9,10 +9,15 @@ test('computeCreditHealthScore returns null (Insufficient History) for a custome
 });
 
 test('computeCreditHealthScore drops for a customer with severe overdue ageing, an open dispute, and an active escalation', () => {
-  const healthy = { totalDue: 1000, oldestOverdueDays: 0, disputedAmount: 0, escalationLevel: 'none' };
-  const unhealthy = { totalDue: 1000, oldestOverdueDays: 120, disputedAmount: 500, escalationLevel: 'L2' };
-  const healthyScore = scoringService.computeCreditHealthScore(healthy, []);
-  const unhealthyScore = scoringService.computeCreditHealthScore(unhealthy, []);
+  // The score also uses BUSY's credit limit (exposure) and last receipt
+  // (recent trend), so a genuinely healthy account has room on its limit,
+  // paid recently and kept its promises.
+  const recent = new Date(Date.now() - 5 * 86400000).toISOString();
+  const healthy = { totalDue: 1000, totalOutstanding: 1000, creditLimit: 100000, lastPaymentDate: recent, oldestOverdueDays: 0, disputedAmount: 0, escalationLevel: 'none' };
+  const unhealthy = { totalDue: 1000, totalOutstanding: 1000, creditLimit: 0, lastPaymentDate: null, oldestOverdueDays: 120, disputedAmount: 500, escalationLevel: 'L2' };
+  const kept = [{ status: 'kept' }, { status: 'kept' }];
+  const healthyScore = scoringService.computeCreditHealthScore(healthy, kept);
+  const unhealthyScore = scoringService.computeCreditHealthScore(unhealthy, [{ status: 'broken' }]);
   assert.ok(healthyScore > unhealthyScore, `expected a healthy account to score higher (${healthyScore} vs ${unhealthyScore})`);
   assert.equal(scoringService.creditHealthBand(healthyScore), 'Low Risk');
 });
@@ -36,7 +41,8 @@ test('computeCreditHealthScore rewards a real kept-PTP track record over a broke
 
 test('computeRecoveryScoreComponents rewards genuine collection performance against target', () => {
   const ownedCustomers = [{ id: 'X1', totalDue: 100000, oldestOverdueDays: 10, escalationLevel: 'none' }];
-  const target = 100000 * 0.12;
+  // Tier 1 recovery target: 25% of overdue (same as the app's Recovery Target report).
+  const target = 100000 * 0.25;
   const goodPtps = [{ customerId: 'X1', status: 'kept', amountReceived: target }];
   const badPtps = [{ customerId: 'X1', status: 'broken', amountReceived: 0 }];
   const empty = { ownedTasks: [], auditByCustomer: new Map(), taskByCustomer: new Map() };

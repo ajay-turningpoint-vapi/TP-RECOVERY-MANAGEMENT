@@ -135,7 +135,7 @@ export function SalesmanDetail({ id }: { id: string }) {
             <Button
               variant="outline"
               disabled={action.isPending}
-              onClick={() => action.mutate({ path: `/salesmen/${encodeURIComponent(s.id)}/dismiss-underperformance`, success: "Marked reviewed for this month." })}
+              onClick={() => action.mutate({ path: `/salesmen/${encodeURIComponent(s.id)}/dismiss-underperformance`, success: "Marked as checked for this month." })}
             >
               <CheckCircle2 /> Mark reviewed this month
             </Button>
@@ -247,7 +247,10 @@ export function SalesmanDetail({ id }: { id: string }) {
         onSubmit={async (v) => {
           let ok = 0;
           const failed: string[] = [];
-          for (const cid of selected) {
+          const ids = [...selected];
+          const tid = toast.loading(`Moving customers… 0 of ${ids.length}`);
+          for (const cid of ids) {
+            toast.loading(`Moving customers… ${ok + failed.length + 1} of ${ids.length}`, { id: tid });
             try {
               await rmsPost(`/customers/${encodeURIComponent(cid)}/reassign`, { toSalesmanId: v.toSalesmanId, reason: v.reason });
               ok++;
@@ -257,8 +260,13 @@ export function SalesmanDetail({ id }: { id: string }) {
           }
           qc.invalidateQueries();
           setSelected(new Set());
-          if (failed.length) toast.error(`Reassigned ${ok}; failed: ${failed.slice(0, 3).join(", ")}${failed.length > 3 ? "…" : ""}`);
-          else toast.success(`Reassigned ${ok} customer${ok === 1 ? "" : "s"}.`);
+          if (failed.length)
+            toast.error(`Moved ${ok} customer${ok === 1 ? "" : "s"}. ${failed.length} could not be moved.`, {
+              id: tid,
+              duration: 10_000,
+              description: `Not moved: ${failed.slice(0, 3).join(", ")}${failed.length > 3 ? "…" : ""}. Please try those again.`,
+            });
+          else toast.success(`Moved ${ok} customer${ok === 1 ? "" : "s"} to the new salesman.`, { id: tid });
         }}
       />
     </div>

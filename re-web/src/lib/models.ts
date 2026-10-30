@@ -76,6 +76,9 @@ export type Customer = {
   coveredAmount: number;
   actionableAmount: number;
   outcomeWaitText: string | null;
+  /** Which Record Outcome rule is holding the customer (PTP, Will Confirm, No Answer, …) and until when. */
+  outcomeWaitRule: string | null;
+  outcomeWaitUntil: Date | null;
   oldestOverdueDays: number;
   currentRecoveryState: string;
   primaryNextAction: string;
@@ -117,6 +120,8 @@ export function parseCustomer(j: Json): Customer {
     coveredAmount: numv(j.coveredAmount),
     actionableAmount: numv(j.actionableAmount),
     outcomeWaitText: optStr((j.outcomeWait as Json | undefined)?.text),
+    outcomeWaitRule: optStr((j.outcomeWait as Json | undefined)?.rule),
+    outcomeWaitUntil: (j.outcomeWait as Json | undefined)?.until ? new Date((j.outcomeWait as Json).until as string) : null,
     oldestOverdueDays: numv(j.oldestOverdueDays),
     currentRecoveryState: str(j.currentRecoveryState),
     primaryNextAction: str(j.primaryNextAction),

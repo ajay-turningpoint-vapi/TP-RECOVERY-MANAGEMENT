@@ -4,7 +4,7 @@ const auditRepository = require('../repositories/auditRepository');
 const { notifyDecision, salesmanForCustomer } = require('./decisionNotify');
 const { driveRecoveryTask, rupees } = require('./recoveryTaskService');
 const { withTransaction } = require('../config/db');
-const { NotFoundError } = require('../errors/AppError');
+const { NotFoundError, ConflictError } = require('../errors/AppError');
 
 async function listForUser(user) {
   if (user.role === 'SALESPERSON') {
@@ -26,8 +26,16 @@ async function verify(claimId, user, success) {
   const claim = await paymentClaimRepository.findById(claimId);
   if (!claim) throw new NotFoundError('Payment claim');
 
+  // Decided once only — ZAKARIA KHAN, 29 Oct: the same claim was verified
+  // twice 29 s apart, logging it twice and cutting the balance twice.
+  const alreadyDecided = () =>
+    new ConflictError(`This payment claim was already ${claim.status === 'Failed' ? 'marked No Payment Found' : 'verified'}.`);
+  if (!['Awaiting Verification', 'Sync Pending'].includes(claim.status)) throw alreadyDecided();
+
   await withTransaction(async (conn) => {
-    await paymentClaimRepository.updateStatus(claimId, success ? 'Verified' : 'Failed', conn);
+    if (!(await paymentClaimRepository.decideIfOpen(claimId, success ? 'Verified' : 'Failed', conn))) {
+      throw alreadyDecided();
+    }
 
     if (success) {
       const customer = await customerRepository.findById(claim.customerId);

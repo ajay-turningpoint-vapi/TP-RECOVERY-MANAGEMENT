@@ -3,7 +3,9 @@
 import { useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { redirectToLogin, refreshSession } from "@/lib/api";
+import { isOwnSessionChange, redirectToLogin, refreshSession } from "@/lib/api";
+import type { SyncStatus } from "@/lib/models";
+import { useSessionUser } from "./providers";
 
 /**
  * One SSE stream (GET /api/events via the BFF proxy) → TanStack Query
@@ -20,6 +22,7 @@ const CORE = new Set(["customers", "tasks", "ptps", "disputes"]);
 
 export function RealtimeBridge() {
   const qc = useQueryClient();
+  const { sessionVersion } = useSessionUser();
   const pending = useRef(new Set<string>());
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -57,13 +60,30 @@ export function RealtimeBridge() {
           queue(["notifications"]);
           break;
         case "sync":
+          // Lock/unlock at once from the event, then confirm with the server.
+          qc.setQueryData<SyncStatus>(["sync-status"], (old) => ({
+            lastSync: old?.lastSync ?? null,
+            syncing: data.phase === "started",
+            since: data.phase === "started" ? ((data.since as string | undefined) ?? new Date().toISOString()) : null,
+          }));
           qc.invalidateQueries({ queryKey: ["sync-status"] });
           if (data.phase === "finished") qc.invalidateQueries();
           break;
         case "session-revoked":
-          // The server only sends web-channel revocations to web streams.
-          // Our own login's echo can't reach us: this stream opens after login.
-          toast.error("This account signed in on another browser, so you were signed out here.");
+          // Single-device login (server authService.login): another device
+          // signed in. Same self-check as the app — ignore the echo of our
+          // own login, whose version matches our token.
+          if (data.sessionVersion == null || data.sessionVersion === sessionVersion || isOwnSessionChange()) break;
+          // Another tab of THIS browser signed in (cookies are shared, so
+          // they already hold the new session): just pick it up. Signing
+          // out here would wipe that fresh session too.
+          if (cookieSessionVersion() === data.sessionVersion) {
+            stopped = true;
+            controller?.abort();
+            window.location.reload();
+            break;
+          }
+          toast.error("This account was signed in on another device, so you were signed out here.");
           setTimeout(() => {
             fetch("/api/auth/logout", { method: "POST" }).finally(() => redirectToLogin("revoked"));
           }, 1500);
@@ -138,7 +158,17 @@ export function RealtimeBridge() {
       controller?.abort();
       if (timer.current) clearTimeout(timer.current);
     };
-  }, [qc]);
+  }, [qc, sessionVersion]);
 
   return null;
+}
+
+/** sessionVersion in the readable `rms_user` cookie — the session this browser holds right now. */
+function cookieSessionVersion(): number | null {
+  try {
+    const raw = document.cookie.split("; ").find((c) => c.startsWith("rms_user="));
+    return raw ? (JSON.parse(decodeURIComponent(raw.slice(9))).sessionVersion ?? null) : null;
+  } catch {
+    return null;
+  }
 }

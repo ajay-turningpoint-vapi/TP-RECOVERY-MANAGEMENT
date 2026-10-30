@@ -2,6 +2,10 @@ import { notFound } from "next/navigation";
 import { REPORTS } from "../catalog";
 import { ReportView } from "./report-view";
 
+export function generateStaticParams() {
+  return REPORTS.map((r) => ({ slug: r.slug }));
+}
+
 export async function generateMetadata({ params }: PageProps<"/reports/[slug]">) {
   const { slug } = await params;
   return { title: REPORTS.find((r) => r.slug === slug)?.title ?? "Report" };

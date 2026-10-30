@@ -3,8 +3,8 @@ const authService = require('../services/authService');
 const userRepository = require('../repositories/userRepository');
 
 const login = asyncHandler(async (req, res) => {
-  const { username, password, client } = req.body;
-  const result = await authService.login(username, password, client || 'mobile');
+  const { username, password } = req.body;
+  const result = await authService.login(username, password);
   res.json(result);
 });
 
@@ -28,7 +28,7 @@ const me = asyncHandler(async (req, res) => {
 
 const changePassword = asyncHandler(async (req, res) => {
   const { newPassword } = req.body;
-  const result = await authService.changePassword(req.user.id, newPassword, req.user.channel === 'web' ? 'web' : 'mobile');
+  const result = await authService.changePassword(req.user.id, newPassword);
   res.json(result);
 });
 

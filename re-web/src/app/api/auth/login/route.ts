@@ -18,9 +18,9 @@ export async function POST(request: NextRequest) {
     upstream = await fetch(rmsApiUrl("/api/auth/login"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      // 'web' = separate session channel (server migration 040), so this
-      // login never signs the RE out of the mobile app.
-      body: JSON.stringify({ username: username.trim(), password, client: "web" }),
+      // Same request as the mobile app. The server's single-device rule
+      // applies: this sign-in ends any other session (phone or browser).
+      body: JSON.stringify({ username: username.trim(), password }),
       cache: "no-store",
     });
   } catch {

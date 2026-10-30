@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   flexRender,
   getCoreRowModel,
@@ -12,21 +12,26 @@ import {
   type SortingState,
   type VisibilityState,
 } from "@tanstack/react-table";
-import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, ChevronsUpDown, Columns3, Download, Search } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuLabel,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  ArrowDown,
+  ArrowUp,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsUpDown,
+  Download,
+  Search,
+  SearchX,
+  CircleAlert,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { downloadCsv } from "@/lib/csv";
+import { useRmsData } from "@/lib/queries";
+import { EmptyState } from "./empty-state";
+import { SimpleSelect } from "./simple-select";
 
 declare module "@tanstack/react-table" {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -52,7 +57,6 @@ export function DataTable<T>({
   pageSize = 25,
   emptyText = "Nothing to show.",
   rowClassName,
-  dense,
 }: {
   columns: ColumnDef<T, unknown>[];
   data: T[];
@@ -73,6 +77,21 @@ export function DataTable<T>({
   const [sorting, setSorting] = useState<SortingState>(initialSorting);
   const [visibility, setVisibility] = useState<VisibilityState>(initialHidden);
   const [query, setQuery] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
+  const { loadFailed } = useRmsData();
+
+  // "/" jumps to this table's search box (ignored while typing elsewhere).
+  useEffect(() => {
+    if (!searchText) return;
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (e.key !== "/" || e.metaKey || e.ctrlKey || el?.closest("input, textarea, select, [contenteditable=true]")) return;
+      e.preventDefault();
+      searchRef.current?.focus();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [searchText]);
 
   const filtered = useMemo(() => {
     if (!searchText || !query.trim()) return data;
@@ -116,54 +135,33 @@ export function DataTable<T>({
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         {searchText && (
-          <div className="relative w-full sm:w-72">
-            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+          <div className="relative w-full sm:w-80">
+            <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-foreground" />
             <Input
+              ref={searchRef}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => e.key === "Escape" && (setQuery(""), e.currentTarget.blur())}
               placeholder={searchPlaceholder}
-              className="h-8 pl-8"
+              className="pl-10"
             />
           </div>
         )}
         {toolbar}
         <div className="ml-auto flex items-center gap-2">
-          <DropdownMenu>
-            <DropdownMenuTrigger render={<Button variant="outline" size="sm" />}>
-              <Columns3 />
-              Columns
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuGroup>
-                <DropdownMenuLabel>Show columns</DropdownMenuLabel>
-                {table
-                  .getAllLeafColumns()
-                  .filter((c) => c.getCanHide() && c.id !== "actions")
-                  .map((c) => (
-                    <DropdownMenuCheckboxItem
-                      key={c.id}
-                      checked={c.getIsVisible()}
-                      onCheckedChange={(v) => c.toggleVisibility(!!v)}
-                    >
-                      {typeof c.columnDef.header === "string" ? c.columnDef.header : c.id}
-                    </DropdownMenuCheckboxItem>
-                  ))}
-              </DropdownMenuGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
           {exportName && (
-            <Button variant="outline" size="sm" onClick={exportCsv} disabled={!total}>
+            <Button variant="outline" onClick={exportCsv} disabled={!total}>
               <Download />
-              Export
+              Download (Excel)
             </Button>
           )}
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-xl border bg-card">
-        <div className="overflow-x-auto">
+      <div className="overflow-hidden rounded-xl border-2 bg-card">
+        <div className="max-h-[70vh] overflow-auto">
           <Table>
-            <TableHeader className="bg-muted/50">
+            <TableHeader className="sticky top-0 z-10 bg-muted">
               {table.getHeaderGroups().map((hg) => (
                 <TableRow key={hg.id} className="hover:bg-transparent">
                   {hg.headers.map((h) => {
@@ -173,7 +171,7 @@ export function DataTable<T>({
                       <TableHead
                         key={h.id}
                         className={cn(
-                          "h-9 text-xs font-medium whitespace-nowrap text-muted-foreground",
+                          "h-11 text-[15px] font-semibold whitespace-nowrap text-foreground",
                           align === "right" && "text-right",
                           align === "center" && "text-center",
                           h.column.columnDef.meta?.className,
@@ -203,6 +201,7 @@ export function DataTable<T>({
                       </TableHead>
                     );
                   })}
+                  {onRowClick && <TableHead className="w-28" />}
                 </TableRow>
               ))}
             </TableHeader>
@@ -211,16 +210,25 @@ export function DataTable<T>({
                 Array.from({ length: 8 }).map((_, i) => (
                   <TableRow key={i}>
                     {table.getVisibleLeafColumns().map((c) => (
-                      <TableCell key={c.id}>
-                        <Skeleton className="h-4 w-full max-w-32" />
+                      <TableCell key={c.id} className="py-3">
+                        <Skeleton className="h-4 w-full max-w-32" style={{ animationDelay: `${i * 60}ms` }} />
                       </TableCell>
                     ))}
+                    {onRowClick && <TableCell />}
                   </TableRow>
                 ))
               ) : table.getRowModel().rows.length === 0 ? (
                 <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={table.getVisibleLeafColumns().length} className="h-32 text-center text-muted-foreground">
-                    {emptyText}
+                  <TableCell colSpan={table.getVisibleLeafColumns().length + (onRowClick ? 1 : 0)} className="p-0">
+                    {loadFailed ? (
+                      <EmptyState icon={<CircleAlert />} title="Could not load this list" hint="See the red message at the top of the page and press Try again." />
+                    ) : (
+                      <EmptyState
+                        icon={query ? <SearchX /> : undefined}
+                        title={query ? `No matches for “${query}”` : emptyText}
+                        hint={query ? "Try a different name, code or salesman." : undefined}
+                      />
+                    )}
                   </TableCell>
                 </TableRow>
               ) : (
@@ -228,7 +236,22 @@ export function DataTable<T>({
                   <TableRow
                     key={row.id}
                     onClick={onRowClick ? () => onRowClick(row.original) : undefined}
-                    className={cn(onRowClick && "cursor-pointer", rowClassName?.(row.original))}
+                    onKeyDown={
+                      onRowClick
+                        ? (e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              onRowClick(row.original);
+                            }
+                          }
+                        : undefined
+                    }
+                    tabIndex={onRowClick ? 0 : undefined}
+                    className={cn(
+                      "group/row border-b-2 transition-colors hover:bg-accent/60",
+                      onRowClick && "cursor-pointer focus-visible:bg-accent/50 focus-visible:outline-none",
+                      rowClassName?.(row.original),
+                    )}
                   >
                     {row.getVisibleCells().map((cell) => {
                       const align = cell.column.columnDef.meta?.align;
@@ -236,7 +259,7 @@ export function DataTable<T>({
                         <TableCell
                           key={cell.id}
                           className={cn(
-                            dense ? "py-1.5" : "py-2.5",
+                            "py-3",
                             align === "right" && "tabular text-right",
                             align === "center" && "text-center",
                             cell.column.columnDef.meta?.className,
@@ -246,6 +269,13 @@ export function DataTable<T>({
                         </TableCell>
                       );
                     })}
+                    {onRowClick && (
+                      <TableCell className="w-28 pr-4 text-right">
+                        <span className="inline-flex h-9 items-center gap-1 rounded-lg border-2 border-primary/40 px-3 text-sm font-semibold text-primary group-hover/row:bg-primary group-hover/row:text-primary-foreground">
+                          Open <ChevronRight className="size-4" />
+                        </span>
+                      </TableCell>
+                    )}
                   </TableRow>
                 ))
               )}
@@ -254,20 +284,27 @@ export function DataTable<T>({
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+      <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
         <span className="tabular">
-          {total === 0 ? "0 rows" : `${from}–${to} of ${total.toLocaleString("en-IN")}`}
+          {total === 0 ? "Nothing to show" : `Showing ${from} to ${to} of ${total.toLocaleString("en-IN")}`}
           {data.length !== total && ` (filtered from ${data.length.toLocaleString("en-IN")})`}
         </span>
         <div className="flex items-center gap-1">
-          <Button variant="outline" size="icon-sm" onClick={() => table.previousPage()} disabled={!table.getCanPreviousPage()} aria-label="Previous page">
-            <ChevronLeft />
+          <SimpleSelect
+            value={String(size)}
+            onChange={(v) => table.setPageSize(Number(v))}
+            options={["10", "25", "50", "100"].map((n) => ({ value: n, label: `Show ${n}` }))}
+            className="mr-2 min-w-28"
+            aria-label="Rows per page"
+          />
+          <Button variant="outline" onClick={() => table.previousPage()} disabled={!table.getCanPreviousPage()}>
+            <ChevronLeft /> Previous
           </Button>
           <span className="tabular px-2">
             Page {pageIndex + 1} of {Math.max(1, table.getPageCount())}
           </span>
-          <Button variant="outline" size="icon-sm" onClick={() => table.nextPage()} disabled={!table.getCanNextPage()} aria-label="Next page">
-            <ChevronRight />
+          <Button variant="outline" onClick={() => table.nextPage()} disabled={!table.getCanNextPage()}>
+            Next <ChevronRight />
           </Button>
         </div>
       </div>

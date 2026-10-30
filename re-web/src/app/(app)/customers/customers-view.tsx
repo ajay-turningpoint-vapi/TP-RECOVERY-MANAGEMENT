@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { Building2 as Building2Icon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
 import { customerColumns } from "@/components/app/customer-columns";
@@ -27,7 +28,7 @@ export function CustomersView() {
 
   return (
     <div className="mx-auto max-w-[1600px]">
-      <PageHeader title="Customers" description="Every active customer in scope. Open one for the full Customer 360." />
+      <PageHeader icon={<Building2Icon />} hue="sky" title="All Customers" description="Every customer. Type a name to find one, then click Open." />
       <DataTable
         columns={columns}
         data={rows}
@@ -36,6 +37,7 @@ export function CustomersView() {
         searchPlaceholder="Search name, code, phone…"
         onRowClick={(c) => router.push(`/customers/${encodeURIComponent(c.id)}`)}
         exportName="customers"
+        initialHidden={{ branch: false, credit: false, escalation: false }}
         initialSorting={[{ id: "totalDue", desc: true }]}
         toolbar={
           <>

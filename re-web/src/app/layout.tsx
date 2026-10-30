@@ -20,7 +20,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <body className="min-h-full bg-background">
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
           <TooltipProvider>{children}</TooltipProvider>
-          <Toaster richColors position="top-right" />
+          <Toaster richColors closeButton position="top-center" toastOptions={{ classNames: { toast: "!w-[420px] !py-4", title: "!text-[15px] !font-semibold", description: "!text-sm" } }} />
         </ThemeProvider>
       </body>
     </html>

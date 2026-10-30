@@ -400,6 +400,21 @@ async function applyOutcome(conn, customer, user, { nextAction, reason, details,
     // separately as the claim's raiser), instead of a fabricated line.
     const refMatch = /Ref:\s*(.+)$/s.exec(details);
     const reference = refMatch ? refMatch[1].trim() : null;
+    // One payment is claimed once. A claim for the same amount in the last
+    // 7 days that is still waiting or already verified is that same payment
+    // (JYOTSNA DHANSUKH VORA, 30 Oct: ₹8,00,000 claimed on 29 and 30 Oct,
+    // both verified, so Total Collected counted it twice).
+    const sameClaim = (await paymentClaimRepository.findByCustomer(customerId, conn)).find(
+      (c) =>
+        ['Awaiting Verification', 'Sync Pending', 'Verified'].includes(c.status) &&
+        Math.abs(c.amount - amount) < 1 &&
+        Date.now() - new Date(c.createdAt || c.claimDate).getTime() < 7 * 24 * 60 * 60 * 1000
+    );
+    if (sameClaim) {
+      const on = new Date(sameClaim.createdAt || sameClaim.claimDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', timeZone: 'Asia/Kolkata' });
+      const state = sameClaim.status === 'Verified' ? 'and the RE has already verified it' : 'and it is waiting for the RE';
+      throw new ValidationError(`This ₹${Math.round(amount).toLocaleString('en-IN')} payment was already claimed on ${on} ${state}. Don't claim the same payment twice.`);
+    }
     await paymentClaimRepository.insert({ customerId, amount, claimDate: new Date(), reference, status: 'Awaiting Verification', attachmentPath }, conn);
   } else if (nextAction === 'Call Customer' && reason === 'No Answer') {
     // A No Answer's next callback must not exist as a task until the

@@ -1,13 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Bell,
-  Building2,
   CheckCheck,
   CircleAlert,
   KeyRound,
@@ -15,20 +12,10 @@ import {
   LogOut,
   Moon,
   RefreshCw,
-  Search,
   Sun,
 } from "lucide-react";
 import { toast } from "sonner";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import {
-  CommandDialog,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command";
 import {
   Dialog,
   DialogContent,
@@ -49,22 +36,23 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { rmsPost } from "@/lib/api";
-import { formatINR, initials, timeAgo } from "@/lib/format";
+import { expectOwnSessionChange } from "@/lib/api";
+import { timeAgo } from "@/lib/format";
+import { useRmsAction } from "@/lib/actions";
 import { useRefreshAll, useRms, useSyncStatus } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import { useBranch, useSessionUser } from "./providers";
+import { TopProgress } from "./top-progress";
+import { ColorAvatar } from "./visual";
 import { SimpleSelect } from "./simple-select";
 
 export function Topbar() {
+  const { isFetching } = useRms();
   return (
-    <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b bg-background/85 px-3 backdrop-blur supports-[backdrop-filter]:bg-background/70 md:px-4">
-      <SidebarTrigger className="-ml-1" />
-      <Separator orientation="vertical" className="mx-1 h-5" />
-      <GlobalSearch />
+    <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 border-b-2 bg-card px-3 md:px-5">
+      <SidebarTrigger className="size-10 [&_svg]:size-5!" />
       <div className="ml-auto flex items-center gap-2">
         <BranchFilter />
         <SyncPill />
@@ -72,74 +60,8 @@ export function Topbar() {
         <NotificationBell />
         <UserMenu />
       </div>
+      <TopProgress active={isFetching} />
     </header>
-  );
-}
-
-function GlobalSearch() {
-  const [open, setOpen] = useState(false);
-  const router = useRouter();
-  const rms = useRms();
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        setOpen((o) => !o);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
-  const go = (href: string) => {
-    setOpen(false);
-    router.push(href);
-  };
-
-  return (
-    <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="flex h-8 w-full max-w-sm items-center gap-2 rounded-lg border bg-muted/40 px-2.5 text-sm text-muted-foreground transition-colors hover:bg-muted"
-      >
-        <Search className="size-4" />
-        <span className="hidden truncate sm:inline">Search customers, salesmen…</span>
-        <span className="sm:hidden">Search</span>
-        <kbd className="ml-auto hidden rounded border bg-background px-1.5 font-mono text-[10px] sm:inline">⌘K</kbd>
-      </button>
-      <CommandDialog open={open} onOpenChange={setOpen} title="Search" description="Find a customer or salesman">
-        <CommandInput placeholder="Customer name, code, salesman or branch…" />
-        <CommandList>
-          <CommandEmpty>No matches.</CommandEmpty>
-          <CommandGroup heading="Customers">
-            {rms.allCustomers.slice(0, 2000).map((c) => (
-              <CommandItem
-                key={c.id}
-                value={`${c.name} ${c.id} ${c.branch} ${rms.salesmanName(c.assignedSalesmanId)}`}
-                onSelect={() => go(`/customers/${encodeURIComponent(c.id)}`)}
-              >
-                <Building2 />
-                <span className="truncate">{c.name}</span>
-                <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular">{formatINR(c.totalDue)} due</span>
-              </CommandItem>
-            ))}
-          </CommandGroup>
-          <CommandGroup heading="Salesmen">
-            {rms.salesmen.map((s) => (
-              <CommandItem key={s.id} value={`${s.fullName} ${s.username} ${s.branch}`} onSelect={() => go(`/salesmen/${encodeURIComponent(s.id)}`)}>
-                <Avatar className="size-5">
-                  <AvatarFallback className="text-[9px]">{initials(s.fullName)}</AvatarFallback>
-                </Avatar>
-                <span className="truncate">{s.fullName}</span>
-                <span className="ml-auto text-xs text-muted-foreground">{s.branch}</span>
-              </CommandItem>
-            ))}
-          </CommandGroup>
-        </CommandList>
-      </CommandDialog>
-    </>
   );
 }
 
@@ -148,7 +70,7 @@ function BranchFilter() {
   const { branchOptions } = useRms();
   return (
     <div className="hidden md:block">
-      <SimpleSelect value={branch} onChange={setBranch} options={branchOptions} aria-label="Branch filter" className="min-w-40" />
+      <SimpleSelect value={branch} onChange={setBranch} options={branchOptions} aria-label="Branch" className="min-w-44 font-semibold" />
     </div>
   );
 }
@@ -160,26 +82,23 @@ function SyncPill() {
   const finished = last?.finishedAt ? new Date(last.finishedAt) : null;
   // Measured against when the status was fetched (refetched every 5 min), not the render clock.
   const stale = !finished || dataUpdatedAt - finished.getTime() > 26 * 3600_000;
+  const failed = last?.status === "failed" || last?.status === "stalled";
   const state = data.syncing
-    ? { label: "Syncing BUSY…", tone: "bg-info/10 text-info", dot: "bg-info animate-pulse" }
-    : last?.status === "failed" || last?.status === "stalled"
-      ? { label: "Sync failed", tone: "bg-destructive/10 text-destructive", dot: "bg-destructive" }
+    ? { label: "Updating data…", cls: "bg-sky-100 text-sky-900", Icon: RefreshCw }
+    : failed
+      ? { label: "Data update failed", cls: "bg-red-100 text-red-800", Icon: CircleAlert }
       : stale
-        ? { label: "Stale / Preliminary", tone: "bg-warning/14 text-warning", dot: "bg-warning" }
-        : { label: "Fresh", tone: "bg-success/12 text-success", dot: "bg-success" };
+        ? { label: "Data may be old", cls: "bg-amber-100 text-amber-900", Icon: CircleAlert }
+        : { label: finished ? `Data updated ${timeAgo(finished)}` : "Data up to date", cls: "bg-green-100 text-green-800", Icon: CheckCheck };
 
   return (
     <Tooltip>
-      <TooltipTrigger
-        render={
-          <span className={cn("hidden h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium lg:inline-flex", state.tone)} />
-        }
-      >
-        <span className={cn("size-1.5 rounded-full", state.dot)} />
-        BUSY: {state.label}
+      <TooltipTrigger render={<span className={cn("hidden h-10 items-center gap-2 rounded-lg px-3 text-sm font-semibold xl:inline-flex", state.cls)} />}>
+        <state.Icon className="size-4" />
+        {state.label}
       </TooltipTrigger>
-      <TooltipContent className="max-w-xs">
-        {last?.message ?? (finished ? `Last BUSY sync finished ${timeAgo(finished)}.` : "No completed BUSY sync recorded yet.")}
+      <TooltipContent className="max-w-xs text-sm">
+        {last?.message ?? "Money figures come from BUSY. They update automatically every day."}
       </TooltipContent>
     </Tooltip>
   );
@@ -189,12 +108,21 @@ function RefreshButton() {
   const refresh = useRefreshAll();
   const { isFetching } = useRms();
   return (
-    <Tooltip>
-      <TooltipTrigger render={<Button variant="ghost" size="icon" onClick={() => refresh()} aria-label="Refresh data" />}>
-        <RefreshCw className={cn(isFetching && "animate-spin")} />
-      </TooltipTrigger>
-      <TooltipContent>Refresh all data</TooltipContent>
-    </Tooltip>
+    <Button
+      variant="outline"
+      disabled={isFetching}
+      onClick={() =>
+        toast.promise(refresh(), {
+          loading: "Getting the latest data…",
+          success: "Data is up to date.",
+          error: "Could not refresh. Check your internet and try again.",
+        })
+      }
+      aria-label="Refresh data"
+    >
+      <RefreshCw className={cn(isFetching && "animate-spin")} />
+      <span className="hidden lg:inline">{isFetching ? "Refreshing…" : "Refresh"}</span>
+    </Button>
   );
 }
 
@@ -207,19 +135,15 @@ const SEVERITY_DOT: Record<string, string> = {
 
 function NotificationBell() {
   const rms = useRms();
-  const qc = useQueryClient();
-  const markAll = useMutation({
-    mutationFn: () => rmsPost("/notifications/read-all"),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications"] }),
-  });
+  const markAll = useRmsAction();
   const recent = [...rms.notifications].sort((a, b) => +b.timestamp - +a.timestamp).slice(0, 8);
 
   return (
     <Popover>
-      <PopoverTrigger render={<Button variant="ghost" size="icon" className="relative" aria-label="Notifications" />}>
+      <PopoverTrigger render={<Button variant="outline" size="icon" className="relative" aria-label="Notifications" />}>
         <Bell />
         {rms.unreadNotificationCount > 0 && (
-          <span className="absolute top-1 right-1 flex min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] leading-4 font-semibold text-white tabular">
+          <span className="absolute top-0.5 right-0.5 flex min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-xs leading-5 font-bold text-white tabular">
             {rms.unreadNotificationCount > 9 ? "9+" : rms.unreadNotificationCount}
           </span>
         )}
@@ -227,8 +151,8 @@ function NotificationBell() {
       <PopoverContent align="end" className="w-96 p-0">
         <div className="flex items-center justify-between border-b px-4 py-3">
           <div className="text-sm font-semibold">Notifications</div>
-          <Button variant="ghost" size="xs" onClick={() => markAll.mutate()} disabled={!rms.unreadNotificationCount || markAll.isPending}>
-            <CheckCheck />
+          <Button variant="ghost" size="xs" onClick={() => markAll.mutate({ path: "/notifications/read-all", success: "All messages marked as read." })} disabled={!rms.unreadNotificationCount || markAll.isPending}>
+            {markAll.isPending ? <Loader2 className="animate-spin" /> : <CheckCheck />}
             Mark all read
           </Button>
         </div>
@@ -270,6 +194,7 @@ function UserMenu() {
 
   const signOut = async () => {
     setSigningOut(true);
+    toast.loading("Signing you out…");
     await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
     // Full reload on purpose — drops every cached query along with the session.
     // eslint-disable-next-line @next/next/no-location-assign-relative-destination
@@ -279,11 +204,9 @@ function UserMenu() {
   return (
     <>
       <DropdownMenu>
-        <DropdownMenuTrigger render={<Button variant="ghost" className="h-9 gap-2 px-1.5" />}>
-          <Avatar className="size-7">
-            <AvatarFallback className="bg-primary text-[11px] font-semibold text-primary-foreground">{initials(user.fullName)}</AvatarFallback>
-          </Avatar>
-          <span className="hidden max-w-32 truncate text-sm font-medium xl:inline">{user.fullName}</span>
+        <DropdownMenuTrigger render={<Button variant="outline" className="gap-2 px-2" aria-label="My account" />}>
+          <ColorAvatar name={user.fullName} size="sm" />
+          <span className="hidden max-w-36 truncate font-semibold 2xl:inline">{user.fullName}</span>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-60">
           <DropdownMenuGroup>
@@ -326,6 +249,7 @@ function ChangePasswordDialog({ open, onOpenChange }: { open: boolean; onOpenCha
     if (pw.length < 8) return setError("Use at least 8 characters.");
     if (pw !== confirm) return setError("Passwords don't match.");
     setPending(true);
+    expectOwnSessionChange();
     const res = await fetch("/api/auth/change-password", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -337,9 +261,9 @@ function ChangePasswordDialog({ open, onOpenChange }: { open: boolean; onOpenCha
       return setError(body?.message ?? "Could not change password.");
     }
     toast.success("Password changed. Your mobile app will ask you to sign in again.");
-    setPw("");
-    setConfirm("");
-    onOpenChange(false);
+    // The change bumped the server's session version — reload so this page
+    // runs with its new version (the echo is ignored meanwhile, see api.ts).
+    window.location.reload();
   };
 
   return (

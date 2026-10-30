@@ -10,7 +10,7 @@ const clients = new Set(); // { res, userId, role, branch }
 const RE_ROLES = new Set(['RECOVERY_EXECUTIVE', 'MANAGEMENT']);
 
 function add(res, user) {
-  const entry = { res, userId: user.id, role: user.role, branch: user.branch || null, channel: user.channel === 'web' ? 'web' : 'mobile' };
+  const entry = { res, userId: user.id, role: user.role, branch: user.branch || null };
   clients.add(entry);
   return entry;
 }
@@ -44,10 +44,7 @@ function matches(entry, event) {
       // for this exact user hears it, including the device that just
       // logged in; that one self-filters by comparing sessionVersion
       // against its own token (see AppStore._onRealtimeEvent).
-      // Only the channel that was revoked hears it (migration 040) — a web
-      // login must not log the phone out, and older mobile builds never
-      // see web events at all.
-      return !!scope.userId && entry.userId === scope.userId && entry.channel === (event.channel || 'mobile');
+      return !!scope.userId && entry.userId === scope.userId;
     case 'invalidate':
       // RE / Manager see the whole company (branch-filtered client-side),
       // so every data change is relevant to them. Salespeople only get a

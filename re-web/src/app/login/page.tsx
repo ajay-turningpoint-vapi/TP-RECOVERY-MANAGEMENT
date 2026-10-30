@@ -28,7 +28,7 @@ export default function LoginPage() {
           <img src="/logo.png" alt="" className="size-10 rounded-xl bg-white/10 p-1.5" />
           <div>
             <div className="text-base font-semibold text-white">Turning Point</div>
-            <div className="text-xs text-sidebar-foreground/70">Receivables Management System</div>
+            <div className="text-xs text-sidebar-foreground/70">Recovery Management System</div>
           </div>
         </div>
 
@@ -73,7 +73,7 @@ export default function LoginPage() {
             <LoginForm />
           </Suspense>
           <p className="text-xs text-muted-foreground">
-            Signing in here keeps your mobile app session active. Salespeople should continue to use the mobile app.
+            One device at a time: signing in here signs you out of the TP-RMS mobile app, and signing in on the app signs you out here.
           </p>
         </div>
       </main>

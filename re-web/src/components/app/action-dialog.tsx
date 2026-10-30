@@ -14,7 +14,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { rmsUpload } from "@/lib/api";
+import { friendlyError, rmsUpload } from "@/lib/api";
 import { SimpleSelect, type Option } from "./simple-select";
 
 export type Field = {
@@ -78,8 +78,9 @@ export function ActionDialog({
     try {
       await onSubmit(values);
       onOpenChange(false);
-    } catch {
-      /* toast already shown by useRmsAction */
+    } catch (e) {
+      // The alert is shown too; keep the form open with the reason inside it.
+      setError(friendlyError(e));
     } finally {
       setPending(false);
     }
