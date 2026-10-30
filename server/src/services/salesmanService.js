@@ -75,7 +75,7 @@ async function listRoster() {
 
     const taskCompletionRate = realOwnedTasks.length === 0 ? 0 : Math.round(((realOwnedTasks.length - overdueTasks) / realOwnedTasks.length) * 100);
     const validNextActionCount = owned.filter((c) =>
-      scoringService.hasValidNextAction(c, ptpsByCustomer.get(c.id) || [], tasksByCustomer.get(c.id) || [])
+      scoringService.hasPlannedNextStep(c, ptpsByCustomer.get(c.id) || [], tasksByCustomer.get(c.id) || [])
     ).length;
     const validNextActionRate = owned.length === 0 ? 100 : Math.round((validNextActionCount / owned.length) * 100);
 

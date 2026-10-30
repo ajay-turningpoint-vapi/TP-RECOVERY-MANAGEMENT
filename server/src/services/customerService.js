@@ -79,7 +79,8 @@ async function enrichCustomers(customerList) {
     const creditHealthScore = creditHealthComponents ? creditHealthComponents.total : null;
     return {
       ...c,
-      hasValidNextAction: scoringService.hasValidNextAction(c, cPtps, cTasks) || waitingOnOutcome(c.id),
+      // Display flag: a routine automatic call is not a planned next step.
+      hasValidNextAction: scoringService.hasPlannedNextStep(c, cPtps, cTasks) || waitingOnOutcome(c.id),
       creditHealthScore,
       creditHealthBand: scoringService.creditHealthBand(creditHealthScore),
       creditHealthComponents,

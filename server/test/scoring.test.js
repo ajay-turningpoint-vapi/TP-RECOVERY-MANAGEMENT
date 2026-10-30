@@ -69,3 +69,27 @@ test('compareByRecoveryPriority ranks escalation severity above overdue days abo
   equalEscalation.sort(scoringService.compareByRecoveryPriority);
   assert.equal(equalEscalation[0].id, 'OLDER');
 });
+
+test('a routine automatic call is not a planned next step; a real task or an open PTP is', () => {
+  const owing = { totalDue: 5000 };
+  const routine = { status: 'pending', source: 'Recovery', isRoutine: true };
+  assert.equal(scoringService.hasPlannedNextStep(owing, [], [routine]), false, 'the daily automatic call says nothing about a plan');
+  assert.equal(scoringService.hasValidNextAction(owing, [], [routine]), true, 'the automation rule is unchanged');
+  assert.equal(scoringService.hasPlannedNextStep(owing, [], [{ status: 'pending', source: 'RE', isRoutine: false }]), true);
+  assert.equal(scoringService.hasPlannedNextStep(owing, [], [{ status: 'pending', source: 'Recovery', isRoutine: false }]), true, 'an event-driven call (e.g. PTP broken) is a real next step');
+  assert.equal(scoringService.hasPlannedNextStep(owing, [{ status: 'scheduled' }], [routine]), true);
+  assert.equal(scoringService.hasPlannedNextStep({ totalDue: 0 }, [], []), true);
+});
+
+test('a task the system closed by itself is not follow-up; one a person completed is', () => {
+  const customer = { totalDue: 5000 };
+  const yesterday = new Date(Date.now() - 86400000).toISOString();
+  const systemClosed = [
+    { completedAt: yesterday, outcome: 'Superseded — next No Answer callback scheduled.' },
+    { completedAt: yesterday, outcome: 'Closed — the RE has taken direct control of this account.' },
+    { completedAt: yesterday, outcome: 'Auto-closed — customer no longer appears in BUSY.' },
+  ];
+  assert.ok(scoringService.daysSinceLastFollowUp(customer, systemClosed, []) > 30, 'nobody has followed up');
+  const byPerson = [{ completedAt: yesterday, outcome: 'Resolved via outcome: PTP Scheduled' }];
+  assert.equal(scoringService.daysSinceLastFollowUp(customer, byPerson, []), 1);
+});

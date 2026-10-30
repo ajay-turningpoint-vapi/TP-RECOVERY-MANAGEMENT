@@ -33,6 +33,12 @@ function daysSinceLastFollowUp(customer, customerTasks, customerAuditEvents) {
     if (!last || ts > last) last = ts;
   }
   for (const t of customerTasks) {
+    // A task the system closed or replaced by itself ("Auto-closed — …",
+    // "Closed — …", "Superseded — …") is not contact either — counting it
+    // made a salesman who never recorded anything look followed up
+    // yesterday on every customer (30 Oct: 76 untouched customers, "Not
+    // followed up" showed 5).
+    if (isSystemClosedOutcome(t.outcome)) continue;
     // Only a task's actual COMPLETION is real evidence of contact. Its
     // `deadline` is just a future due date — a task the reconcile sweep
     // auto-created moments ago (untouched, still pending) has a deadline
@@ -60,6 +66,31 @@ function daysSinceLastFollowUp(customer, customerTasks, customerAuditEvents) {
 }
 
 /** totalDue cleared, or a genuinely open task/active PTP already exists. */
+/** Outcome text the server writes when IT closes a task, not a person (same list as the app's _isSystemClosed). */
+const SYSTEM_CLOSED_PREFIXES = ['Auto-closed', 'Closed —', 'Paused —', 'Superseded'];
+function isSystemClosedOutcome(outcome) {
+  const o = String(outcome || '').trimStart();
+  return SYSTEM_CLOSED_PREFIXES.some((p) => o.startsWith(p));
+}
+
+/**
+ * What the RE / apps show as "has a next step planned". Same as
+ * hasValidNextAction below, except the routine automatic call (source
+ * 'Recovery', isRoutine) does not count — the sweep creates it for every
+ * customer with money due, so it says nothing about anyone having a plan
+ * (30 Oct: a salesman with 76 untouched customers showed only 5 under "No
+ * next step"). hasValidNextAction itself stays as is: the task automation
+ * relies on it.
+ */
+function hasPlannedNextStep(customer, customerPtps, customerTasks) {
+  if (customer.totalDue <= 0) return true;
+  const hasPlannedTask = customerTasks.some(
+    (t) => t.status !== 'completed' && t.status !== 'closed' && !(t.source === 'Recovery' && t.isRoutine)
+  );
+  const hasActivePtp = customerPtps.some((p) => ['scheduled', 'pendingVerification', 'financialSyncPending'].includes(p.status));
+  return hasPlannedTask || hasActivePtp;
+}
+
 function hasValidNextAction(customer, customerPtps, customerTasks) {
   if (customer.totalDue <= 0) return true;
   const hasOpenTask = customerTasks.some((t) => t.status !== 'completed' && t.status !== 'closed');
@@ -363,7 +394,7 @@ function compareByRecoveryPriority(a, b) {
   return b.totalDue - a.totalDue;
 }
 
-module.exports = {
+module.exports = { hasPlannedNextStep, isSystemClosedOutcome,
   waitingOnOutcome,
   lastRecordedOutcome,
   openClaimAndDisputeIds,
