@@ -75,11 +75,18 @@ test('the RE can create a task only for a never-contacted customer', async () =>
   await query(
     "INSERT INTO tasks (id, type, customer_id, owner_id, deadline, priority, reason, status, source, is_routine) VALUES ('T_ROUTINE', 'customerCall', 'C4', 'mahesh', NOW() + INTERVAL 6 HOUR, 'Normal', 'Start recovery', 'pending', 'Recovery', 1)"
   );
+  // ...and the RE's own "Missed Deadline" reminder (30 Oct: 303 of 332
+  // never-contacted customers had one, and it wrongly blocked the RE).
+  await query(
+    "INSERT INTO tasks (id, type, customer_id, owner_id, deadline, priority, reason, status, source, is_routine) VALUES ('T_MISSED', 'customerCall', 'C4', 'amit-re', NOW() + INTERVAL 2 HOUR, 'High', 'Salesman missed the call', 'pending', 'Missed Deadline', 1)"
+  );
   const ok = await instruct('C4', 'mahesh');
-  assert.equal(ok.status, 200, 'the routine automatic call does not block the RE');
-  const [routine] = await query("SELECT status, outcome FROM tasks WHERE id = 'T_ROUTINE'");
-  assert.equal(routine.status, 'completed', 'the routine call is replaced, never two calls');
-  assert.match(routine.outcome, /^Superseded/);
+  assert.equal(ok.status, 200, 'neither the routine call nor the RE reminder blocks the RE');
+  const closed = await query("SELECT id, status, outcome FROM tasks WHERE id IN ('T_ROUTINE', 'T_MISSED') ORDER BY id");
+  for (const t of closed) {
+    assert.equal(t.status, 'completed', `${t.id} is closed — never two calls`);
+    assert.match(t.outcome, /^Superseded/);
+  }
 
   const again = await instruct('C4', 'mahesh');
   assert.equal(again.status, 400, 'one real task at a time');

@@ -772,7 +772,10 @@ async function assignManagementInstruction(customerId, user, { salesmanId, desc,
     if (block) throw new ValidationError(`Can't create a task now — ${block.text}`);
     // Same rule as the app's "TASK ALREADY EXISTS": one open task per
     // customer is enough — the RE works that one instead of stacking more.
-    if (openTasks.some((t) => !isRoutineCall(t))) {
+    // Only tasks a SALESPERSON holds count: the RE's own reminders (e.g. the
+    // "Missed Deadline" follow-up) never block — same rule as the RE web.
+    const salespersonIds = new Set((await userRepository.findAll()).filter((u) => u.role === 'SALESPERSON').map((u) => u.id));
+    if (openTasks.some((t) => !isRoutineCall(t) && salespersonIds.has(t.ownerId))) {
       throw new ValidationError('Can\'t create a task now — a task is already open for this customer. Work that one first.');
     }
   }
@@ -787,8 +790,9 @@ async function assignManagementInstruction(customerId, user, { salesmanId, desc,
     if (isInstruction) {
       await taskRepository.supersedeOpenTasks(customerId, 'Superseded — replaced by RE/Manager Management Instruction', conn);
     }
-    // The RE's task replaces the routine automatic call — never two calls.
-    for (const t of openTasks.filter(isRoutineCall)) {
+    // The RE's task replaces the routine automatic call — never two calls —
+    // and settles the RE's own "Missed Deadline" reminder for this customer.
+    for (const t of openTasks.filter((t) => isRoutineCall(t) || t.source === 'Missed Deadline')) {
       await taskRepository.update(t.id, { status: 'completed', completedAt: new Date(), outcome: 'Superseded — replaced by the RE\'s call task.' }, conn);
     }
     await taskRepository.insert({ type: taskType, customerId, ownerId: salesmanId, deadline, priority, reason: desc, source: 'RE Instruction', note, attachmentPath }, conn);
