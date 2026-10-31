@@ -7,9 +7,7 @@ import {
   Loader2,
   CalendarClock,
   Check,
-  ClipboardPlus,
   Phone,
-  Repeat2,
   ShieldCheck,
   X,
 } from "lucide-react";
@@ -82,8 +80,7 @@ export function TaskDetail({
   const task = item.kind === "realTask" || item.kind === "visitReview" ? rms.tasks.find((t) => t.id === item.refId) : undefined;
   const customer = item.customerId ? rms.customerById.get(item.customerId) : undefined;
   const salesmanPhone = rms.salesmanById.get(item.salesmanId)?.phone;
-  const salesmanOptions = rms.salesmen.map((s) => ({ value: s.id, label: `${s.fullName} · ${s.branch}` }));
-  const commands = commandsFor(item, task, rms, salesmanOptions);
+  const commands = commandsFor(item, task, rms);
   const late = !item.isDone && item.date < new Date();
 
   const run = async (cmd: Cmd, values: Record<string, string> = {}) => {
@@ -291,27 +288,7 @@ export function commandsFor(
   item: ReTaskItem,
   task: Task | undefined,
   rms: RmsView,
-  salesmanOptions: { value: string; label: string }[],
 ): Cmd[] {
-  // One task at a time: no new call task while the salesman still holds one
-  // on this customer (same lock as Create task on the customer page).
-  const salesmanBusy = !!item.customerId && !!rms.openSalesmanTaskFor(item.customerId);
-  const followUps = (title: string): Cmd[] => (salesmanBusy ? [] : [followUp(title)]);
-  const followUp = (title: string): Cmd => ({
-    key: "followup",
-    label: "Ask salesman to call",
-    icon: <ClipboardPlus />,
-    title,
-    description: "Adds a call-customer task to the salesman's list.",
-    path: `/customers/${encodeURIComponent(item.customerId ?? "")}/management-instruction`,
-    fields: [
-      { name: "desc", label: "Instruction", type: "textarea", required: true, defaultValue: "Call the customer and record an outcome." },
-      { name: "deadline", label: "Deadline", type: "datetime", required: true, defaultValue: deadlineInput(1, 21) },
-    ],
-    body: (v) => ({ salesmanId: item.salesmanId, desc: v.desc, deadline: localToIso(v.deadline), taskType: "customerCall", priority: "High" }),
-    success: "Done. The salesman has a new call task.",
-  });
-
   switch (item.kind) {
     case "realTask": {
       if (!task || !isTaskOpen(task)) return [];
@@ -348,7 +325,7 @@ export function commandsFor(
           },
           { key: "rv", label: "Visit could not happen", icon: <X />, variant: "destructive", path: `${t}/reject-visit`, fields: [reasonField()], body: (v) => ({ reason: v.reason }), success: "Saved: the visit could not happen." },
         );
-      } else if (task.type === "financialTeamFollowUp" && task.source === "Record Outcome") {
+      } else if (task.type === "financialTeamFollowUp") {
         cmds.push(
           {
             key: "ai",
@@ -357,8 +334,11 @@ export function commandsFor(
             variant: "default",
             description: "The internal dependency is resolved — the salesperson gets a call-customer follow-up.",
             path: `${t}/approve-internal-action`,
-            fields: [{ name: "note", label: "Note for the salesperson", type: "textarea" }],
-            body: (v) => ({ note: v.note || undefined }),
+            fields: [
+              { name: "note", label: "Note for the salesperson", type: "textarea" },
+              { name: "attachmentPath", label: "Attach photo or PDF (optional)", type: "file" },
+            ],
+            body: (v) => ({ note: v.note || undefined, attachmentPath: v.attachmentPath || undefined }),
             success: "Approved. The salesman will call the customer.",
           },
           {
@@ -368,8 +348,8 @@ export function commandsFor(
             variant: "destructive",
             description: "Not valid or not needed — the salesperson still gets a call-customer follow-up.",
             path: `${t}/reject-internal-action`,
-            fields: [reasonField("Reason", false)],
-            body: (v) => ({ reason: v.reason || undefined }),
+            fields: [reasonField("Reason", false), { name: "attachmentPath", label: "Attach photo or PDF (optional)", type: "file" }],
+            body: (v) => ({ reason: v.reason || undefined, attachmentPath: v.attachmentPath || undefined }),
             success: "Rejected. The salesman will still call the customer.",
           },
         );
@@ -398,22 +378,10 @@ export function commandsFor(
             success: "Date changed.",
           });
       }
-      cmds.push({
-        key: "ra",
-        label: "Give to another salesman",
-        icon: <Repeat2 />,
-        path: `${t}/reassign`,
-        fields: [
-          { name: "newOwnerId", label: "New owner", type: "select", required: true, options: salesmanOptions.filter((o) => o.value !== task.ownerId) },
-          reasonField(),
-        ],
-        body: (v) => ({ newOwnerId: v.newOwnerId, reason: v.reason }),
-        success: "Task given to the other salesman.",
-      });
       return cmds;
     }
     case "visitReview":
-      return followUps("Follow up on the visit");
+      return [];
     case "overdueTarget":
       return [
         {
@@ -424,7 +392,6 @@ export function commandsFor(
           path: `/salesmen/${encodeURIComponent(item.salesmanId)}/dismiss-underperformance`,
           success: "Marked as checked for this month.",
         },
-        ...followUps("Ask the salesman to work this account"),
       ];
     case "dispute":
       return [{ key: "open", label: "Open the dispute", icon: <ArrowUpRight />, variant: "default", href: `/disputes/${item.refId}` }];
@@ -440,7 +407,6 @@ export function commandsFor(
       ];
     case "ptpMissed":
       return [
-        ...followUps("Follow up on the broken PTP"),
         { key: "esc", label: "Open customer to escalate", icon: <ArrowUpRight />, href: `/customers/${encodeURIComponent(item.customerId ?? "")}` },
       ];
   }

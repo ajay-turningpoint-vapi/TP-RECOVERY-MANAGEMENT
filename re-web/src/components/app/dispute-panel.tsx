@@ -249,7 +249,7 @@ export function DisputePanel({ dispute: d, rms }: { dispute: Dispute; rms: RmsVi
         description={`${formatINR(d.amount)} will be put on hold. Choose who fixes the problem and by when.`}
         submitLabel={needsOwner ? "Save" : "Accept and assign"}
         fields={[
-          { name: "resolutionOwner", label: "Person fixing it", type: "select", required: true, options: salesmanOptions, defaultValue: salesmanId },
+          { name: "resolutionOwner", label: "Person fixing it", type: "select", required: true, options: salesmanOptions, placeholder: "Choose the person who will fix it" },
           { name: "department", label: "Department", type: "select", options: DEPARTMENTS.map((x) => ({ value: x, label: x })), defaultValue: DEPARTMENTS[0] },
           { name: "description", label: "What needs to be done", type: "textarea", required: true },
           { name: "note", label: "Note for that person", type: "textarea", required: true },

@@ -1,17 +1,21 @@
 "use client";
 
 import { useMemo } from "react";
-import { ListOrdered as ListOrderedIcon } from "lucide-react";
+import { ClipboardPlus, ListOrdered as ListOrderedIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
+import { useDialog } from "@/components/app/action-dialog";
+import { CreateCallTaskDialog } from "@/components/app/create-call-task-dialog";
 import { customerColumns } from "@/components/app/customer-columns";
 import { DataTable } from "@/components/app/data-table";
 import { PageHeader } from "@/components/app/page-header";
 import { SimpleSelect } from "@/components/app/simple-select";
 import { Pill } from "@/components/app/status";
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatINRCompact } from "@/lib/format";
 import { useRms } from "@/lib/queries";
+import type { Customer } from "@/lib/models";
 import type { QueueRow } from "@/lib/selectors";
 import { useUrlState } from "@/lib/use-url-state";
 
@@ -49,6 +53,7 @@ const RANK_TONE: Record<number, "danger" | "warning" | "info" | "neutral" | "vio
 export function QueueView() {
   const rms = useRms();
   const router = useRouter();
+  const createTask = useDialog<Customer>();
   const [view, setView] = useUrlState("view", "all");
   const [salesman, setSalesman] = useUrlState("salesman", "all");
   const [sort, setSort] = useUrlState("sort", "priority");
@@ -107,8 +112,38 @@ export function QueueView() {
           ),
         meta: { align: "right" },
       },
+      ...(view === "no-next-action"
+        ? [
+            {
+              id: "createTask",
+              header: "",
+              enableSorting: false,
+              cell: ({ row }) => {
+                const c = row.original.customer;
+                const given = rms.openSalesmanTaskFor(c.id);
+                const locked = !rms.canCreateTaskFor(c);
+                return (
+                  <Button
+                    size="sm"
+                    variant={locked ? "outline" : "default"}
+                    disabled={locked}
+                    title={given ? "The salesman already has a task for this customer" : c.outcomeWaitText ?? undefined}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      createTask.open(c);
+                    }}
+                  >
+                    <ClipboardPlus /> {given ? "Task given" : "Create task"}
+                  </Button>
+                );
+              },
+              meta: { csv: () => "" },
+            } as ColumnDef<QueueRow, unknown>,
+          ]
+        : []),
     ],
-    [rms],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rms, view],
   );
 
   return (
@@ -139,6 +174,7 @@ export function QueueView() {
           ))}
         </TabsList>
       </Tabs>
+      <CreateCallTaskDialog customer={createTask.target} {...createTask.props} />
       <DataTable
         columns={columns}
         data={rows}

@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
-import { Loader2 } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { FileText, Loader2, Paperclip, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -112,24 +112,12 @@ export function ActionDialog({
                   onChange={(e) => set(f.name, e.target.value)}
                 />
               ) : f.type === "file" ? (
-                <Input
+                <FileField
                   id={`f-${f.name}`}
-                  type="file"
-                  accept="image/*,application/pdf"
-                  onChange={async (e) => {
-                    const file = e.target.files?.[0];
-                    if (!file) return set(f.name, "");
-                    setUploading(true);
-                    setError(null);
-                    try {
-                      set(f.name, await rmsUpload(file));
-                    } catch (err) {
-                      set(f.name, "");
-                      setError(err instanceof Error ? err.message : "Upload failed");
-                    } finally {
-                      setUploading(false);
-                    }
-                  }}
+                  value={values[f.name]}
+                  onUploading={setUploading}
+                  onError={setError}
+                  onChange={(path) => set(f.name, path)}
                 />
               ) : f.type === "select" ? (
                 <SimpleSelect
@@ -176,4 +164,110 @@ export function useDialog<T = true>() {
     close: () => setTarget(null),
     props: { open: target != null, onOpenChange: (o: boolean) => !o && setTarget(null) },
   };
+}
+
+/**
+ * Photo / PDF picker: a clear "Choose" button, then a preview of what was
+ * picked — the photo itself, or a PDF icon with the file name — with Change
+ * and Remove. Uploads straight away (POST /api/attachments) and hands the
+ * server's file name back as the field value.
+ */
+function FileField({
+  id,
+  value,
+  onChange,
+  onUploading,
+  onError,
+}: {
+  id: string;
+  value: string;
+  onChange: (path: string) => void;
+  onUploading: (busy: boolean) => void;
+  onError: (message: string | null) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [picked, setPicked] = useState<{ name: string; isPdf: boolean; url: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  // Free the local preview URL when it changes or the form closes.
+  useEffect(() => () => { if (picked) URL.revokeObjectURL(picked.url); }, [picked]);
+
+  const choose = async (file: File | undefined) => {
+    if (!file) return;
+    const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+    setPicked({ name: file.name, isPdf, url: URL.createObjectURL(file) });
+    setBusy(true);
+    onUploading(true);
+    onError(null);
+    try {
+      onChange(await rmsUpload(file));
+    } catch (err) {
+      setPicked(null);
+      onChange("");
+      onError(friendlyError(err));
+    } finally {
+      setBusy(false);
+      onUploading(false);
+      if (inputRef.current) inputRef.current.value = "";
+    }
+  };
+
+  const remove = () => {
+    setPicked(null);
+    onChange("");
+  };
+
+  return (
+    <div>
+      <input
+        ref={inputRef}
+        id={id}
+        type="file"
+        accept="image/*,application/pdf"
+        className="sr-only"
+        onChange={(e) => choose(e.target.files?.[0])}
+      />
+      {!picked ? (
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          className="flex w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed border-input bg-muted/30 px-4 py-5 text-[15px] font-medium text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+        >
+          <Paperclip className="size-5" /> Choose photo or PDF
+        </button>
+      ) : (
+        <div className="flex items-center gap-3 rounded-lg border-2 bg-card p-2.5">
+          <a href={picked.url} target="_blank" rel="noreferrer" className="shrink-0" title="Open">
+            {picked.isPdf ? (
+              <span className="flex size-16 flex-col items-center justify-center rounded-md bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-300">
+                <FileText className="size-7" />
+                <span className="text-[11px] font-bold">PDF</span>
+              </span>
+            ) : (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={picked.url} alt="" className="size-16 rounded-md border object-cover" />
+            )}
+          </a>
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-semibold">{picked.name}</div>
+            <div className="text-sm text-muted-foreground">
+              {busy ? (
+                <span className="inline-flex items-center gap-1.5"><Loader2 className="size-3.5 animate-spin" /> Uploading…</span>
+              ) : value ? (
+                <span className="text-green-700 dark:text-green-300">Attached</span>
+              ) : null}
+            </div>
+          </div>
+          <div className="flex shrink-0 gap-1.5">
+            <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => inputRef.current?.click()}>
+              Change
+            </Button>
+            <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={remove} aria-label="Remove file">
+              <X />
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }

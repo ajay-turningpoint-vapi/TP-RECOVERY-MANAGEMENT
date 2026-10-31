@@ -56,3 +56,31 @@ test('a salesman task left undone for 5 days after an outcome is "Not followed u
   await query("UPDATE tasks SET status = 'completed', completed_at = NOW() WHERE id = 'T_LATE'");
   assert.ok(!(await notFollowedUp()).includes('C3'), 'done — off the list');
 });
+
+const instruct = (id, salesmanId) =>
+  fetch(`${app.baseUrl}/api/customers/${id}/management-instruction`, {
+    method: 'POST',
+    headers: authHeaders(re),
+    body: JSON.stringify({ salesmanId, desc: 'Call and get a first outcome', deadline: new Date(Date.now() + 86400000).toISOString(), priority: 'High', taskType: 'customerCall' }),
+  });
+
+test('the RE can create a task only for a never-contacted customer', async () => {
+  // C3 has a recorded outcome (first test) — its tasks come from that outcome.
+  const refused = await instruct('C3', 'rahul');
+  assert.equal(refused.status, 400);
+  assert.match((await refused.json()).error.message, /never been contacted/);
+
+  // C4: never contacted, only the routine daily automatic call open.
+  await query("UPDATE tasks SET status = 'completed' WHERE customer_id = 'C4'");
+  await query(
+    "INSERT INTO tasks (id, type, customer_id, owner_id, deadline, priority, reason, status, source, is_routine) VALUES ('T_ROUTINE', 'customerCall', 'C4', 'mahesh', NOW() + INTERVAL 6 HOUR, 'Normal', 'Start recovery', 'pending', 'Recovery', 1)"
+  );
+  const ok = await instruct('C4', 'mahesh');
+  assert.equal(ok.status, 200, 'the routine automatic call does not block the RE');
+  const [routine] = await query("SELECT status, outcome FROM tasks WHERE id = 'T_ROUTINE'");
+  assert.equal(routine.status, 'completed', 'the routine call is replaced, never two calls');
+  assert.match(routine.outcome, /^Superseded/);
+
+  const again = await instruct('C4', 'mahesh');
+  assert.equal(again.status, 400, 'one real task at a time');
+});

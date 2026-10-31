@@ -753,13 +753,28 @@ async function assignManagementInstruction(customerId, user, { salesmanId, desc,
   // The salesman's recorded outcome is still waiting on its own trigger
   // (Record Outcome rules) — the system creates the next task then; the RE
   // must not add one in between. Managers' instructions are not blocked.
+  // The routine daily automatic call ("Start Recovery") — exists for every
+  // customer with money overdue, so it never counts as "a task is already
+  // open"; it is closed when the RE gives the salesman a real call task.
+  const isRoutineCall = (t) => t.source === 'Recovery' && t.isRoutine;
+  const openTasks = (await taskRepository.findByCustomer(customerId)).filter((t) => !['completed', 'closed', 'cancelled'].includes(t.status));
   if (user.role === 'RECOVERY_EXECUTIVE') {
+    // The RE creates a task ONLY for a "No next step" customer: money
+    // overdue and no outcome ever recorded. Everyone else's tasks come from
+    // the salesman's recorded outcome (same rule as the RE web).
+    if (!(Number(customer.totalDue) > 0)) {
+      throw new ValidationError('Nothing is overdue for this customer, so no task is needed.');
+    }
+    if (await auditRepository.latestOfSource(customerId, 'Record Outcome')) {
+      throw new ValidationError('A task can only be created for a customer who has never been contacted — this customer\'s tasks come from the salesman\'s recorded outcome.');
+    }
     const block = await reTaskBlock(customerId);
     if (block) throw new ValidationError(`Can't create a task now — ${block.text}`);
     // Same rule as the app's "TASK ALREADY EXISTS": one open task per
     // customer is enough — the RE works that one instead of stacking more.
-    const openTask = (await taskRepository.findByCustomer(customerId)).find((t) => !['completed', 'closed', 'cancelled'].includes(t.status));
-    if (openTask) throw new ValidationError('Can\'t create a task now — a task is already open for this customer. Work that one first.');
+    if (openTasks.some((t) => !isRoutineCall(t))) {
+      throw new ValidationError('Can\'t create a task now — a task is already open for this customer. Work that one first.');
+    }
   }
 
   // A plain 'customerCall'/'physicalVisit' task is routine follow-up work,
@@ -771,6 +786,10 @@ async function assignManagementInstruction(customerId, user, { salesmanId, desc,
   await withTransaction(async (conn) => {
     if (isInstruction) {
       await taskRepository.supersedeOpenTasks(customerId, 'Superseded — replaced by RE/Manager Management Instruction', conn);
+    }
+    // The RE's task replaces the routine automatic call — never two calls.
+    for (const t of openTasks.filter(isRoutineCall)) {
+      await taskRepository.update(t.id, { status: 'completed', completedAt: new Date(), outcome: 'Superseded — replaced by the RE\'s call task.' }, conn);
     }
     await taskRepository.insert({ type: taskType, customerId, ownerId: salesmanId, deadline, priority, reason: desc, source: 'RE Instruction', note, attachmentPath }, conn);
     await auditRepository.record(

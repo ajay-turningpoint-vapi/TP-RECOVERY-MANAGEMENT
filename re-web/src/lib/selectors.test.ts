@@ -226,3 +226,26 @@ describe("Not followed up / No next step (server rules)", () => {
     expect(v.noValidNextAction.map((c) => c.id)).toEqual(["never"]);
   });
 });
+
+describe("RE create task — only for No next step customers", () => {
+  it("never-contacted with overdue → in the list and can get a task; otherwise not", () => {
+    const never = cust("never", { hasValidNextAction: false, totalDue: 500 });
+    const noOverdue = cust("noOverdue", { hasValidNextAction: false, totalDue: 0, totalOutstanding: 900 });
+    const contacted = cust("contacted", { hasValidNextAction: true, totalDue: 500 });
+    const waiting = cust("waiting", { hasValidNextAction: false, totalDue: 500, outcomeWait: { text: "PTP open" } });
+    const v = buildView(data({ customers: [never, noOverdue, contacted, waiting] }), ALL_BRANCHES, RE, NOW);
+    expect(v.noValidNextAction.map((c) => c.id).sort()).toEqual(["never", "waiting"]);
+    expect(v.canCreateTaskFor(never)).toBe(true);
+    expect(v.canCreateTaskFor(noOverdue)).toBe(false);
+    expect(v.canCreateTaskFor(contacted)).toBe(false);
+    expect(v.canCreateTaskFor(waiting)).toBe(false);
+  });
+
+  it("the daily automatic call doesn't block it; a real salesman task does", () => {
+    const c = cust("c1", { hasValidNextAction: false, totalDue: 500 });
+    const routine = task("r", { source: "Recovery", isRoutine: true });
+    const real = task("t", { source: "RE", isRoutine: false });
+    expect(buildView(data({ customers: [c], tasks: [routine] }), ALL_BRANCHES, RE, NOW).canCreateTaskFor(c)).toBe(true);
+    expect(buildView(data({ customers: [c], tasks: [real] }), ALL_BRANCHES, RE, NOW).canCreateTaskFor(c)).toBe(false);
+  });
+});

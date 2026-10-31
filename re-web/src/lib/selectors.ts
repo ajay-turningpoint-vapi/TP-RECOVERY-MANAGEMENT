@@ -549,8 +549,15 @@ export function buildView(data: RmsData, branch: string, currentUserId: string, 
   // exists the RE cannot add another (one task at a time for the salesman).
   const openSalesmanTaskFor = (customerId: string): Task | null =>
     data.tasks
-      .filter((t) => t.customerId === customerId && isTaskOpen(t) && salesmanById.has(t.ownerId))
+      // The routine daily automatic call doesn't count — it exists for every
+      // customer with money due, so it never blocks the RE from giving a real task.
+      .filter((t) => t.customerId === customerId && isTaskOpen(t) && salesmanById.has(t.ownerId) && !(t.source === "Recovery" && t.isRoutine))
       .sort((a, b) => +a.deadline - +b.deadline)[0] ?? null;
+  // The RE may create a task ONLY for a "No next step" customer: money
+  // overdue and no outcome ever recorded. Everyone else's tasks come from the
+  // salesman's own recorded outcome (server enforces the same rule).
+  const canCreateTaskFor = (c: Customer) =>
+    c.totalDue > 0 && !c.hasValidNextAction && !openSalesmanTaskFor(c.id) && !c.outcomeWaitText;
   const nextStepFor = (c: Customer): NextStep => {
     const task = openTasksByCustomer.get(c.id) ?? null;
     if (task) {
@@ -577,6 +584,7 @@ export function buildView(data: RmsData, branch: string, currentUserId: string, 
     allTasks: data.tasks,
     nextStepFor,
     openSalesmanTaskFor,
+    canCreateTaskFor,
     allPaymentClaims: data.paymentClaims,
     allSalesmen: data.salesmen,
     allDisputes: data.disputes,

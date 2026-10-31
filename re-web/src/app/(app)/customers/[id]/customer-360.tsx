@@ -22,6 +22,7 @@ import {
   Siren,
 } from "lucide-react";
 import { ActionDialog, useDialog } from "@/components/app/action-dialog";
+import { CreateCallTaskDialog } from "@/components/app/create-call-task-dialog";
 import { ColorAvatar, HUE, IconTile, type Hue } from "@/components/app/visual";
 import { AttachmentLink } from "@/components/app/attachment-link";
 import { Timeline } from "@/components/app/timeline";
@@ -115,13 +116,12 @@ export function Customer360({ id }: { id: string }) {
     );
   }
 
-  const salesmanOptions = rms.salesmen.map((s) => ({ value: s.id, label: `${s.fullName} · ${s.branch}` }));
   const salesman = rms.salesmanById.get(c.assignedSalesmanId);
   // The live open task is the source of truth for "what now" — the
   // customer's stored next-action text can be left over from an older step.
   const step = rms.nextStepFor(c);
   const salesmanTask = rms.openSalesmanTaskFor(c.id);
-  const createLocked = !!c.outcomeWaitText || !!salesmanTask;
+  const createLocked = !rms.canCreateTaskFor(c);
   const currentTask = step.task;
   // When the recorded outcome is due: promised date, "will confirm" time,
   // end of the No Answer wait, or the date given for a payment already made.
@@ -261,10 +261,23 @@ export function Customer360({ id }: { id: string }) {
           <div className="mx-5 mb-4 flex items-start gap-3 rounded-lg bg-amber-50 px-4 py-3 text-[15px] text-amber-950 dark:bg-amber-100">
             <ShieldAlert className="mt-0.5 size-5 shrink-0 text-amber-700" />
             <div>
-              <span className="font-semibold">Create task is locked for now. </span>
-              {salesmanTask
-                ? `${rms.salesmanName(salesmanTask.ownerId)} already has a task for this customer (due ${formatDate(salesmanTask.deadline, "d/M/yyyy HH:mm")}). You can create a new one once it is done.`
-                : c.outcomeWaitText}
+              {c.totalDue <= 0 ? (
+                <>
+                  <span className="font-semibold">Create task is not needed. </span>Nothing is overdue for this customer.
+                </>
+              ) : c.hasValidNextAction ? (
+                <>
+                  <span className="font-semibold">Create task is not available. </span>
+                  This customer&apos;s tasks come from the salesman&apos;s recorded outcome. The RE can only create a task for customers who were never contacted (the No next step list).
+                </>
+              ) : (
+                <>
+                  <span className="font-semibold">Create task is locked for now. </span>
+                  {salesmanTask
+                    ? `${rms.salesmanName(salesmanTask.ownerId)} already has a task for this customer (due ${formatDate(salesmanTask.deadline, "d/M/yyyy HH:mm")}). You can create a new one once it is done.`
+                    : c.outcomeWaitText}
+                </>
+              )}
             </div>
           </div>
         )}
@@ -560,31 +573,7 @@ export function Customer360({ id }: { id: string }) {
       </Tabs>
 
       {/* Commands */}
-      <ActionDialog
-        {...instruct.props}
-        title="Create call task for salesman"
-        description="The salesman must call this customer. It appears in their app immediately."
-        submitLabel="Create task"
-        fields={[
-          { name: "salesmanId", label: "Assign to", type: "select", required: true, defaultValue: c.assignedSalesmanId, options: salesmanOptions },
-          { name: "desc", label: "Instruction", type: "textarea", required: true, placeholder: "What exactly should the salesman do?" },
-          { name: "deadline", label: "Deadline", type: "datetime", required: true, defaultValue: deadlineInput(1, 18) },
-          {
-            name: "priority",
-            label: "Priority",
-            type: "select",
-            defaultValue: "High",
-            options: ["Low", "Normal", "High", "Critical"].map((p) => ({ value: p, label: p })),
-          },
-        ]}
-        onSubmit={(v) =>
-          action.mutateAsync({
-            path: `/customers/${encodeURIComponent(c.id)}/management-instruction`,
-            body: { salesmanId: v.salesmanId, desc: v.desc, deadline: localToIso(v.deadline), priority: v.priority, taskType: "customerCall" },
-            success: "Done. The task is now in the salesman's app.",
-          })
-        }
-      />
+      <CreateCallTaskDialog customer={c} {...instruct.props} />
       <ActionDialog
         {...escalate.props}
         title={`Escalate to ${NEXT_LEVEL[c.escalationLevel]}`}
